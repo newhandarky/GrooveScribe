@@ -18,10 +18,12 @@ This scaffold covers `GS-P1-001` only:
 - Local pipeline plan builder.
 - Dry-run CLI entry point under `scripts/run_local_pipeline.py`.
 
-No real audio processing is executed yet. ffmpeg, Demucs, ADTOF-pytorch, MIDI post-processing, and notation rendering will be added in later tickets.
+ffmpeg normalization and the Demucs source-separation adapter are now implemented as local POC modules. ADTOF-pytorch, MIDI post-processing, and notation rendering will be added in later tickets.
 
 ## Smoke Command
 
 ```bash
 PYTHONPATH=. python scripts/run_local_pipeline.py --output-dir storage/local/jobs/dev-smoke
+PYTHONPATH=. python scripts/run_normalize_audio.py --input /path/to/audio.wav --output-dir /tmp/groovescribe-normalized
+PYTHONPATH=. python scripts/run_demucs_separation.py --input /tmp/groovescribe-normalized/normalized.wav --output-dir /tmp/groovescribe-stems
 ```

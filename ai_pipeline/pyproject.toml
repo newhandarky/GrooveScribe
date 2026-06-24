@@ -10,7 +10,8 @@ dependencies = [
   "torch",
   "pretty_midi",
   "mido",
-  "music21"
+  "music21",
+  "demucs"
 ]
 
 [project.optional-dependencies]
