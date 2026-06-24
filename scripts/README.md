@@ -11,6 +11,7 @@
 - `run_midi_postprocess.py`：將 `raw_drum.mid` 後處理為 `processed_drum.mid` 與 `drum_events.json`。
 - `generate_score.py`：從 `drum_events.json` 產生 `score.musicxml`，可選用 MuseScore CLI 轉出 PDF。
 - `generate_test_fixtures.py`：產生 Phase 1 pipeline smoke test 用的合成音檔與 manifest。
+- `check_ai_runtime.py`：輸出本機 ffmpeg、MuseScore 與 Python package 可用性。
 
 ## 預期後續 script
 

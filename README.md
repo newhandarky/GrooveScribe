@@ -32,6 +32,7 @@ docs/         Level 1 / 2 / 3 專案文件
 - `docs/02_功能細部設計/README.md`
 - `docs/03_工程實作任務/README.md`
 - `docs/03_工程實作任務/MVP_Ticket總表.md`
+- `ai_pipeline/RUNTIME.md`
 
 ## 本地服務
 
