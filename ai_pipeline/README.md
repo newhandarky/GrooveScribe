@@ -1,0 +1,27 @@
+# AI Pipeline
+
+Local Python package for the GrooveScribe audio pipeline.
+
+## MVP Pipeline
+
+1. Normalize MP3/WAV into `normalized.wav` with ffmpeg.
+2. Split the full song into a `drums.wav` stem with Demucs.
+3. Transcribe `drums.wav` into `raw_drum.mid` with ADTOF-pytorch.
+4. Quantize and map MIDI notes into `processed_drum.mid`.
+5. Generate `drum_score.musicxml` and `drum_score.pdf` for preview and download.
+
+## Current Scope
+
+This scaffold covers `GS-P1-001` only:
+
+- Shared pipeline stage contract.
+- Local pipeline plan builder.
+- Dry-run CLI entry point under `scripts/run_local_pipeline.py`.
+
+No real audio processing is executed yet. ffmpeg, Demucs, ADTOF-pytorch, MIDI post-processing, and notation rendering will be added in later tickets.
+
+## Smoke Command
+
+```bash
+PYTHONPATH=. python scripts/run_local_pipeline.py --output-dir storage/local/jobs/dev-smoke
+```

@@ -2,7 +2,7 @@
 
 GrooveScribe 是一個 MVP 專案，目標是讓使用者上傳單首 MP3 / WAV 音檔，透過背景 AI pipeline 產生基本鼓 MIDI、MusicXML、PDF 與網頁預覽。
 
-目前狀態：專案骨架與規劃文件已建立，尚未實作完整功能。
+目前狀態：專案骨架與規劃文件已建立，已開始實作 Phase 1 / Phase 2 的基礎骨架與 ffmpeg 音訊標準化。尚未整合 Demucs、ADTOF-pytorch、資料庫、Queue 與前端流程。
 
 ## 專案結構
 
@@ -42,3 +42,15 @@ docker compose up -d postgres redis
 ```
 
 套件尚未安裝。正式開發時請依各子目錄的 `pyproject.toml` 或 `package.json` 建立環境。
+
+## 目前可用指令
+
+```bash
+python -m compileall backend/app ai_pipeline worker/app scripts
+PYTHONPATH=. python scripts/run_local_pipeline.py --output-dir storage/local/jobs/dev-smoke
+PYTHONPATH=. python scripts/run_normalize_audio.py --input /path/to/audio.wav --output-dir /tmp/groovescribe-normalized
+```
+
+也提供 `Makefile` 包裝常用指令；若本機 `make` 環境不可用，直接執行上方 Python 指令即可。
+
+`backend-test` 需要先安裝 backend dev dependencies，包含 `fastapi`、`pytest`、`httpx`。
