@@ -4,7 +4,7 @@
 
 ## 已建立
 
-- `run_local_pipeline.py`：輸出 MVP pipeline dry-run plan，不執行實際音訊處理。
+- `run_local_pipeline.py`：串接本地 POC pipeline；支援 dry-run 與 `--mock-ai` smoke test。
 - `run_normalize_audio.py`：使用 ffmpeg 將 MP3/WAV 轉成 `normalized.wav`。
 - `run_demucs_separation.py`：使用 Demucs 將 `normalized.wav` 分離成穩定輸出 `drums.wav`。
 

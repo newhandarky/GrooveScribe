@@ -23,7 +23,8 @@ ffmpeg normalization, the Demucs source-separation adapter, the ADTOF drum-trans
 ## Smoke Command
 
 ```bash
-PYTHONPATH=. python scripts/run_local_pipeline.py --output-dir storage/local/jobs/dev-smoke
+PYTHONPATH=. python scripts/run_local_pipeline.py --dry-run --output-dir storage/local/jobs/dev-smoke
+PYTHONPATH=. python scripts/run_local_pipeline.py --input /path/to/audio.wav --output-dir /tmp/groovescribe-job --mock-ai
 PYTHONPATH=. python scripts/run_normalize_audio.py --input /path/to/audio.wav --output-dir /tmp/groovescribe-normalized
 PYTHONPATH=. python scripts/run_demucs_separation.py --input /tmp/groovescribe-normalized/normalized.wav --output-dir /tmp/groovescribe-stems
 PYTHONPATH=. python scripts/run_adtof_transcription.py --input /tmp/groovescribe-stems/drums.wav --output-dir /tmp/groovescribe-midi
