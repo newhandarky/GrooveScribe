@@ -18,7 +18,7 @@ This scaffold covers `GS-P1-001` only:
 - Local pipeline plan builder.
 - Dry-run CLI entry point under `scripts/run_local_pipeline.py`.
 
-ffmpeg normalization, the Demucs source-separation adapter, and the ADTOF drum-transcription adapter boundary are now implemented as local POC modules. MIDI post-processing and notation rendering will be added in later tickets.
+ffmpeg normalization, the Demucs source-separation adapter, the ADTOF drum-transcription adapter boundary, and initial MIDI post-processing are now implemented as local POC modules. Notation rendering will be added in later tickets.
 
 ## Smoke Command
 
@@ -27,4 +27,5 @@ PYTHONPATH=. python scripts/run_local_pipeline.py --output-dir storage/local/job
 PYTHONPATH=. python scripts/run_normalize_audio.py --input /path/to/audio.wav --output-dir /tmp/groovescribe-normalized
 PYTHONPATH=. python scripts/run_demucs_separation.py --input /tmp/groovescribe-normalized/normalized.wav --output-dir /tmp/groovescribe-stems
 PYTHONPATH=. python scripts/run_adtof_transcription.py --input /tmp/groovescribe-stems/drums.wav --output-dir /tmp/groovescribe-midi
+PYTHONPATH=. python scripts/run_midi_postprocess.py --input /tmp/groovescribe-midi/raw_drum.mid --output-dir /tmp/groovescribe-processed-midi
 ```
