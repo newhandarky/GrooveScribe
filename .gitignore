@@ -1,0 +1,47 @@
+# macOS
+.DS_Store
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Node
+node_modules/
+.npm/
+.pnpm-store/
+frontend/dist/
+frontend/.vite/
+
+# Logs
+*.log
+logs/
+
+# Local storage artifacts
+storage/local/*
+!storage/local/.gitkeep
+!storage/local/jobs/
+storage/local/jobs/*
+!storage/local/jobs/.gitkeep
+
+# Model/cache artifacts
+models/
+.cache/
+
+# Generated pipeline outputs
+outputs/
+work/

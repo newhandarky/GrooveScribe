@@ -1,0 +1,29 @@
+[project]
+name = "groovescribe-backend"
+version = "0.1.0"
+description = "GrooveScribe FastAPI backend"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+  "python-multipart",
+  "pydantic-settings",
+  "sqlalchemy",
+  "alembic",
+  "psycopg[binary]",
+  "redis"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "httpx",
+  "ruff",
+  "mypy"
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

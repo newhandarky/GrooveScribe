@@ -1,0 +1,27 @@
+[project]
+name = "groovescribe-ai-pipeline"
+version = "0.1.0"
+description = "GrooveScribe audio and drum transcription pipeline"
+requires-python = ">=3.11"
+dependencies = [
+  "librosa",
+  "soundfile",
+  "torchaudio",
+  "torch",
+  "pretty_midi",
+  "mido",
+  "music21"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "ruff",
+  "mypy"
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
