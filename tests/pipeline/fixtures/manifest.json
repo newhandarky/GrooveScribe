@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0",
+  "generated_by": "scripts/generate_test_fixtures.py",
+  "license_note": "Programmatically generated test fixtures. No third-party audio material is included.",
+  "fixtures": [
+    {
+      "path": "tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav",
+      "type": "audio/wav",
+      "duration_seconds": 2.0,
+      "source": "generated",
+      "third_party_material": false,
+      "purpose": "Clean synthetic drum-like pattern for local runner and preprocessing smoke tests.",
+      "expected_behavior": "ffmpeg normalization succeeds; mock pipeline can complete end to end."
+    },
+    {
+      "path": "tests/pipeline/fixtures/audio/synthetic_quiet_drum_pattern.wav",
+      "type": "audio/wav",
+      "duration_seconds": 2.0,
+      "source": "generated",
+      "third_party_material": false,
+      "purpose": "Low-level synthetic drum-like pattern for future low-confidence and sensitivity checks.",
+      "expected_behavior": "ffmpeg normalization succeeds; true model output may be sparse or low confidence."
+    },
+    {
+      "path": "tests/pipeline/fixtures/audio/synthetic_silence.wav",
+      "type": "audio/wav",
+      "duration_seconds": 1.0,
+      "source": "generated",
+      "third_party_material": false,
+      "purpose": "Valid silent WAV for edge-case handling.",
+      "expected_behavior": "ffmpeg normalization succeeds; true transcription should produce empty or failed output."
+    },
+    {
+      "path": "tests/pipeline/fixtures/audio/invalid_audio.wav",
+      "type": "invalid-audio",
+      "duration_seconds": null,
+      "source": "generated",
+      "third_party_material": false,
+      "purpose": "Invalid WAV extension with non-audio bytes for decode failure checks.",
+      "expected_behavior": "ffmpeg normalization fails with AUDIO_DECODE_FAILED."
+    }
+  ]
+}
