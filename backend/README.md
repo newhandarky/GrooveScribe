@@ -28,3 +28,14 @@ cd backend
 python -m pytest
 uvicorn app.main:app --reload
 ```
+
+## Database Migrations
+
+After installing backend dependencies, run from `backend/`:
+
+```bash
+alembic upgrade head
+alembic downgrade -1
+```
+
+The initial migration creates `users`, `audio_files`, `transcription_jobs`, `drum_tracks`, and `export_files`.
