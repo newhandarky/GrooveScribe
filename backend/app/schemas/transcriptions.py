@@ -17,6 +17,7 @@ class JobErrorResponse(BaseModel):
     code: str | None = None
     message: str | None = None
     stage: str | None = None
+    retriable: bool = False
 
 
 class JobStatusResponse(BaseModel):

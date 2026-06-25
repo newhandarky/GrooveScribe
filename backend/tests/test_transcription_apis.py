@@ -93,6 +93,25 @@ def test_job_status_service_not_found_raises_job_not_found() -> None:
             raise AssertionError("expected JOB_NOT_FOUND")
 
 
+def test_job_status_failed_error_payload_includes_retriable() -> None:
+    with _session() as session:
+        job = _create_job(session, status=JobStatus.FAILED, stage=PipelineStage.FAILED)
+        job.error_code = ErrorCode.PIPELINE_FAILED
+        job.error_message = "音訊分析流程失敗，請稍後再試或重新上傳音檔。"
+        job.error_stage = PipelineStage.DRUM_TRANSCRIPTION.value
+        session.commit()
+        service = JobQueryService()
+
+        error = service.error_payload(job)
+
+        assert error == {
+            "code": ErrorCode.PIPELINE_FAILED,
+            "message": "音訊分析流程失敗，請稍後再試或重新上傳音檔。",
+            "stage": PipelineStage.DRUM_TRANSCRIPTION.value,
+            "retriable": True,
+        }
+
+
 def test_result_service_returns_completed_job_with_related_metadata() -> None:
     with _session() as session:
         _create_job(
@@ -170,6 +189,24 @@ def test_download_service_rejects_missing_export(tmp_path) -> None:
 
         try:
             service.open_export(session, job_id="job-1", export_type="pdf")
+        except ApiErrorException as exc:
+            assert exc.code == ErrorCode.EXPORT_NOT_FOUND
+        else:
+            raise AssertionError("expected EXPORT_NOT_FOUND")
+
+
+def test_download_service_maps_missing_storage_artifact_to_export_not_found(tmp_path) -> None:
+    with _session() as session:
+        _create_job(
+            session,
+            status=JobStatus.COMPLETED,
+            stage=PipelineStage.COMPLETED,
+            export_status=ExportFileStatus.AVAILABLE,
+        )
+        service = DownloadService(storage=LocalStorageAdapter(tmp_path))
+
+        try:
+            service.open_export(session, job_id="job-1", export_type="midi")
         except ApiErrorException as exc:
             assert exc.code == ErrorCode.EXPORT_NOT_FOUND
         else:

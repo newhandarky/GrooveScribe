@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.errors import ApiErrorException, ErrorCode
+from app.core.errors import ApiErrorException, ErrorCode, get_error_definition
 from app.models import AudioFile, TranscriptionJob
 from app.models.enums import JobStatus, PipelineStage
 from app.models.mixins import new_uuid
@@ -74,7 +74,6 @@ class UploadService:
             ArtifactType.ORIGINAL_AUDIO,
             filename=safe_filename,
         )
-        self.storage.put_bytes(content, original_storage_key, content_type or "application/octet-stream")
 
         created_at = datetime.now(UTC)
         audio_file = AudioFile(
@@ -90,24 +89,71 @@ class UploadService:
         job = TranscriptionJob(
             id=job_id,
             audio_file_id=audio_file_id,
-            status=JobStatus.QUEUED,
-            stage=PipelineStage.QUEUED,
+            status=JobStatus.UPLOADED,
+            stage=PipelineStage.UPLOADED,
             progress=0,
             title=clean_title,
-            queued_at=created_at,
         )
 
+        db.add(audio_file)
+        db.add(job)
+        db.commit()
+
         try:
-            db.add(audio_file)
-            db.add(job)
-            db.flush()
+            self.storage.put_bytes(content, original_storage_key, content_type or "application/octet-stream")
+        except Exception as exc:
+            self._mark_job_failed(
+                db,
+                job_id,
+                error_code=getattr(exc, "code", ErrorCode.STORAGE_WRITE_FAILED),
+                error_stage=PipelineStage.UPLOADED.value,
+            )
+            raise
+
+        job.status = JobStatus.QUEUED
+        job.stage = PipelineStage.QUEUED
+        job.queued_at = created_at
+        db.commit()
+
+        try:
             self.queue.enqueue_transcription(job_id)
+        except ApiErrorException as exc:
+            self._mark_job_failed(db, job_id, error_code=exc.code, error_stage=PipelineStage.QUEUED.value)
+            raise
+        except Exception as exc:
+            self._mark_job_failed(
+                db,
+                job_id,
+                error_code=ErrorCode.QUEUE_ENQUEUE_FAILED,
+                error_stage=PipelineStage.QUEUED.value,
+            )
+            raise ApiErrorException(ErrorCode.QUEUE_ENQUEUE_FAILED) from exc
+
+        return UploadResult(job_id=job_id, status=JobStatus.QUEUED, created_at=created_at)
+
+    def _mark_job_failed(
+        self,
+        db: Session,
+        job_id: str,
+        *,
+        error_code: str | ErrorCode,
+        error_stage: str,
+    ) -> None:
+        definition = get_error_definition(error_code)
+        try:
+            job = db.get(TranscriptionJob, job_id)
+            if job is None:
+                return
+            job.status = JobStatus.FAILED
+            job.stage = PipelineStage.FAILED
+            job.error_code = definition.code
+            job.error_message = definition.message
+            job.error_stage = error_stage
+            job.failed_at = datetime.now(UTC)
             db.commit()
         except Exception:
             db.rollback()
             raise
-
-        return UploadResult(job_id=job_id, status=JobStatus.QUEUED, created_at=created_at)
 
     def _validate_file(self, *, filename: str, content_type: str | None, content: bytes) -> str:
         if not filename:

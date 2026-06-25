@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.core.errors import ApiErrorException, ErrorCode
+from app.core.errors import ApiErrorException, ErrorCode, get_error_definition
 from app.models import TranscriptionJob
 from app.models.enums import PipelineStage
 
@@ -31,11 +31,13 @@ class JobQueryService:
     def stage_message(self, job: TranscriptionJob) -> str:
         return _STAGE_MESSAGES.get(job.stage.value, "任務狀態已更新。")
 
-    def error_payload(self, job: TranscriptionJob) -> dict[str, str | None] | None:
+    def error_payload(self, job: TranscriptionJob) -> dict[str, str | bool | None] | None:
         if not job.error_code and not job.error_message and not job.error_stage:
             return None
+        definition = get_error_definition(job.error_code or ErrorCode.INTERNAL_SERVER_ERROR)
         return {
             "code": job.error_code,
             "message": job.error_message,
             "stage": job.error_stage,
+            "retriable": definition.retriable,
         }

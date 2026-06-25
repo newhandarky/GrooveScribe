@@ -9,6 +9,7 @@ from app.core.errors import ApiErrorException, ErrorCode
 from app.models import ExportFile, TranscriptionJob
 from app.models.enums import ExportFileStatus, ExportFileType, JobStatus
 from app.storage.base import StorageAdapter
+from app.storage.errors import ArtifactNotFoundError
 
 _FILENAME_BY_EXPORT_TYPE: dict[ExportFileType, str] = {
     ExportFileType.MIDI: "processed_drum.mid",
@@ -53,7 +54,13 @@ class DownloadService:
                 details={"job_id": job_id, "type": normalized_type.value, "status": export_file.status.value},
             )
 
-        reader = self.storage.open_reader(export_file.storage_key)
+        try:
+            reader = self.storage.open_reader(export_file.storage_key)
+        except ArtifactNotFoundError as exc:
+            raise ApiErrorException(
+                ErrorCode.EXPORT_NOT_FOUND,
+                details={"job_id": job_id, "type": normalized_type.value},
+            ) from exc
         return DownloadArtifact(
             reader=reader,
             content_type=export_file.content_type,
