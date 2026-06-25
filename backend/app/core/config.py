@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://groovescribe:groovescribe@localhost:5432/groovescribe"
     redis_url: str = "redis://localhost:6379/0"
     storage_root: str = "./storage/local"
+    upload_max_size_bytes: int = 100 * 1024 * 1024
+    upload_max_duration_seconds: int = 10 * 60
+    upload_metadata_timeout_seconds: int = 5
+    upload_title_max_length: int = 120
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
