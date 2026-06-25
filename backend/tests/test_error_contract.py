@@ -66,3 +66,11 @@ def test_payload_does_not_include_traceback_field() -> None:
 
     assert "traceback" not in payload["error"]
     assert "stack" not in payload["error"]
+
+
+def test_pipeline_failed_error_is_in_catalog() -> None:
+    payload = build_error_payload(ErrorCode.PIPELINE_FAILED)
+
+    assert payload["error"]["code"] == "PIPELINE_FAILED"
+    assert payload["error"]["retriable"] is True
+    assert status_code_for_error(ErrorCode.PIPELINE_FAILED) == 422

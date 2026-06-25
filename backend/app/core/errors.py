@@ -27,6 +27,7 @@ class ErrorCode(StrEnum):
     MIDI_POST_PROCESSING_FAILED = "MIDI_POST_PROCESSING_FAILED"
     NOTATION_GENERATION_FAILED = "NOTATION_GENERATION_FAILED"
     PDF_EXPORT_FAILED = "PDF_EXPORT_FAILED"
+    PIPELINE_FAILED = "PIPELINE_FAILED"
     VALIDATION_ERROR = "VALIDATION_ERROR"
     INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR"
 
@@ -144,6 +145,12 @@ ERROR_CATALOG: dict[str, ErrorDefinition] = {
         code=ErrorCode.PDF_EXPORT_FAILED,
         message="PDF 匯出失敗，請先下載 MusicXML。",
         status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+    ),
+    ErrorCode.PIPELINE_FAILED: ErrorDefinition(
+        code=ErrorCode.PIPELINE_FAILED,
+        message="音訊分析流程失敗，請稍後再試或重新上傳音檔。",
+        status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+        retriable=True,
     ),
     ErrorCode.VALIDATION_ERROR: ErrorDefinition(
         code=ErrorCode.VALIDATION_ERROR,
