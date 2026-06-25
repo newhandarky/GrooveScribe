@@ -39,7 +39,7 @@ storage/local/jobs/*
 !storage/local/jobs/.gitkeep
 
 # Model/cache artifacts
-models/
+/models/
 .cache/
 
 # Generated pipeline outputs
