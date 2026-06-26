@@ -19,6 +19,7 @@ def test_known_error_payload_uses_stable_contract() -> None:
         "retriable": False,
         "details": {},
     }
+    assert status_code_for_error(ErrorCode.INVALID_FILE_TYPE) == 400
 
 
 def test_error_payload_supports_safe_details() -> None:
@@ -49,7 +50,7 @@ def test_storage_error_can_be_mapped_without_exposing_internal_details() -> None
     exc = api_error_from_exception(StorageWriteFailedError("disk quota exceeded at /tmp/internal"))
 
     assert exc.code == "STORAGE_WRITE_FAILED"
-    assert exc.status_code == 503
+    assert exc.status_code == 500
     assert exc.to_payload()["error"]["message"] == "檔案儲存失敗，請稍後再試。"
     assert "/tmp/internal" not in exc.to_payload()["error"]["message"]
 
@@ -73,4 +74,11 @@ def test_pipeline_failed_error_is_in_catalog() -> None:
 
     assert payload["error"]["code"] == "PIPELINE_FAILED"
     assert payload["error"]["retriable"] is True
-    assert status_code_for_error(ErrorCode.PIPELINE_FAILED) == 422
+    assert status_code_for_error(ErrorCode.PIPELINE_FAILED) == 500
+
+
+def test_route_not_found_error_is_distinct_from_job_not_found() -> None:
+    payload = build_error_payload(ErrorCode.ROUTE_NOT_FOUND)
+
+    assert payload["error"]["code"] == "ROUTE_NOT_FOUND"
+    assert status_code_for_error(ErrorCode.ROUTE_NOT_FOUND) == 404

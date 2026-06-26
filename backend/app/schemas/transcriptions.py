@@ -34,9 +34,9 @@ class JobStatusResponse(BaseModel):
     failed_at: datetime | None = None
 
 
-class AudioFileResult(BaseModel):
+class AudioResult(BaseModel):
     id: str
-    original_filename: str
+    file_name: str
     content_type: str
     file_size_bytes: int
     duration_seconds: float | None = None
@@ -73,7 +73,7 @@ class TranscriptionResultResponse(BaseModel):
     title: str | None = None
     created_at: datetime
     completed_at: datetime | None = None
-    audio_file: AudioFileResult
+    audio: AudioResult
     drum_track: DrumTrackResult | None = None
     preview: PreviewResult
     exports: list[ExportFileResult]

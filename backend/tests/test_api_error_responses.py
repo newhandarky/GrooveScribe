@@ -46,7 +46,7 @@ def test_upload_invalid_file_type_uses_unified_error_shape() -> None:
         files={"file": ("demo.wav", b"fake-wav", "audio/wav")},
     )
 
-    assert response.status_code == 415
+    assert response.status_code == 400
     _assert_error_shape(response.json(), "INVALID_FILE_TYPE")
 
 
@@ -75,7 +75,7 @@ def test_upload_storage_write_error_uses_unified_error_shape() -> None:
         files={"file": ("demo.wav", b"fake-wav", "audio/wav")},
     )
 
-    assert response.status_code == 503
+    assert response.status_code == 500
     body = response.json()
     _assert_error_shape(body, "STORAGE_WRITE_FAILED")
     assert "/tmp/internal" not in body["error"]["message"]
@@ -142,5 +142,12 @@ def test_pipeline_failed_uses_unified_error_shape() -> None:
 
     response = TestClient(app).get("/raise-pipeline-failed")
 
-    assert response.status_code == 422
+    assert response.status_code == 500
     _assert_error_shape(response.json(), "PIPELINE_FAILED")
+
+
+def test_unknown_api_route_uses_route_not_found_error_shape() -> None:
+    response = TestClient(create_app()).get("/api/v1/does-not-exist")
+
+    assert response.status_code == 404
+    _assert_error_shape(response.json(), "ROUTE_NOT_FOUND")

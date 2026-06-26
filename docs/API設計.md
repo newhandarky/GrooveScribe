@@ -216,6 +216,7 @@ Failed response 範例：
 | 413 | FILE_TOO_LARGE | 檔案過大 |
 | 422 | AUDIO_METADATA_UNREADABLE | 音檔無法解析 |
 | 404 | JOB_NOT_FOUND | 找不到任務 |
+| 404 | ROUTE_NOT_FOUND | 找不到 API 資源 |
 | 409 | JOB_NOT_COMPLETED | 任務尚未完成 |
 | 409 | EXPORT_NOT_READY | 輸出檔尚未完成 |
 | 500 | STORAGE_WRITE_FAILED | 寫入儲存失敗 |

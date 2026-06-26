@@ -13,7 +13,7 @@ from app.db.session import get_db_session
 from app.models import TranscriptionJob
 from app.models.enums import ExportFileStatus
 from app.schemas.transcriptions import (
-    AudioFileResult,
+    AudioResult,
     DrumTrackResult,
     ExportFileResult,
     JobErrorResponse,
@@ -157,9 +157,9 @@ def _build_result_response(
         title=job.title,
         created_at=job.created_at,
         completed_at=job.completed_at,
-        audio_file=AudioFileResult(
+        audio=AudioResult(
             id=audio_file.id,
-            original_filename=audio_file.original_filename,
+            file_name=audio_file.original_filename,
             content_type=audio_file.content_type,
             file_size_bytes=audio_file.file_size_bytes,
             duration_seconds=audio_file.duration_seconds,

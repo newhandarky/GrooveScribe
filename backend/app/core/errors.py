@@ -28,6 +28,7 @@ class ErrorCode(StrEnum):
     NOTATION_GENERATION_FAILED = "NOTATION_GENERATION_FAILED"
     PDF_EXPORT_FAILED = "PDF_EXPORT_FAILED"
     PIPELINE_FAILED = "PIPELINE_FAILED"
+    ROUTE_NOT_FOUND = "ROUTE_NOT_FOUND"
     VALIDATION_ERROR = "VALIDATION_ERROR"
     INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR"
 
@@ -44,7 +45,7 @@ ERROR_CATALOG: dict[str, ErrorDefinition] = {
     ErrorCode.INVALID_FILE_TYPE: ErrorDefinition(
         code=ErrorCode.INVALID_FILE_TYPE,
         message="目前只支援 MP3 或 WAV 音檔。",
-        status_code=HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+        status_code=HTTPStatus.BAD_REQUEST,
     ),
     ErrorCode.FILE_TOO_LARGE: ErrorDefinition(
         code=ErrorCode.FILE_TOO_LARGE,
@@ -92,13 +93,13 @@ ERROR_CATALOG: dict[str, ErrorDefinition] = {
     ErrorCode.STORAGE_WRITE_FAILED: ErrorDefinition(
         code=ErrorCode.STORAGE_WRITE_FAILED,
         message="檔案儲存失敗，請稍後再試。",
-        status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+        status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
         retriable=True,
     ),
     ErrorCode.STORAGE_READ_FAILED: ErrorDefinition(
         code=ErrorCode.STORAGE_READ_FAILED,
         message="檔案讀取失敗，請稍後再試。",
-        status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+        status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
         retriable=True,
     ),
     ErrorCode.ARTIFACT_NOT_FOUND: ErrorDefinition(
@@ -149,8 +150,13 @@ ERROR_CATALOG: dict[str, ErrorDefinition] = {
     ErrorCode.PIPELINE_FAILED: ErrorDefinition(
         code=ErrorCode.PIPELINE_FAILED,
         message="音訊分析流程失敗，請稍後再試或重新上傳音檔。",
-        status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+        status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
         retriable=True,
+    ),
+    ErrorCode.ROUTE_NOT_FOUND: ErrorDefinition(
+        code=ErrorCode.ROUTE_NOT_FOUND,
+        message="找不到指定的 API 資源。",
+        status_code=HTTPStatus.NOT_FOUND,
     ),
     ErrorCode.VALIDATION_ERROR: ErrorDefinition(
         code=ErrorCode.VALIDATION_ERROR,

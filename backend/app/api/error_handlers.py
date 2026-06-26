@@ -52,11 +52,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
     if exc.status_code == 404:
-        return _error_response(
-            ErrorCode.JOB_NOT_FOUND,
-            status_code=404,
-            message="找不到指定的 API 資源。",
-        )
+        return _error_response(ErrorCode.ROUTE_NOT_FOUND)
 
     if 400 <= exc.status_code < 500:
         return _error_response(
