@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.core.errors import ApiErrorException, ErrorCode
+from app.queue import CeleryJobQueue
 
 
 class JobQueue(Protocol):
@@ -21,4 +22,4 @@ class NoopJobQueue:
 
 
 def get_job_queue() -> JobQueue:
-    return NoopJobQueue()
+    return CeleryJobQueue()

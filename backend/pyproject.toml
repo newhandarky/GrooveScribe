@@ -11,7 +11,8 @@ dependencies = [
   "sqlalchemy",
   "alembic",
   "psycopg[binary]",
-  "redis"
+  "redis",
+  "celery"
 ]
 
 [project.optional-dependencies]

@@ -28,6 +28,8 @@ class ErrorCode(StrEnum):
     NOTATION_GENERATION_FAILED = "NOTATION_GENERATION_FAILED"
     PDF_EXPORT_FAILED = "PDF_EXPORT_FAILED"
     PIPELINE_FAILED = "PIPELINE_FAILED"
+    WORKER_TIMEOUT = "WORKER_TIMEOUT"
+    INVALID_JOB_STATE_TRANSITION = "INVALID_JOB_STATE_TRANSITION"
     ROUTE_NOT_FOUND = "ROUTE_NOT_FOUND"
     VALIDATION_ERROR = "VALIDATION_ERROR"
     INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR"
@@ -152,6 +154,17 @@ ERROR_CATALOG: dict[str, ErrorDefinition] = {
         message="音訊分析流程失敗，請稍後再試或重新上傳音檔。",
         status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
         retriable=True,
+    ),
+    ErrorCode.WORKER_TIMEOUT: ErrorDefinition(
+        code=ErrorCode.WORKER_TIMEOUT,
+        message="分析任務執行逾時，請稍後再試或重新上傳音檔。",
+        status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+        retriable=True,
+    ),
+    ErrorCode.INVALID_JOB_STATE_TRANSITION: ErrorDefinition(
+        code=ErrorCode.INVALID_JOB_STATE_TRANSITION,
+        message="分析任務狀態轉換不合法。",
+        status_code=HTTPStatus.CONFLICT,
     ),
     ErrorCode.ROUTE_NOT_FOUND: ErrorDefinition(
         code=ErrorCode.ROUTE_NOT_FOUND,

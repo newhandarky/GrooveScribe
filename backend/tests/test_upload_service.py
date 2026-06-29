@@ -28,6 +28,14 @@ class FailingStorage:
         raise StorageWriteFailedError("disk full at /tmp/internal")
 
 
+class RecordingQueue:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def enqueue_transcription(self, job_id: str, pipeline_config_id: str | None = None) -> None:
+        self.calls.append({"job_id": job_id, "pipeline_config_id": pipeline_config_id})
+
+
 def _settings(tmp_path) -> Settings:
     return Settings(
         database_url="sqlite+pysqlite:///:memory:",
@@ -44,10 +52,11 @@ def _session():
 def test_upload_service_creates_job_audio_file_and_original_artifact(tmp_path) -> None:
     settings = _settings(tmp_path)
     storage = LocalStorageAdapter(settings.storage_root)
+    queue = RecordingQueue()
     service = UploadService(
         settings=settings,
         storage=storage,
-        queue=NoopJobQueue(),
+        queue=queue,
         metadata_inspector=FakeMetadataInspector(),
     )
 
@@ -70,6 +79,7 @@ def test_upload_service_creates_job_audio_file_and_original_artifact(tmp_path) -
         assert audio is not None
         assert audio.original_filename == "demo.wav"
         assert storage.exists(audio.original_storage_key) is True
+        assert queue.calls == [{"job_id": result.job_id, "pipeline_config_id": None}]
 
 
 def test_upload_service_rejects_invalid_file_type(tmp_path) -> None:

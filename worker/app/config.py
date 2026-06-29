@@ -1,35 +1,37 @@
+from __future__ import annotations
+
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings(BaseSettings):
-    app_name: str = "GrooveScribe API"
+DEFAULT_REDIS_URL = "redis://localhost:6379/0"
+
+
+class WorkerSettings(BaseSettings):
     app_env: str = "local"
-    log_level: str = "info"
-    api_v1_prefix: str = "/api/v1"
     database_url: str = "postgresql+psycopg://groovescribe:groovescribe@localhost:5432/groovescribe"
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: str = DEFAULT_REDIS_URL
     celery_broker_url: str | None = None
     celery_result_backend: str | None = None
     celery_task_default_queue: str = "groovescribe"
+    worker_concurrency: int = 1
+    celery_task_time_limit_seconds: int = 60 * 60
+    celery_task_soft_time_limit_seconds: int = 55 * 60
     storage_root: str = "./storage/local"
-    upload_max_size_bytes: int = 100 * 1024 * 1024
-    upload_max_duration_seconds: int = 10 * 60
-    upload_metadata_timeout_seconds: int = 5
-    upload_title_max_length: int = 120
+    pipeline_version: str = "local-poc"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @property
-    def resolved_celery_broker_url(self) -> str:
+    def broker_url(self) -> str:
         return self.celery_broker_url or self.redis_url
 
     @property
-    def resolved_celery_result_backend(self) -> str:
+    def result_backend_url(self) -> str:
         return self.celery_result_backend or self.redis_url
 
 
 @lru_cache
-def get_settings() -> Settings:
-    return Settings()
+def get_worker_settings() -> WorkerSettings:
+    return WorkerSettings()
