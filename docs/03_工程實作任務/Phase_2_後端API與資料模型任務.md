@@ -42,7 +42,8 @@
 - 正式前端 API contract 維持不變：`GET /api/v1/transcriptions/{job_id}` 不外露 `pipeline_log` 或 `stage_reports`。
 - backend 已新增 internal job detail read path：`InternalJobDetailService.get_pipeline_snapshot(db, job_id)`。此 service 可用 job id 組出 backend/worker 內部 snapshot，包含 job status、failed_stage、artifact keys、stage_reports、warnings、`completed_with_warning`、error code/message、`pipeline_log_found` 與 mock/true pipeline mode。
 - pipeline log 缺失時不視為正式 API failure；internal snapshot 會回傳 `pipeline_log_found=false`、`stage_reports=[]`，並保留 DB 已知 artifact keys。
-- 專案目前沒有 internal/admin API router；工程師查詢 pipeline snapshot 先使用 `backend/.venv/bin/python scripts/read_pipeline_snapshot.py --job-id <job_id> --pretty`。此 CLI 使用 backend DB/session/settings/storage/service pattern，不新增正式前端 API。
+- 工程師可用 `backend/.venv/bin/python scripts/read_pipeline_snapshot.py --job-id <job_id> --pretty` 查詢 pipeline snapshot；此 CLI 使用 backend DB/session/settings/storage/service pattern。
+- 另有 gated internal route：`GET /internal/jobs/{job_id}/pipeline-snapshot`。此 route 預設關閉，需 `INTERNAL_API_ENABLED=true` 與 `Authorization: Bearer <INTERNAL_API_TOKEN>`；response 會套 redaction，不新增或擴張正式 `/api/v1/transcriptions/*` frontend API contract。
 
 ## Ticket 詳細內容
 

@@ -27,7 +27,7 @@ PYTHONPATH=. "$PYTHON" scripts/check_ai_runtime.py
 
 ## Internal pipeline snapshot debug
 
-目前沒有 internal/admin API router；工程師查詢 job pipeline snapshot 先使用 CLI：
+工程師查詢 job pipeline snapshot 可先使用 CLI：
 
 ```bash
 backend/.venv/bin/python scripts/read_pipeline_snapshot.py \
@@ -36,6 +36,17 @@ backend/.venv/bin/python scripts/read_pipeline_snapshot.py \
 ```
 
 可用 `--database-url` 與 `--storage-root` 指向非預設環境。輸出包含 `job_id`、`status`、`failed_stage`、`artifacts`、`stage_reports`、`warnings`、`completed_with_warning`、`error`、`mock_ai` / `pipeline_mode` 與 `pipeline_log_found`。
+
+若需要遠端查詢，backend 也提供預設關閉的 internal route：
+
+```bash
+INTERNAL_API_ENABLED=true
+INTERNAL_API_TOKEN=<token>
+curl -H "Authorization: Bearer <token>" \
+  http://localhost:8000/internal/jobs/<job_id>/pipeline-snapshot
+```
+
+此 route 不掛在 `/api/v1/transcriptions/*`，不出現在公開 OpenAPI，且 response 會遮蔽本機路徑、command template、checkpoint path、stderr/stdout、stack trace 與 secret-like 欄位。
 
 ## 預期後續 script
 

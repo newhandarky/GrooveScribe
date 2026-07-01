@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     upload_max_duration_seconds: int = 10 * 60
     upload_metadata_timeout_seconds: int = 5
     upload_title_max_length: int = 120
+    internal_api_enabled: bool = False
+    internal_api_token: str | None = None
+    internal_api_token_label: str = "internal"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
