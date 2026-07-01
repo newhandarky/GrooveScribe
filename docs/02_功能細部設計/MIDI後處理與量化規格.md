@@ -61,7 +61,7 @@
 
 - 輸入：`jobs/{job_id}/midi/raw_drum.mid`。
 - 輸出：`jobs/{job_id}/midi/processed_drum.mid`。
-- 輸出：`jobs/{job_id}/events/drum_events.json`。
+- 輸出：`jobs/{job_id}/midi/drum_events.json`。
 - Log：post-processing report。
 
 ## 狀態流轉

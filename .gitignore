@@ -10,6 +10,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv-ai/
 venv/
 .pytest_cache/
 .mypy_cache/

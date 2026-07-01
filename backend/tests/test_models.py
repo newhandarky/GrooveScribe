@@ -29,7 +29,7 @@ def test_models_can_be_created_and_queried() -> None:
         drum_track = DrumTrack(
             job=job,
             processed_midi_storage_key="jobs/job-1/midi/processed_drum.mid",
-            drum_events_storage_key="jobs/job-1/events/drum_events.json",
+            drum_events_storage_key="jobs/job-1/midi/drum_events.json",
             event_count=4,
             warnings=["mock_ai_enabled"],
         )

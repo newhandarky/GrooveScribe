@@ -11,36 +11,56 @@
 ## Runtime 檢查
 
 ```bash
-PYTHONPATH=. python scripts/check_ai_runtime.py
+export PYTHON="$(pwd)/.venv-ai/bin/python"
+PYTHONPATH=. "$PYTHON" scripts/check_ai_runtime.py
 ```
 
-目前本機 spot check（2026-06-25）：
+目前本機 spot check（2026-06-30，使用 `.venv-ai/bin/python`）：
 
-- Python：`3.14.4`
+- Python：`3.11.15`
 - ffmpeg：`ffmpeg version 8.0`
-- Python packages：`torch`、`torchaudio`、`demucs`、`mido`、`pretty_midi`、`music21`、`fastapi`、`celery` 尚未安裝於目前 Python 環境。
+- MuseScore / PDF renderer：`/opt/homebrew/bin/mscore` 可用；PDF artifact smoke 已產生 `/tmp/groovescribe-score/score.pdf`。
+- Python packages：`torch==2.12.1`、`torchaudio==2.11.0`、`torchcodec==0.14.0`、`demucs==4.0.1`、`mido==1.3.3`、`pretty_midi==0.2.11`、`music21==10.5.0`。
+- ADTOF-pytorch：由官方 GitHub repo 安裝，commit `85c192e78f716ea0b111cc8a5ee4a8f6a3a4f8a9`，package version `0.1.0`。
+- Demucs probe：`.venv-ai/bin/python -m demucs --help` 成功。
+- ADTOF verification：使用 `.venv-ai/bin/adtof --audio {input} --out {output} --device {device} --threshold {threshold}`，對 `/tmp/groovescribe-stems/drums.wav` 產出可解析 `raw_drum.mid`，`event_count=7`。
+- Local pipeline readiness：`runtime_checks.local_pipeline.true_ai_ready=true`；已完成兩個 generated fixtures 與一個授權真實鼓聲 fixture 的不使用 `--mock-ai` local runner smoke。
 
 以上是當前開發機狀態，不是專案支援矩陣。建立正式 POC 環境時，請依實際 PyTorch / Demucs / ADTOF-pytorch wheel 支援選擇 Python 版本。
 
 ## Phase 1 最小 runtime
 
-- Python：repo 目前宣告 `>=3.11`。
+- Python：repo 目前宣告 `>=3.11`；AI runtime 使用 Python 3.11。
 - ffmpeg：需要在 PATH 中可執行，用於 `run_normalize_audio.py` 與 local runner preprocessing stage。
-- Demucs：由 `DemucsSourceSeparator` adapter 呼叫，預設命令為 `python -m demucs`。
-- ADTOF-pytorch：由 `AdtofDrumTranscriber` adapter 呼叫；因實際 CLI 尚未鎖定，現階段透過 command template 配置。
+- Demucs：由 `DemucsSourceSeparator` adapter 呼叫，預設使用目前 Python interpreter 執行 `-m demucs`。
+- ADTOF-pytorch：由 `AdtofDrumTranscriber` adapter 呼叫；實際 CLI 透過 command template 配置。
 - MuseScore CLI：可選，用於 PDF export；缺少時 MusicXML 仍應可產生。
+
+## Runtime 設定
+
+`scripts/check_ai_runtime.py` 會讀取 ADTOF 相關環境變數；`run_local_pipeline.py` 目前不直接讀取這些環境變數，只接受 CLI 參數。因此若範例使用 env，必須用 shell 展開後傳入 `--adtof-command-template`。
+
+template 必須支援 `{input}` 與 `{output}` placeholder，並可選擇支援 `{device}`、`{threshold}`、`{checkpoint}`。
+
+```bash
+export GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE="$(pwd)/.venv-ai/bin/adtof --audio {input} --out {output} --device {device} --threshold {threshold}"
+export GROOVESCRIBE_ADTOF_CHECKPOINT=''
+export GROOVESCRIBE_ADTOF_VERIFY_INPUT='/tmp/groovescribe-stems/drums.wav'
+```
+
+`scripts/check_ai_runtime.py` 只有在 ADTOF command 實際產生可解析且包含 note-on event 的 `raw_drum.mid` 後，才會將 `runtime_checks.adtof_pytorch.ready` 標示為 `true`。任意可執行命令或只會 echo path 的 template 不算 ADTOF ready。
 
 ## 安裝建議
 
-在乾淨環境中先建立虛擬環境，再安裝各子專案依賴：
+在乾淨環境中先建立 AI 專用虛擬環境，再安裝 Phase 1 runtime 依賴：
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ./ai_pipeline[dev]
-python -m pip install -e ./backend[dev]
-python -m pip install -e ./worker[dev]
+python3.11 -m venv .venv-ai
+source .venv-ai/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install librosa soundfile torchaudio torch torchcodec pretty_midi mido music21 demucs pytest ruff mypy
+python -m pip install 'git+https://github.com/xavriley/ADTOF-pytorch.git'
+python -m pip install -e './ai_pipeline[dev]'
 ```
 
 若 PyTorch / torchaudio 需要特定 CPU、CUDA、MPS wheel，請依目標機器重新安裝對應版本；不要把本機硬體假設寫進 adapter。
@@ -51,30 +71,110 @@ python -m pip install -e ./worker[dev]
 
 ```bash
 ffmpeg -version
-PYTHONPATH=. python scripts/run_normalize_audio.py --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav --output-dir /tmp/groovescribe-normalized
+export PYTHON="$(pwd)/.venv-ai/bin/python"
+PYTHONPATH=. "$PYTHON" scripts/run_normalize_audio.py --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav --output-dir /tmp/groovescribe-normalized
 ```
 
 ### Local Pipeline Without AI Models
 
 ```bash
-PYTHONPATH=. python scripts/run_local_pipeline.py --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav --output-dir /tmp/groovescribe-fixture-run --mock-ai
+export PYTHON="$(pwd)/.venv-ai/bin/python"
+PYTHONPATH=. "$PYTHON" scripts/run_local_pipeline.py --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav --output-dir /tmp/groovescribe-fixture-run --mock-ai
 ```
 
 ### Demucs
 
 ```bash
-PYTHONPATH=. python scripts/run_demucs_separation.py --input /tmp/groovescribe-normalized/normalized.wav --output-dir /tmp/groovescribe-stems --model-name htdemucs
+export PYTHON="$(pwd)/.venv-ai/bin/python"
+PYTHONPATH=. "$PYTHON" scripts/run_demucs_separation.py --input /tmp/groovescribe-normalized/normalized.wav --output-dir /tmp/groovescribe-stems --model-name htdemucs --device cpu
 ```
 
 ### ADTOF-pytorch
 
-ADTOF 實際命令尚未鎖定。現階段 runner 支援 command template：
-
 ```bash
-PYTHONPATH=. python scripts/run_adtof_transcription.py   --input /tmp/groovescribe-stems/drums.wav   --output-dir /tmp/groovescribe-midi   --command-template "python -m adtof transcribe --input {input} --output {output} --device {device} --threshold {threshold}"
+export PYTHON="$(pwd)/.venv-ai/bin/python"
+export GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE="$(pwd)/.venv-ai/bin/adtof --audio {input} --out {output} --device {device} --threshold {threshold}"
+PYTHONPATH=. "$PYTHON" scripts/run_adtof_transcription.py \
+  --input /tmp/groovescribe-stems/drums.wav \
+  --output-dir /tmp/groovescribe-midi \
+  --command-template "$GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE" \
+  --device cpu \
+  --threshold 0.5
 ```
 
-若確認真實 CLI 不同，只需調整 command template 或 `AdtofDrumTranscriber` adapter，不應修改 worker orchestration 或 API 層。
+### Local Pipeline With True AI Runtime
+
+只有在 `scripts/check_ai_runtime.py` 回報 `runtime_checks.local_pipeline.true_ai_ready=true` 後，才執行不帶 `--mock-ai` 的 runner。ADTOF verification 需要先有 Demucs 產出的 drums stem，並設定 `GROOVESCRIBE_ADTOF_VERIFY_INPUT`：
+
+```bash
+export PYTHON="$(pwd)/.venv-ai/bin/python"
+export GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE="$(pwd)/.venv-ai/bin/adtof --audio {input} --out {output} --device {device} --threshold {threshold}"
+export GROOVESCRIBE_ADTOF_VERIFY_INPUT="/tmp/groovescribe-stems/drums.wav"
+PYTHONPATH=. "$PYTHON" scripts/check_ai_runtime.py
+
+PYTHONPATH=. "$PYTHON" scripts/run_local_pipeline.py \
+  --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav \
+  --output-dir /tmp/groovescribe-true-ai-run \
+  --demucs-device cpu \
+  --adtof-command-template "$GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE" \
+  --adtof-device cpu \
+  --adtof-threshold 0.5
+```
+
+### PDF Export
+
+MuseScore CLI 已安裝於 `/opt/homebrew/bin/mscore`。PDF artifact smoke command：
+
+```bash
+export PYTHON="$(pwd)/.venv-ai/bin/python"
+PYTHONPATH=. "$PYTHON" scripts/generate_score.py \
+  --events-json /tmp/groovescribe-true-ai-run/midi/drum_events.json \
+  --output-dir /tmp/groovescribe-score \
+  --export-pdf
+test -s /tmp/groovescribe-score/score.pdf
+```
+
+2026-06-30 smoke result:
+
+- `score.musicxml` generated at `/tmp/groovescribe-score/score.musicxml`.
+- `score.pdf` generated at `/tmp/groovescribe-score/score.pdf`, size `29K`.
+- `test -s /tmp/groovescribe-score/score.pdf` passed.
+- `file /tmp/groovescribe-score/score.pdf` reports `PDF document, version 1.4, 1 pages`.
+
+Known caveat: MuseScore 4.7.3 can produce the PDF artifact but return a non-zero status during CLI shutdown. `MuseScorePdfExporter` now reports this as `completed_with_warning` when `score.pdf` exists and is non-empty; missing or empty PDF output remains `failed`.
+
+## 授權真實鼓聲 Fixture
+
+目前 repo 內音檔只有 `tests/pipeline/fixtures/audio/` 下的 generated synthetic fixtures 與 invalid-audio fixture；授權真實鼓聲 smoke fixture 目前位於 repo 外：
+
+- `/Users/zhangzhipeng/MyProject/files/audio/authorized_real_drum_smoke_60s_12s.wav`
+
+這個外部 fixture 已完成 true AI smoke，可用於目前開發機的品質檢查；若要讓其他開發機重現，仍需將授權來源、取得方式或可提交副本整理進 fixture 流程。
+
+建議放置路徑：
+
+- `tests/pipeline/fixtures/audio/authorized_real_drum_smoke.wav`
+
+音檔要求：
+
+- 5-15 秒、WAV 或可由 ffmpeg 解碼的格式。
+- 來源需可提交或可在本機保存並記錄授權；不要使用未授權商用歌曲或 loop library。
+- 儘量包含清楚 kick、snare、closed hi-hat，避免完整商用混音。
+
+本次授權 fixture true AI smoke command：
+
+```bash
+export PYTHON="$(pwd)/.venv-ai/bin/python"
+export GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE="$(pwd)/.venv-ai/bin/adtof --audio {input} --out {output} --device {device} --threshold {threshold}"
+
+PYTHONPATH=. "$PYTHON" scripts/run_local_pipeline.py \
+  --input /Users/zhangzhipeng/MyProject/files/audio/authorized_real_drum_smoke_60s_12s.wav \
+  --output-dir /tmp/groovescribe-authorized-real-drum-run \
+  --demucs-device cpu \
+  --adtof-command-template "$GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE" \
+  --adtof-device cpu \
+  --adtof-threshold 0.5
+```
 
 ## Artifact 命名
 
@@ -89,9 +189,65 @@ Phase 1 local runner 使用下列固定 artifact 名稱：
 - `exports/score.pdf`，僅在 PDF renderer 可用且要求 export 時產生
 - `logs/pipeline.json`
 
+## 2026-06-30 True AI Fixture Smoke
+
+Input fixtures:
+
+- `tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav`
+- `tests/pipeline/fixtures/audio/synthetic_separated_kick_snare_hat_pattern.wav`
+- `/Users/zhangzhipeng/MyProject/files/audio/authorized_real_drum_smoke_60s_12s.wav`
+
+Clean fixture artifacts:
+
+- `/tmp/groovescribe-true-ai-run/audio/normalized.wav`
+- `/tmp/groovescribe-true-ai-run/stems/drums.wav`
+- `/tmp/groovescribe-true-ai-run/midi/raw_drum.mid`
+- `/tmp/groovescribe-true-ai-run/midi/processed_drum.mid`
+- `/tmp/groovescribe-true-ai-run/midi/drum_events.json`
+- `/tmp/groovescribe-true-ai-run/notation/score.musicxml`
+- `/tmp/groovescribe-true-ai-run/logs/pipeline.json`
+
+Separated fixture artifacts:
+
+- `/tmp/groovescribe-separated-ksh-run/audio/normalized.wav`
+- `/tmp/groovescribe-separated-ksh-run/stems/drums.wav`
+- `/tmp/groovescribe-separated-ksh-run/midi/raw_drum.mid`
+- `/tmp/groovescribe-separated-ksh-run/midi/processed_drum.mid`
+- `/tmp/groovescribe-separated-ksh-run/midi/drum_events.json`
+- `/tmp/groovescribe-separated-ksh-run/notation/score.musicxml`
+- `/tmp/groovescribe-separated-ksh-run/logs/pipeline.json`
+
+Authorized real-drum fixture artifacts:
+
+- `/tmp/groovescribe-authorized-real-drum-run/audio/normalized.wav`
+- `/tmp/groovescribe-authorized-real-drum-run/stems/drums.wav`
+- `/tmp/groovescribe-authorized-real-drum-run/midi/raw_drum.mid`
+- `/tmp/groovescribe-authorized-real-drum-run/midi/processed_drum.mid`
+- `/tmp/groovescribe-authorized-real-drum-run/midi/drum_events.json`
+- `/tmp/groovescribe-authorized-real-drum-run/notation/score.musicxml`
+- `/tmp/groovescribe-authorized-real-drum-run/logs/pipeline.json`
+
+Result summary:
+
+- Demucs `htdemucs` CPU separation completed, `drums.wav` duration `2.0s`, sample rate `44100`, channels `2`.
+- ADTOF raw MIDI completed, `event_count=7`, threshold `0.5`, CPU device.
+- MIDI post-processing completed, `output_event_count=7`, no dropped events.
+- MusicXML generation completed, `measure_count=1`.
+- Second true AI fixture `synthetic_separated_kick_snare_hat_pattern.wav` completed end to end without `--mock-ai`; ADTOF emitted `event_count=4` and MusicXML generation completed with `measure_count=2`.
+- Authorized real-drum fixture completed end to end without `--mock-ai`; ADTOF emitted `event_count=14`, MIDI post-processing kept all 14 events, and MusicXML generation completed with `measure_count=6`.
+- PDF artifact smoke completed after MuseScore CLI install; `/tmp/groovescribe-score/score.pdf` exists, is non-empty, and is a one-page PDF.
+- Manual eval recorded at `tests/manual_eval/2026-06-30_true_ai_fixture_eval.csv`; output quality is low for both synthetic fixtures and medium for the authorized real-drum fixture.
+
+ADTOF quality diagnosis:
+
+- `synthetic_clean_drum_pattern.wav` raw MIDI notes were six `47` events and one `35` event. The postprocessor maps `47` to GM tom and `35` to kick, so the mostly-tom result comes from ADTOF raw output rather than a postprocessor mapping bug.
+- `synthetic_separated_kick_snare_hat_pattern.wav` raw MIDI notes were four `47` events. The pipeline correctly preserved these as tom events after quantization.
+- `authorized_real_drum_smoke_60s_12s.wav` raw MIDI notes were eight `35` events and six `38` events. The postprocessor maps them to kick and snare with no dropped events, so mapping is working for these GM notes.
+- Current evidence points to synthetic timbre mismatch for the generated fixtures. On the authorized real-drum fixture, ADTOF performs materially better for kick/snare but still misses hi-hat entirely, so model quality is improved but not fully validated for MVP drum transcription.
+
 ## 已知限制
 
-- 目前尚未在本機實跑真 Demucs / ADTOF-pytorch。
 - `--mock-ai` 只驗證 pipeline orchestration，不代表模型準確度。
-- PDF export 依賴 MuseScore CLI；缺少 renderer 時應回報明確錯誤。
-- ADTOF-pytorch CLI 尚待 runtime spike 確認，已用 adapter / command template 隔離風險。
+- MuseScore CLI 已安裝且 PDF artifact smoke 已產生非空 PDF；MuseScore 非零 return code + 非空 PDF 目前回報為 `completed_with_warning`。
+- ADTOF-pytorch CLI 已確認，且授權真實鼓聲 fixture 已跑通；仍需要更多授權測試音檔與 ground-truth / manual eval criteria 才能判定 MVP 品質門檻。
+- 這次 true AI smoke 證明 pipeline 可跑通；manual eval 顯示 synthetic fixture 輸出品質偏低，真實鼓聲 fixture 的 kick/snare 明顯改善，但 hi-hat 仍缺失。

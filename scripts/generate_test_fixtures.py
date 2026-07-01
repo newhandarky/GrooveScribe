@@ -17,6 +17,7 @@ def main() -> int:
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     fixtures = [
         _write_clean_drum_pattern(AUDIO_DIR / "synthetic_clean_drum_pattern.wav"),
+        _write_separated_kick_snare_hat_pattern(AUDIO_DIR / "synthetic_separated_kick_snare_hat_pattern.wav"),
         _write_quiet_drum_pattern(AUDIO_DIR / "synthetic_quiet_drum_pattern.wav"),
         _write_silence(AUDIO_DIR / "synthetic_silence.wav"),
         _write_invalid_audio(AUDIO_DIR / "invalid_audio.wav"),
@@ -52,6 +53,25 @@ def _write_clean_drum_pattern(path: Path) -> dict:
         path,
         purpose="Clean synthetic drum-like pattern for local runner and preprocessing smoke tests.",
         expected_behavior="ffmpeg normalization succeeds; mock pipeline can complete end to end.",
+        duration_seconds=duration_seconds,
+        valid_audio=True,
+    )
+
+
+def _write_separated_kick_snare_hat_pattern(path: Path) -> dict:
+    duration_seconds = 3.0
+    frames = [0.0] * int(SAMPLE_RATE * duration_seconds)
+    for beat in (0.25, 0.75):
+        _add_kick(frames, beat, gain=0.9)
+    for beat in (1.25, 1.75):
+        _add_snare(frames, beat, gain=0.55)
+    for beat in (2.25, 2.5, 2.75):
+        _add_hat(frames, beat, gain=0.3)
+    _write_wav(path, frames)
+    return _fixture_entry(
+        path,
+        purpose="Sparse synthetic fixture with separated kick, snare, and closed-hat regions for true AI smoke diagnostics.",
+        expected_behavior="ffmpeg normalization succeeds; true model should ideally emit kick/snare/hat events but may still misclassify synthetic timbres.",
         duration_seconds=duration_seconds,
         valid_audio=True,
     )

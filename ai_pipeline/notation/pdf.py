@@ -44,11 +44,20 @@ class MuseScorePdfExporter:
         except subprocess.TimeoutExpired as exc:
             raise PdfExportFailedError(str(exc)) from exc
 
+        pdf_created = pdf_path.exists() and pdf_path.stat().st_size > 0
+        if completed.returncode != 0 and pdf_created:
+            stderr = (completed.stderr or "").strip()
+            message = stderr or f"PDF renderer exited with code {completed.returncode} after creating output"
+            return PdfExportResult(
+                pdf_path=pdf_path,
+                renderer=renderer,
+                warnings=(f"renderer_nonzero_exit: {message}",),
+            )
         if completed.returncode != 0:
             stderr = (completed.stderr or "").strip()
             message = stderr or f"PDF renderer failed with exit code {completed.returncode}"
             raise PdfExportFailedError(message)
-        if not pdf_path.exists() or pdf_path.stat().st_size == 0:
+        if not pdf_created:
             raise PdfExportFailedError(f"PDF renderer did not create output: {pdf_path}")
 
         return PdfExportResult(pdf_path=pdf_path, renderer=renderer)

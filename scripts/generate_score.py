@@ -35,7 +35,12 @@ def main() -> int:
                 musicxml.musicxml_path,
                 args.output_dir,
             )
-            pdf_payload = {"status": "completed", "pdf_path": str(pdf.pdf_path), "renderer": pdf.renderer}
+            pdf_payload = {
+                "status": "completed_with_warning" if pdf.warnings else "completed",
+                "pdf_path": str(pdf.pdf_path),
+                "renderer": pdf.renderer,
+                "warnings": list(pdf.warnings),
+            }
         except NotationError as exc:
             pdf_payload = {"status": "failed", "code": exc.code, "message": exc.message}
             if args.require_pdf:

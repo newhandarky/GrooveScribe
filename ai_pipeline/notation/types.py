@@ -25,3 +25,4 @@ class MusicXmlResult:
 class PdfExportResult:
     pdf_path: Path
     renderer: str
+    warnings: tuple[str, ...] = ()

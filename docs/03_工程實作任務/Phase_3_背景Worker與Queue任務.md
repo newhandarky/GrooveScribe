@@ -312,6 +312,10 @@ GS-P3-006
 **驗收標準**
 - 可從 log 追蹤每個 job 的 stage。
 - failed job 有 error ref。
+- Mock worker 的 `jobs/{job_id}/logs/pipeline.json` 需包含 internal `stage_reports` read model，至少能表達 stage name/status/artifacts/report/warnings/error，並保留既有 event log。
+- Backend internal `InternalJobDetailService.get_pipeline_snapshot(db, job_id)` 可讀取 mock worker 寫出的 `stage_reports`，並將 PDF `completed_with_warning`、stage warnings 與 failed stage error 組成內部查詢 snapshot；正式前端 Result API 暫不外露此欄位。
+- 在 internal/admin route pattern 尚未建立前，工程師使用 `scripts/read_pipeline_snapshot.py --job-id <job_id>` 查詢 pipeline snapshot；這是 debug CLI，不代表 production worker 已接真 Demucs / ADTOF。
+- Integration smoke 已覆蓋 mock worker 跑完 job 後，用同一個 `job_id` 透過 `scripts/read_pipeline_snapshot.py` 讀到 completed snapshot、artifact keys、`stage_reports`、PDF `completed_with_warning` 與 `pipeline_log_found=true`。
 
 **測試要求**
 - unit test：log context。

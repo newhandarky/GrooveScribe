@@ -209,6 +209,8 @@ def test_result_api_uses_audio_contract(tmp_path: Path) -> None:
     body = response.json()
     assert "audio" in body
     assert "audio_file" not in body
+    assert "pipeline_log" not in body
+    assert "stage_reports" not in body
     assert body["audio"]["file_name"] == "demo.wav"
     assert body["preview"]["musicxml_url"] == "/api/v1/transcriptions/job-result/download/musicxml"
 

@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from ai_pipeline.transcription.base import DrumTranscriptionReport, MidiMetadata, TranscriptionResult
+from ai_pipeline.transcription.base import (
+    DrumTranscriptionReport,
+    MidiMetadata,
+    TranscriptionResult,
+)
 from ai_pipeline.transcription.errors import (
     DrumTranscriberNotAvailableError,
     DrumTranscriptionFailedError,
@@ -17,7 +22,7 @@ from ai_pipeline.transcription.midi_validation import count_note_on_events
 CompletedProcessRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 DEFAULT_COMMAND_TEMPLATE = (
-    "python",
+    sys.executable,
     "-m",
     "adtof",
     "transcribe",
@@ -54,7 +59,11 @@ class AdtofDrumTranscriber:
         self.runner = runner
 
     @classmethod
-    def from_command_template_string(cls, command_template: str, **kwargs) -> "AdtofDrumTranscriber":
+    def from_command_template_string(
+        cls,
+        command_template: str,
+        **kwargs,
+    ) -> "AdtofDrumTranscriber":
         return cls(command_template=tuple(shlex.split(command_template)), **kwargs)
 
     def build_command(self, drums_path: Path, raw_midi_path: Path) -> list[str]:
@@ -66,7 +75,8 @@ class AdtofDrumTranscriber:
             "checkpoint": str(self.checkpoint_path) if self.checkpoint_path else "",
         }
         command = [part.format(**replacements) for part in self.command_template]
-        if self.checkpoint_path is not None and "{checkpoint}" not in " ".join(self.command_template):
+        template_text = " ".join(self.command_template)
+        if self.checkpoint_path is not None and "{checkpoint}" not in template_text:
             command.extend(["--checkpoint", str(self.checkpoint_path)])
         return [part for part in command if part]
 

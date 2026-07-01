@@ -11,7 +11,31 @@
 - `run_midi_postprocess.py`：將 `raw_drum.mid` 後處理為 `processed_drum.mid` 與 `drum_events.json`。
 - `generate_score.py`：從 `drum_events.json` 產生 `score.musicxml`，可選用 MuseScore CLI 轉出 PDF。
 - `generate_test_fixtures.py`：產生 Phase 1 pipeline smoke test 用的合成音檔與 manifest。
-- `check_ai_runtime.py`：輸出本機 ffmpeg、MuseScore 與 Python package 可用性。
+- `check_ai_runtime.py`：輸出本機 ffmpeg、Demucs、ADTOF command/template、MuseScore、Python package 可用性，並列出真 AI local pipeline 缺口。
+- `read_pipeline_snapshot.py`：internal/debug CLI，用 `job_id` 從 backend DB 與 `jobs/{job_id}/logs/pipeline.json` 讀取 pipeline snapshot；不改正式前端 API。
+
+## Runtime gate
+
+真 AI smoke 前先執行：
+
+```bash
+export PYTHON="$(pwd)/.venv-ai/bin/python"
+PYTHONPATH=. "$PYTHON" scripts/check_ai_runtime.py
+```
+
+若 `runtime_checks.local_pipeline.true_ai_ready` 不是 `true`，不要宣告 `GS-P1-003` / `GS-P1-004` / 非 mock `GS-P1-007` 完成；依輸出的 `missing_requirements` 補安裝 Demucs/PyTorch 或設定 `GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE`。
+
+## Internal pipeline snapshot debug
+
+目前沒有 internal/admin API router；工程師查詢 job pipeline snapshot 先使用 CLI：
+
+```bash
+backend/.venv/bin/python scripts/read_pipeline_snapshot.py \
+  --job-id <job_id> \
+  --pretty
+```
+
+可用 `--database-url` 與 `--storage-root` 指向非預設環境。輸出包含 `job_id`、`status`、`failed_stage`、`artifacts`、`stage_reports`、`warnings`、`completed_with_warning`、`error`、`mock_ai` / `pipeline_mode` 與 `pipeline_log_found`。
 
 ## 預期後續 script
 

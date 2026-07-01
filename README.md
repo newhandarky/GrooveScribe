@@ -2,7 +2,7 @@
 
 GrooveScribe 是一個 MVP 專案，目標是讓使用者上傳單首 MP3 / WAV 音檔，透過背景 AI pipeline 產生基本鼓 MIDI、MusicXML、PDF 與網頁預覽。
 
-目前狀態：專案骨架與規劃文件已建立，已開始實作 Phase 1 / Phase 2 的基礎骨架與 ffmpeg 音訊標準化。尚未整合 Demucs、ADTOF-pytorch、資料庫、Queue 與前端流程。
+目前狀態：Phase 1 runtime POC 已收尾；ffmpeg preprocessing、Demucs/ADTOF adapter 邊界、MIDI post-processing、MusicXML/PDF generation、mock local runner 與 fixture tests 已建立。Phase 1 已在獨立 `.venv-ai` 內完成 generated synthetic fixtures 與授權真實鼓聲 fixture 的真 Demucs + ADTOF 非 mock smoke，並產出 MIDI、MusicXML 與 PDF artifact；PDF smoke 目前為 `completed_with_warning`，因 MuseScore CLI 可能在產生非空 PDF 後以非零狀態結束。ADTOF 品質限制仍保留：真實音檔 kick/snare 改善，但 hi-hat recall、更多授權音檔與 ground-truth/manual eval criteria 留待後續品質驗證。backend API、database model、storage adapter、Celery enqueue 與 worker mock pipeline 也已有測試覆蓋；前端仍只有 scaffold。
 
 ## 專案結構
 
@@ -47,11 +47,17 @@ docker compose up -d postgres redis
 ## 目前可用指令
 
 ```bash
-python -m compileall backend/app ai_pipeline worker/app scripts
-PYTHONPATH=. python scripts/run_local_pipeline.py --output-dir storage/local/jobs/dev-smoke
-PYTHONPATH=. python scripts/run_normalize_audio.py --input /path/to/audio.wav --output-dir /tmp/groovescribe-normalized
+export BACKEND_PYTHON="$(pwd)/backend/.venv/bin/python"
+export AI_PYTHON="$(pwd)/.venv-ai/bin/python"
+"$BACKEND_PYTHON" -m compileall backend/app ai_pipeline worker/app scripts
+PYTHONPATH=. "$AI_PYTHON" scripts/check_ai_runtime.py
+PYTHONPATH=. "$AI_PYTHON" scripts/run_local_pipeline.py --dry-run --output-dir storage/local/jobs/dev-smoke
+PYTHONPATH=. "$AI_PYTHON" scripts/run_local_pipeline.py --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav --output-dir /tmp/groovescribe-fixture-run --mock-ai
+PYTHONPATH=. "$AI_PYTHON" scripts/run_normalize_audio.py --input /path/to/audio.wav --output-dir /tmp/groovescribe-normalized
 ```
 
 也提供 `Makefile` 包裝常用指令；若本機 `make` 環境不可用，直接執行上方 Python 指令即可。
 
 `backend-test` 需要先安裝 backend dev dependencies，包含 `fastapi`、`pytest`、`httpx`。
+
+真 AI local pipeline 使用獨立 `.venv-ai`；命令、版本、artifacts 與限制記錄於 `ai_pipeline/RUNTIME.md`。

@@ -247,7 +247,11 @@ class LocalPipelineRunner:
                     output_dir / "exports",
                 )
                 stage_artifacts["pdf"] = pdf.pdf_path
-                report["pdf"] = {"status": "completed", "renderer": pdf.renderer}
+                report["pdf"] = {
+                    "status": "completed_with_warning" if pdf.warnings else "completed",
+                    "renderer": pdf.renderer,
+                    "warnings": list(pdf.warnings),
+                }
             except NotationError as exc:
                 report["pdf"] = {"status": "failed", "error": _serialize_error(exc)}
                 if self.config.require_pdf:

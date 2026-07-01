@@ -35,6 +35,50 @@
 - `GS-P1-008`：準備測試音檔與人工檢查表
 - `GS-P1-009`：鎖定 AI runtime 與安裝重現紀錄
 
+## 目前專案狀態（2026-06-30）
+
+- Closeout（2026-07-01）：Phase 1 runtime POC 可視為收尾完成；runtime、artifact、PDF smoke 與 manual eval 已有可重現紀錄。剩餘 ADTOF hi-hat recall、更多授權音檔與 ground-truth/manual eval criteria 屬品質門檻 backlog，不阻塞 runtime POC closeout。
+- `GS-P1-001` / `GS-P1-002` / `GS-P1-005` / `GS-P1-006`：已有 POC code 與 fast tests；ffmpeg normalization、MIDI post-processing、MusicXML generation 可用。
+- `GS-P1-003`：Demucs adapter、mock-command tests 與一次真 Demucs fixture smoke 已完成；`.venv-ai` 使用 Demucs `4.0.1`、model `htdemucs`、CPU device，輸出 `/tmp/groovescribe-stems/drums.wav`。
+- `GS-P1-004`：ADTOF adapter、command template、MIDI validation tests 與一次真 ADTOF fixture smoke 已完成；使用 `adtof-pytorch` GitHub commit `85c192e78f716ea0b111cc8a5ee4a8f6a3a4f8a9`，CLI template 為 `.venv-ai/bin/adtof --audio {input} --out {output} --device {device} --threshold {threshold}`。
+- `GS-P1-007`：local runner 可用 `--mock-ai` 完成，也已用不帶 `--mock-ai` 的真 Demucs + ADTOF pipeline 跑通兩個 generated synthetic fixtures 與一個授權真實鼓聲 fixture，產出 normalized WAV、drums stem、raw/processed MIDI、drum events、MusicXML；MuseScore CLI 已安裝後，PDF artifact smoke 產出 `/tmp/groovescribe-score/score.pdf`。
+- `GS-P1-008`：已有 generated fixture manifest、人工評估 CSV template，並新增兩筆 synthetic true AI 評估與一筆授權真實鼓聲 true AI 評估；synthetic fixtures 輸出品質偏低，授權真實鼓聲 fixture 的 kick/snare 明顯改善但 hi-hat 缺失。
+- `GS-P1-009`：`ai_pipeline/RUNTIME.md` 與 `scripts/check_ai_runtime.py` 已能列出 ffmpeg、Demucs、ADTOF template/output verification、MuseScore 與 Python package 狀態；`.venv-ai` runtime check 已回報 true AI pipeline ready，PDF artifact smoke 已產生非空 PDF。
+
+### 2026-06-30 Phase 1 收尾盤點
+
+- PDF smoke：passed with warning。`/opt/homebrew/bin/mscore` 已在 PATH；執行 `scripts/generate_score.py --export-pdf` 後，`/tmp/groovescribe-score/score.pdf` 存在、非空，且 `file` 回報為 1 頁 PDF。若 MuseScore 4.7.3 產生 PDF 後仍以非零狀態結束，`MuseScorePdfExporter` 目前回報 `completed_with_warning`；缺檔或空 PDF 仍是 `failed`。
+- Fixture 覆蓋：新增 `tests/pipeline/fixtures/audio/synthetic_separated_kick_snare_hat_pattern.wav`，為程式生成、無第三方音源的 sparse kick/snare/hat 分段 fixture；現有 silence / low-confidence / invalid audio fixture 不重複新增。
+- Manual eval：`tests/manual_eval/2026-06-30_true_ai_fixture_eval.csv` 已記錄 clean / separated synthetic fixtures 與授權真實鼓聲 fixture。三者 pipeline 均完成；真實鼓聲輸出品質較 synthetic 明顯改善，但仍未完整覆蓋 hi-hat。
+- ADTOF 品質診斷：clean fixture raw MIDI 為六筆 note `47` 與一筆 note `35`；separated fixture raw MIDI 為四筆 note `47`。postprocessor 依 GM drum mapping 將 `47` 映射為 tom、`35` 映射為 kick，因此「多數 tom」目前判斷是 ADTOF 對 synthetic timbre 的 raw output 問題，不是 mapping bug。授權真實鼓聲 fixture raw MIDI 為八筆 note `35` 與六筆 note `38`，processed mapping 產出 kick/snare 且無 dropped events，表示 GM kick/snare mapping 正常。
+- ADTOF 品質 blocker：已不再缺授權真實鼓聲 smoke fixture，但目前只有一筆外部授權音檔，且 ADTOF 在該 fixture 上未輸出 hi-hat；仍需要更多授權測試音檔與 ground-truth / manual eval criteria 才能判定 MVP 品質門檻。
+
+### 需要手動提供的最小項目
+
+授權真實鼓聲 fixture：
+
+```bash
+# Current authorized real-drum smoke fixture:
+/Users/zhangzhipeng/MyProject/files/audio/authorized_real_drum_smoke_60s_12s.wav
+
+export GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE="$(pwd)/.venv-ai/bin/adtof --audio {input} --out {output} --device {device} --threshold {threshold}"
+PYTHONPATH=. .venv-ai/bin/python scripts/run_local_pipeline.py \
+  --input /Users/zhangzhipeng/MyProject/files/audio/authorized_real_drum_smoke_60s_12s.wav \
+  --output-dir /tmp/groovescribe-authorized-real-drum-run \
+  --demucs-device cpu \
+  --adtof-command-template "$GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE" \
+  --adtof-device cpu \
+  --adtof-threshold 0.5
+```
+
+### Phase 2/3 artifact contract handoff（2026-07-01）
+
+- Phase 1 local runner artifact keys 與 backend/worker storage key 已對齊：`normalized_audio`、`drums_stem`、`raw_midi`、`processed_midi`、`drum_events`、`musicxml`、`pdf`、`pipeline_log`。
+- `drum_events` storage path 統一為 `jobs/{job_id}/midi/drum_events.json`，與 Phase 1 local runner 的 `midi/drum_events.json` 相同。
+- backend / worker 已可表達 job `status`、`stage`、`progress`、error code/message/stage、export status、drum track warnings 與 export download metadata。
+- worker mock pipeline 已寫出 `stage_reports`，可表達 per-stage artifacts、reports、warnings、`completed_with_warning` 與 failed stage error；backend 已有 internal pipeline log read model 可讀 Phase 1 `stages` 與 worker `stage_reports`。
+- PDF `completed_with_warning` 目前可在 pipeline log/stage report 中表達；Result API 尚未直接外露 stage reports，若要前端顯示需另行設計 response 欄位。
+
 ## Ticket 詳細內容
 
 ### GS-P1-001 — 建立 Python 專案骨架

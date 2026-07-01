@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import time
 import wave
 from collections.abc import Callable, Sequence
@@ -21,13 +22,13 @@ CompletedProcessRunner = Callable[..., subprocess.CompletedProcess[str]]
 class DemucsSourceSeparator:
     def __init__(
         self,
-        command_prefix: Sequence[str] = ("python", "-m", "demucs"),
+        command_prefix: Sequence[str] | None = None,
         model_name: str = "htdemucs",
         device: str = "auto",
         timeout_seconds: int = 1_800,
         runner: CompletedProcessRunner = subprocess.run,
     ) -> None:
-        self.command_prefix = tuple(command_prefix)
+        self.command_prefix = tuple(command_prefix or (sys.executable, "-m", "demucs"))
         self.model_name = model_name
         self.device = device
         self.timeout_seconds = timeout_seconds

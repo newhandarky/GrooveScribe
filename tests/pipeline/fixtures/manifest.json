@@ -13,6 +13,15 @@
       "expected_behavior": "ffmpeg normalization succeeds; mock pipeline can complete end to end."
     },
     {
+      "path": "tests/pipeline/fixtures/audio/synthetic_separated_kick_snare_hat_pattern.wav",
+      "type": "audio/wav",
+      "duration_seconds": 3.0,
+      "source": "generated",
+      "third_party_material": false,
+      "purpose": "Sparse synthetic fixture with separated kick, snare, and closed-hat regions for true AI smoke diagnostics.",
+      "expected_behavior": "ffmpeg normalization succeeds; true model should ideally emit kick/snare/hat events but may still misclassify synthetic timbres."
+    },
+    {
       "path": "tests/pipeline/fixtures/audio/synthetic_quiet_drum_pattern.wav",
       "type": "audio/wav",
       "duration_seconds": 2.0,

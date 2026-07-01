@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -50,3 +52,42 @@ def test_pdf_exporter_reports_missing_renderer(tmp_path) -> None:
         assert getattr(exc, "code") == "PDF_RENDERER_NOT_AVAILABLE"
     else:
         raise AssertionError("expected PDF_RENDERER_NOT_AVAILABLE")
+
+
+def test_pdf_exporter_accepts_nonzero_exit_when_pdf_exists(tmp_path) -> None:
+    events_path = tmp_path / "drum_events.json"
+    _write_events(events_path)
+    musicxml = MusicXmlGenerator().generate(events_path, tmp_path / "notation")
+
+    def runner(command, **kwargs):
+        pdf_path = Path(command[2])
+        pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+        return subprocess.CompletedProcess(command, 1, "", "renderer shutdown warning")
+
+    result = MuseScorePdfExporter(
+        renderer_binary=sys.executable,
+        runner=runner,
+    ).export(musicxml.musicxml_path, tmp_path / "notation")
+
+    assert result.pdf_path.exists()
+    assert result.warnings
+    assert result.warnings[0].startswith("renderer_nonzero_exit:")
+
+
+def test_pdf_exporter_fails_nonzero_exit_without_pdf(tmp_path) -> None:
+    events_path = tmp_path / "drum_events.json"
+    _write_events(events_path)
+    musicxml = MusicXmlGenerator().generate(events_path, tmp_path / "notation")
+
+    def runner(command, **kwargs):
+        return subprocess.CompletedProcess(command, 1, "", "renderer failed")
+
+    try:
+        MuseScorePdfExporter(
+            renderer_binary=sys.executable,
+            runner=runner,
+        ).export(musicxml.musicxml_path, tmp_path / "notation")
+    except Exception as exc:
+        assert getattr(exc, "code") == "PDF_EXPORT_FAILED"
+    else:
+        raise AssertionError("expected PDF_EXPORT_FAILED")

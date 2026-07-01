@@ -65,9 +65,27 @@ class MockPipelineRunner:
         try:
             for stage, progress in STAGE_PROGRESS:
                 status.update_stage(job_id, stage.value, progress)
-                with pipeline_log.time_stage(stage.value):
-                    self._maybe_fail(stage.value)
-                    artifact_keys.update(self._write_stage_artifacts(session, job_id, stage))
+                timer = None
+                try:
+                    with pipeline_log.time_stage(stage.value) as timer:
+                        self._maybe_fail(stage.value)
+                        stage_artifacts = self._write_stage_artifacts(session, job_id, stage)
+                except Exception as exc:
+                    pipeline_log.add_stage_report(
+                        name=stage.value,
+                        status="failed",
+                        runtime_seconds=timer.runtime_seconds if timer else None,
+                        error=self._serialize_stage_error(exc, stage.value),
+                    )
+                    raise
+                artifact_keys.update(stage_artifacts)
+                pipeline_log.add_stage_report(
+                    name=stage.value,
+                    status=self._mock_stage_status(stage),
+                    runtime_seconds=timer.runtime_seconds if timer else None,
+                    artifacts=stage_artifacts,
+                    report=self._mock_stage_report(stage),
+                )
             self._write_mock_metadata(session, job_id, artifact_keys)
             log_ref = self._write_pipeline_log(job_id, pipeline_log)
             status.mark_completed(job_id)
@@ -123,7 +141,7 @@ class MockPipelineRunner:
             raw_midi = self._put(job_id, "midi/raw_drum.mid", b"MThd mock raw midi\n", "audio/midi")
             events = self._put(
                 job_id,
-                "events/drum_events.json",
+                "midi/drum_events.json",
                 json.dumps({"events": [{"time": 0.0, "drum": "kick"}]}).encode("utf-8"),
                 "application/json",
             )
@@ -143,6 +161,40 @@ class MockPipelineRunner:
             artifact = self._put(job_id, "exports/score.pdf", b"%PDF-1.4\n% mock pdf\n", "application/pdf")
             return {"pdf": artifact.storage_key}
         return {}
+
+    def _mock_stage_status(self, stage: PipelineStage) -> str:
+        if stage == PipelineStage.PDF_EXPORT:
+            return "completed_with_warning"
+        return "completed"
+
+    def _mock_stage_report(self, stage: PipelineStage) -> dict:
+        if stage == PipelineStage.PREPROCESSING:
+            return {"warnings": []}
+        if stage == PipelineStage.SOURCE_SEPARATION:
+            return {"separator": "mock", "warnings": ["mock_ai_enabled"]}
+        if stage == PipelineStage.STEM_VALIDATION:
+            return {"warnings": []}
+        if stage == PipelineStage.DRUM_TRANSCRIPTION:
+            return {"transcriber": "mock", "event_count": 1, "warnings": ["mock_ai_enabled"]}
+        if stage == PipelineStage.MIDI_POST_PROCESSING:
+            return {
+                "input_event_count": 1,
+                "output_event_count": 1,
+                "dropped_event_count": 0,
+                "warnings": [],
+            }
+        if stage == PipelineStage.NOTATION_GENERATION:
+            return {"event_count": 1, "measure_count": 1, "warnings": []}
+        if stage == PipelineStage.PDF_EXPORT:
+            return {
+                "pdf": {
+                    "status": "completed_with_warning",
+                    "renderer": "mock",
+                    "warnings": ["mock_pdf_completed_with_warning"],
+                },
+                "warnings": ["mock_pdf_completed_with_warning"],
+            }
+        return {"warnings": []}
 
     def _write_mock_metadata(self, session: Session, job_id: str, artifact_keys: dict[str, str]) -> None:
         if not self._drum_track_exists(session, job_id):
@@ -214,3 +266,11 @@ class MockPipelineRunner:
     def _maybe_fail(self, stage: str) -> None:
         if self.fail_stage == stage:
             raise PipelineStageError(stage, f"mock failure at {stage}")
+
+    def _serialize_stage_error(self, exc: Exception, stage: str) -> dict[str, str]:
+        return {
+            "type": exc.__class__.__name__,
+            "code": getattr(exc, "code", exc.__class__.__name__),
+            "message": str(exc),
+            "stage": getattr(exc, "stage", stage),
+        }
