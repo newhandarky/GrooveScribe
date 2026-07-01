@@ -519,7 +519,7 @@ Phase 1 已有 MIDI 後處理初版；本 ticket 將其正式化為 pipeline sta
 
 **API / Data Model / Storage 關聯**
 - Data：`DrumTrack.processed_midi_storage_key`、`drum_events_storage_key`、`event_count`、`estimated_bpm`、`warnings`。
-- Storage：`jobs/{job_id}/midi/processed_drum.mid`、`jobs/{job_id}/events/drum_events.json`。
+- Storage：`jobs/{job_id}/midi/processed_drum.mid`、`jobs/{job_id}/midi/drum_events.json`。
 
 **驗收標準**
 - raw MIDI 可轉成可 parse 的 processed MIDI。
