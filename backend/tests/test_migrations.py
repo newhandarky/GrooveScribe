@@ -4,7 +4,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 from app.core.config import get_settings
 
@@ -34,6 +34,51 @@ def test_alembic_upgrade_head_and_downgrade_base(tmp_path, monkeypatch) -> None:
         "export_files",
         "alembic_version",
     }.issubset(tables)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO audio_files (
+                    id,
+                    original_filename,
+                    content_type,
+                    file_size_bytes,
+                    original_storage_key
+                )
+                VALUES (
+                    'audio-interrupted',
+                    'demo.wav',
+                    'audio/wav',
+                    8,
+                    'jobs/job-interrupted/original/demo.wav'
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO transcription_jobs (
+                    id,
+                    audio_file_id,
+                    status,
+                    stage,
+                    progress
+                )
+                VALUES (
+                    'job-interrupted',
+                    'audio-interrupted',
+                    'interrupted',
+                    'failed',
+                    50
+                )
+                """
+            )
+        )
+        status = connection.execute(
+            text("SELECT status FROM transcription_jobs WHERE id = 'job-interrupted'")
+        ).scalar_one()
+        assert status == "interrupted"
 
     command.downgrade(config, "base")
 

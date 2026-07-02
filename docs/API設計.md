@@ -3,10 +3,11 @@
 ## 1. API 設計原則
 
 - API 層只負責接收任務、查詢狀態、回傳結果與下載檔案。
-- 長時間 AI pipeline 必須在 background worker 執行。
+- 長時間 AI pipeline 必須由本機 job manager 執行。
 - API response 使用穩定 JSON 格式。
 - 下載 API 不暴露內部 filesystem path。
-- MVP 可先不做登入；若未來加入 User，API path 不需大幅更動。
+- V1 預設不做登入；若未來加入 User 或 cloud sync，API path 不需大幅更動。
+- V1 API 是 localhost app 的內部邊界，不代表雲端 SaaS contract。
 
 Base path：
 
@@ -14,7 +15,27 @@ Base path：
 /api/v1
 ```
 
-## 2. 上傳音檔 API
+## 2. Runtime / Health API
+
+### `GET /api/v1/runtime`
+
+用途：回傳本機 runtime preflight 狀態。
+
+成功 response：`200 OK`
+
+```json
+{
+  "status": "ready",
+  "checks": {
+    "ffmpeg": {"ready": true, "version": "ffmpeg version 8.0"},
+    "demucs": {"ready": true, "version": "4.0.1"},
+    "adtof": {"ready": false, "message": "GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE is not configured"},
+    "musescore": {"ready": true, "path": "/opt/homebrew/bin/mscore"}
+  }
+}
+```
+
+## 3. 上傳音檔 API
 
 ### `POST /api/v1/transcriptions`
 
@@ -25,7 +46,7 @@ Content-Type：`multipart/form-data`
 Request fields：
 
 | 欄位 | 類型 | 必填 | 說明 |
-|---|---|---|---|
+|---|---|---|
 | file | File | 是 | MP3 或 WAV |
 | title | string | 否 | 使用者自訂標題 |
 
@@ -47,12 +68,13 @@ Request fields：
 - `413 FILE_TOO_LARGE`
 - `422 AUDIO_METADATA_UNREADABLE`
 - `500 STORAGE_WRITE_FAILED`
+- `503 RUNTIME_NOT_READY`
 
-## 3. 查詢任務狀態 API
+## 4. 查詢任務狀態 API
 
 ### `GET /api/v1/transcriptions/{job_id}/status`
 
-用途：查詢背景任務狀態。
+用途：查詢本機背景任務狀態。
 
 成功 response：`200 OK`
 
@@ -64,24 +86,10 @@ Request fields：
   "progress": 45,
   "message": "正在分離鼓軌",
   "created_at": "2026-06-24T10:00:00Z",
+  "queued_at": "2026-06-24T10:00:01Z",
   "started_at": "2026-06-24T10:00:10Z",
   "completed_at": null,
-  "error": null
-}
-```
-
-Completed response 範例：
-
-```json
-{
-  "job_id": "job_01HZABC123",
-  "status": "completed",
-  "stage": "completed",
-  "progress": 100,
-  "message": "分析完成",
-  "created_at": "2026-06-24T10:00:00Z",
-  "started_at": "2026-06-24T10:00:10Z",
-  "completed_at": "2026-06-24T10:04:30Z",
+  "failed_at": null,
   "error": null
 }
 ```
@@ -96,8 +104,10 @@ Failed response 範例：
   "progress": 60,
   "message": "鼓軌轉 MIDI 失敗",
   "created_at": "2026-06-24T10:00:00Z",
+  "queued_at": "2026-06-24T10:00:01Z",
   "started_at": "2026-06-24T10:00:10Z",
-  "completed_at": "2026-06-24T10:03:20Z",
+  "completed_at": null,
+  "failed_at": "2026-06-24T10:03:20Z",
   "error": {
     "code": "DRUM_TRANSCRIPTION_FAILED",
     "message": "系統無法從鼓軌產生 MIDI，請嘗試較清楚的音檔。",
@@ -106,7 +116,7 @@ Failed response 範例：
 }
 ```
 
-## 4. 取得分析結果 API
+## 5. 取得分析結果 API
 
 ### `GET /api/v1/transcriptions/{job_id}`
 
@@ -118,6 +128,7 @@ Failed response 範例：
 {
   "job_id": "job_01HZABC123",
   "status": "completed",
+  "stage": "completed",
   "title": "demo-song",
   "audio": {
     "file_name": "demo.mp3",
@@ -137,14 +148,17 @@ Failed response 範例：
   "exports": [
     {
       "type": "midi",
+      "status": "available",
       "download_url": "/api/v1/transcriptions/job_01HZABC123/download/midi"
     },
     {
       "type": "musicxml",
+      "status": "available",
       "download_url": "/api/v1/transcriptions/job_01HZABC123/download/musicxml"
     },
     {
       "type": "pdf",
+      "status": "available",
       "download_url": "/api/v1/transcriptions/job_01HZABC123/download/pdf"
     }
   ],
@@ -170,7 +184,7 @@ Failed response 範例：
 }
 ```
 
-## 5. 下載 API
+## 6. 下載 API
 
 ### `GET /api/v1/transcriptions/{job_id}/download/midi`
 
@@ -186,12 +200,13 @@ Failed response 範例：
 
 下載規則：
 
-- job 必須是 `completed`。
+- job 必須是 `completed`，或該 export 已明確標示 `available`。
 - export file 必須存在且狀態為 `available`。
 - 若檔案不存在，回傳 `404 EXPORT_NOT_FOUND`。
 - 若檔案仍在產生，回傳 `409 EXPORT_NOT_READY`。
+- API 只回傳 stream，不回傳本機真實路徑。
 
-## 6. 錯誤 Response 格式
+## 7. 錯誤 Response 格式
 
 統一格式：
 
@@ -221,8 +236,23 @@ Failed response 範例：
 | 409 | EXPORT_NOT_READY | 輸出檔尚未完成 |
 | 500 | STORAGE_WRITE_FAILED | 寫入儲存失敗 |
 | 500 | PIPELINE_FAILED | pipeline 未分類錯誤 |
+| 503 | RUNTIME_NOT_READY | 本機 runtime 尚未就緒 |
 
-## 7. Job Stage 枚舉
+## 8. Job Status / Stage 枚舉
+
+Status：
+
+```text
+uploaded
+queued
+processing
+completed
+failed
+interrupted
+canceled
+```
+
+Stage：
 
 ```text
 uploaded
@@ -238,12 +268,11 @@ completed
 failed
 ```
 
-
-## 8. 前端輪詢策略
+## 9. 前端輪詢策略
 
 建議：
 
 - queued / processing：每 2 至 5 秒輪詢一次。
-- completed / failed：停止輪詢。
+- completed / failed / interrupted：停止輪詢。
 - 若 API 連線失敗，前端顯示暫時無法更新狀態，但不要直接判斷 job failed。
-- 未來可改 Server-Sent Events 或 WebSocket，但 MVP 輪詢足夠。
+- Future optional 可改 Server-Sent Events 或 WebSocket；V1 輪詢足夠。

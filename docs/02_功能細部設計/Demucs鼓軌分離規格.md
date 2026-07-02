@@ -28,7 +28,7 @@
 
 - 透過 `SourceSeparator.separate(input_audio, config) -> StemSet` interface 呼叫 Demucs adapter。
 - Demucs adapter 負責模型選擇、device 選擇、temp output directory 與 stderr/stdout 摘要。
-- MVP 只保存 drums stem；其他 stems 可不保存。
+- V1 只保存 drums stem；其他 stems 可不保存。
 - 完成後執行 stem validation：檔案存在、可讀、duration 接近 normalized audio、RMS 不異常低。
 - 更新 `TranscriptionJob.source_separator=demucs` 與 version metadata。
 
@@ -91,7 +91,7 @@ preprocessing completed → source_separation started → drums.wav written → 
 - 錯誤測試：Demucs output 缺 drums stem。
 - Validation test：drums.wav duration 與 normalized.wav 差距過大。
 
-## 非 MVP 範圍
+## 非 V1 範圍
 
 - 保存 vocals、bass、other stems 給使用者下載。
 - 讓使用者選 Demucs model。

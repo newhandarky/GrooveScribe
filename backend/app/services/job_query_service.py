@@ -18,6 +18,7 @@ _STAGE_MESSAGES: dict[str, str] = {
     PipelineStage.PDF_EXPORT.value: "正在匯出 PDF。",
     PipelineStage.COMPLETED.value: "分析已完成。",
     PipelineStage.FAILED.value: "分析失敗，請查看錯誤訊息。",
+    "interrupted": "分析中斷，請重新執行任務。",
 }
 
 

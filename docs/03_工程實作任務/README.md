@@ -4,111 +4,96 @@
 
 `03_工程實作任務` 是 GrooveScribe 的工程 ticket 層。Level 1 定義產品與系統架構，Level 2 定義功能細部規格，Level 3 將這些規格拆成工程師可以直接執行、測試與驗收的開發任務。
 
-這一層文件只描述實作任務，不建立程式碼，不取代既有 Level 1 / Level 2 文件。
+本層文件目前以 local-first 完整 V1 為主線，不再以快速 MVP、雲端部署或 staging deployment 作為第一版目標。
+
+## V1 主線
+
+V1 預設：
+
+- Local Web App。
+- 本機 FastAPI backend。
+- SQLite database。
+- 本機 job manager。
+- Local filesystem artifacts。
+- 本機 ffmpeg、Demucs、ADTOF、MusicXML / PDF export。
+
+Future optional：
+
+- Tauri / Electron desktop shell。
+- Redis / Celery worker mode。
+- PostgreSQL server mode。
+- S3-compatible storage。
+- cloud sync / SaaS deployment。
 
 ## 如何閱讀這些文件
 
-建議先讀 `MVP_Ticket總表.md` 掌握全貌，再依照 Phase 順序閱讀各任務文件：
+建議先讀 `V1_Ticket總表.md` 掌握全貌，再依照 V1 phase 順序閱讀各任務文件。既有 `Phase_*` 文件仍保留部分歷史拆分內容，後續應逐步改寫成 V1 ticket 詳細規格。
 
-1. `Phase_1_本地Pipeline_POC任務.md`
-2. `Phase_2_後端API與資料模型任務.md`
-3. `Phase_3_背景Worker與Queue任務.md`
-4. `Phase_4_AI_Pipeline整合任務.md`
-5. `Phase_5_前端上傳與結果頁任務.md`
-6. `Phase_6_樂譜預覽與匯出任務.md`
-7. `Phase_7_測試與驗收任務.md`
-8. `Phase_8_部署與環境設定任務.md`
+優先閱讀：
 
-若團隊想平行開發，可先用 mock adapter 讓 Phase 2 / 3 / 5 並行，Phase 4 再接真實 Demucs 與 ADTOF-pytorch。
+1. `V1_Ticket總表.md`
+2. `docs/產品完整度標準.md`
+3. `docs/架構決策/ADR-001-介面型態與執行模式.md`
+4. `docs/系統架構.md`
+5. `docs/技術選型.md`
 
-## Level 1 / Level 2 的 5-phase 與 Level 3 的 8-phase 對照
+## V1 Phase 對照
 
-Level 1 / Level 2 使用較粗的 5 個開發階段，Level 3 為了拆 ticket，把其中幾段再細分成 8 個工程 phase。兩者對照如下：
-
-| Level 1 / Level 2 階段 | Level 3 對應工程 phase | 說明 |
+| V1 Phase | 目標 | 說明 |
 |---|---|---|
-| Phase 1：本地 Pipeline Proof of Concept | Phase 1：本地 Pipeline POC | 先證明本地音訊到 MIDI / MusicXML / PDF 可跑通。 |
-| Phase 2：後端 API | Phase 2：後端 API 與資料模型、Phase 3：背景 Worker 與 Queue、Phase 4：AI Pipeline 整合 | Level 3 將 API、worker、正式 pipeline 整合拆開，避免長任務進入 API request。 |
-| Phase 3：前端上傳與結果頁 | Phase 5：前端上傳與結果頁 | 建立上傳、輪詢、錯誤、下載入口。 |
-| Phase 4：樂譜預覽與匯出 | Phase 6：樂譜預覽與匯出 | 整合 MusicXML preview、PDF export 與 fallback UI。 |
-| Phase 5：測試與部署 | Phase 7：測試與驗收、Phase 8：部署與環境設定 | Level 3 將測試驗收與部署環境拆成兩段。 |
-
-因此討論「Phase 2」時需明確說明是 Level 1 / 2 的粗階段，還是 Level 3 的工程 phase。
+| Phase 1 | Local runtime baseline | 鎖定本機 AI runtime、fixture、preflight 與 smoke。 |
+| Phase 2 | Local data / storage foundation | SQLite、local filesystem artifacts、app data 目錄。 |
+| Phase 3 | Local job manager | 不以 Redis / Celery 為預設，建立本機 job lifecycle。 |
+| Phase 4 | Production pipeline service | 將 ffmpeg、Demucs、ADTOF、MIDI、MusicXML、PDF 正式串進 job。 |
+| Phase 5 | Local Web App | 建立上傳、結果、輪詢、錯誤、下載 UI。 |
+| Phase 6 | Preview / export / artifact UX | MusicXML preview、PDF fallback、artifact/log 檢視。 |
+| Phase 7 | Quality / diagnostics / acceptance | 測試、人工評估、browser smoke、diagnostics。 |
+| Phase 8 | Local startup / release checklist | 一條本機啟動路徑、app data 初始化、V1 release checklist。 |
 
 ## Ticket ID 規則
 
-Ticket ID 格式：
+V1 ticket ID 格式：
 
 ```text
-GS-P{phase_number}-{ticket_number}
+GS-V1-P{phase_number}-{ticket_number}
 ```
 
 範例：
 
-- `GS-P1-001`：Phase 1 第一張 ticket
-- `GS-P2-006`：Phase 2 第六張 ticket
-- `GS-P8-007`：Phase 8 第七張 ticket
-
-每個 ticket 都包含目的、實作範圍、不包含範圍、建議目錄、輸入、輸出、API / Data Model / Storage 關聯、驗收標準、測試要求、相依任務與風險。
-
-## 建議開發順序
-
-```text
-Phase 1：本地 Pipeline POC
-→ Phase 2：後端 API 與資料模型
-→ Phase 3：背景 Worker 與 Queue
-→ Phase 4：AI Pipeline 整合
-→ Phase 5：前端上傳與結果頁
-→ Phase 6：樂譜預覽與匯出
-→ Phase 7：測試與驗收
-→ Phase 8：部署與環境設定
-```
-
-實務上可平行：
-
-- Phase 1 與 Phase 2 可同時開始。
-- Phase 3 可先用 mock pipeline，不必等 Phase 4 完成。
-- Phase 5 可先用 mock API response，不必等真實模型可用。
-- Phase 6 需要 MusicXML / PDF artifact 初版後再做完整驗收。
+- `GS-V1-P2-001`：V1 Phase 2 第一張 ticket。
+- `GS-V1-P5-004`：V1 Phase 5 第四張 ticket。
 
 ## 如何從 ticket 進入實作
 
-1. 從 `MVP_Ticket總表.md` 選擇 Todo ticket。
-2. 讀取該 ticket 的 Phase 文件與「需參考的 Level 1 / Level 2 文件」。
+1. 從 `V1_Ticket總表.md` 選擇 Todo ticket。
+2. 讀取該 ticket 的對應 Level 1 / Level 2 文件。
 3. 確認相依任務是否完成。
-4. 依照 ticket 的「主要修改位置或建議目錄」建立或修改實作。
-5. 完成「驗收標準」與「測試要求」。
+4. 依照 ticket 的「V1 主線」限制確認不引入雲端預設依賴。
+5. 完成驗收標準與測試要求。
 6. 更新 ticket 狀態與測試紀錄。
 
-## 如何判斷 MVP 完成
+## 如何判斷完整 V1 完成
 
-MVP 完成需同時滿足：
+完整 V1 需同時滿足：
 
-- 使用者可上傳單首 MP3 / WAV。
-- API request 不執行長時間音訊處理，只建立 job 並派送 queue。
-- Background worker 可執行完整 pipeline。
-- Pipeline 可產生 MIDI、MusicXML、PDF。
-- 前端可顯示 queued / processing / completed / failed。
+- 使用者可在本機啟動 GrooveScribe。
+- 使用者可從 localhost UI 上傳單首 MP3 / WAV。
+- Backend 使用 SQLite 與 local filesystem artifacts。
+- 長任務由本機 job manager 執行，不阻塞 API request。
+- Pipeline 可產生 MIDI、MusicXML、PDF，並保留 logs / stage reports。
+- 前端可顯示 queued / processing / completed / failed / partial success。
 - 完成後可預覽 MusicXML 並下載 MIDI / MusicXML / PDF。
-- 失敗時有清楚錯誤訊息，不暴露 stack trace 或 local path。
-- Storage 透過 adapter 使用 local filesystem，並保留 S3-compatible storage 擴充性。
-- 至少完成固定測試音檔的人工檢查與 MVP 驗收 checklist。
+- 失敗時有清楚錯誤訊息，不暴露 stack trace 或敏感 local path。
+- 固定 fixture tests、browser smoke test、人工評估與 V1 release checklist 完成。
 
-## Ticket Grooming 修正紀錄
+詳細標準見 `docs/產品完整度標準.md`。
 
-本輪依文件審核結果補強：
+## 舊文件處理原則
 
-- Phase 3 補 `GS-P3-007`，明確串接 Upload API 與 Celery enqueue。
-- Phase 4 補 `GS-P4-009`、`GS-P4-010`、`GS-P4-011`，讓 preprocessing、MIDI post-processing、notation / PDF export 都有正式 service/interface 邊界。
-- Phase 5 補 `GS-P5-009`，明確處理上傳表單送出、`202 Accepted` 與 `/jobs/{job_id}` 導向。
-- Phase 7 補 `GS-P7-008`，建立瀏覽器端 E2E smoke test。
-- 修正 Phase 2 / 4 / 5 / 6 / 8 的相依任務，讓 ticket 開工順序更清楚。
+既有工程文件中若仍提到 MVP、Redis / Celery、PostgreSQL、staging deployment，應依下列規則更新：
 
-
-最後一輪 grooming 補強：
-
-- 補上 5-phase 與 8-phase mapping，避免不同層級文件的 Phase 命名混淆。
-- 標註 `GS-P4-001` 為 Phase 4 後段整合票，不應照票號第一個開工。
-- 強化 `GS-P2-006` 與 `GS-P7-006` 的驗收標準與測試要求。
-- 調整 `GS-P6-002` 相依，讓正式 MusicXML artifact 產生流程完成後再做完整預覽驗收。
-- 補 `GS-P1-009`，鎖定 AI runtime 與安裝重現紀錄。
+- `MVP` 改為 `V1` 或 `完整 V1`。
+- `Redis / Celery` 改為 future optional，除非該段明確在討論 server mode。
+- `PostgreSQL` 改為 future optional，V1 預設 SQLite。
+- `staging deployment` 改為 future optional，V1 預設 local startup / release checklist。
+- `cloud / SaaS` 改為 future optional。

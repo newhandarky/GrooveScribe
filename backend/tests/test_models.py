@@ -59,6 +59,7 @@ def test_enum_values_match_level_1_contract() -> None:
         "processing",
         "completed",
         "failed",
+        "interrupted",
         "canceled",
     ]
     assert PipelineStage.MIDI_POST_PROCESSING.value == "midi_post_processing"

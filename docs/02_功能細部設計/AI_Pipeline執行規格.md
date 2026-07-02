@@ -91,7 +91,7 @@ queued
 
 ## 驗收標準
 
-- 給定一個已存在 original artifact 的 job，pipeline 可完整產生所有 MVP artifacts。
+- 給定一個已存在 original artifact 的 job，pipeline 可完整產生所有 V1 artifacts。
 - 每個 stage 都能被單獨 mock 測試。
 - Demucs 與 ADTOF adapter 可替換，不影響 API 層。
 - 失敗時 database 有 failed status、error code、error stage。
@@ -103,7 +103,7 @@ queued
 - 錯誤測試：讓 source separation adapter 拋錯，驗證 job failed。
 - artifact 測試：每個 stage output key 符合命名約定。
 
-## 非 MVP 範圍
+## 非 V1 範圍
 
 - 多模型 ensemble。
 - 線上人工修譜後重新產生 PDF。

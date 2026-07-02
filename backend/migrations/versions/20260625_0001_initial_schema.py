@@ -18,6 +18,7 @@ job_status = sa.Enum(
     "processing",
     "completed",
     "failed",
+    "interrupted",
     "canceled",
     name="job_status",
 )

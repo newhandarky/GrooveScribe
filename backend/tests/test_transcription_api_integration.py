@@ -17,6 +17,8 @@ from app.models import AudioFile, DrumTrack, ExportFile, TranscriptionJob
 from app.models.enums import ExportFileStatus, ExportFileType, JobStatus, PipelineStage
 from app.services.audio_metadata import AudioMetadata, AudioMetadataInspectionError
 from app.services.job_queue import NoopJobQueue
+from app.services.local_job_queue import LocalJobQueue
+from app.services.local_pipeline_runner import LocalMockPipelineRunner
 from app.services.upload_service import UploadService
 from app.storage.dependencies import get_storage_adapter
 from app.storage.local import LocalStorageAdapter
@@ -61,6 +63,43 @@ def _client(tmp_path: Path, *, metadata_inspector: FakeMetadataInspector | None 
     app.dependency_overrides[get_storage_adapter] = lambda: storage
     app.dependency_overrides[get_upload_service] = override_upload_service
     return TestClient(app), session_factory, storage
+
+
+def _client_with_local_queue(tmp_path: Path, *, fail_stage: PipelineStage | None = None):
+    session_factory = _session_factory(tmp_path)
+    storage = LocalStorageAdapter(tmp_path / "storage")
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{tmp_path / 'test.db'}",
+        storage_root=str(tmp_path / "storage"),
+        job_queue_backend="local",
+    )
+    queue = LocalJobQueue(
+        settings=settings,
+        session_factory=session_factory,
+        runner_factory=lambda: LocalMockPipelineRunner(
+            settings=settings,
+            storage=storage,
+            fail_stage=fail_stage,
+        ),
+    )
+    app = create_app()
+
+    def override_db_session():
+        with session_factory() as session:
+            yield session
+
+    def override_upload_service():
+        return UploadService(
+            settings=settings,
+            storage=storage,
+            queue=queue,
+            metadata_inspector=FakeMetadataInspector(),
+        )
+
+    app.dependency_overrides[get_db_session] = override_db_session
+    app.dependency_overrides[get_storage_adapter] = lambda: storage
+    app.dependency_overrides[get_upload_service] = override_upload_service
+    return TestClient(app), session_factory, storage, queue
 
 
 def _seed_job(
@@ -174,12 +213,14 @@ def test_status_api_returns_all_core_states(tmp_path: Path) -> None:
         )
         _seed_job(session, job_id="job-completed", status=JobStatus.COMPLETED, stage=PipelineStage.COMPLETED)
         _seed_job(session, job_id="job-failed", status=JobStatus.FAILED, stage=PipelineStage.FAILED)
+        _seed_job(session, job_id="job-interrupted", status=JobStatus.INTERRUPTED, stage=PipelineStage.FAILED)
 
     expected = {
         "job-queued": "queued",
         "job-processing": "processing",
         "job-completed": "completed",
         "job-failed": "failed",
+        "job-interrupted": "interrupted",
     }
     for job_id, status in expected.items():
         response = client.get(f"/api/v1/transcriptions/{job_id}/status")
@@ -189,6 +230,62 @@ def test_status_api_returns_all_core_states(tmp_path: Path) -> None:
         if status == "failed":
             assert body["error"]["code"] == "PIPELINE_FAILED"
             assert body["error"]["retriable"] is True
+
+
+def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path) -> None:
+    client, session_factory, _storage, queue = _client_with_local_queue(tmp_path)
+
+    response = client.post(
+        "/api/v1/transcriptions",
+        files={"file": ("demo.wav", b"fake-wav", "audio/wav")},
+        data={"title": "Demo"},
+    )
+
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    queue.wait_for_all(timeout=5)
+
+    status_response = client.get(f"/api/v1/transcriptions/{job_id}/status")
+    result_response = client.get(f"/api/v1/transcriptions/{job_id}")
+    midi_response = client.get(f"/api/v1/transcriptions/{job_id}/download/midi")
+    musicxml_response = client.get(f"/api/v1/transcriptions/{job_id}/download/musicxml")
+    pdf_response = client.get(f"/api/v1/transcriptions/{job_id}/download/pdf")
+
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "completed"
+    assert result_response.status_code == 200
+    result_body = result_response.json()
+    assert {export["type"] for export in result_body["exports"]} == {"midi", "musicxml", "pdf"}
+    assert midi_response.status_code == 200
+    assert musicxml_response.status_code == 200
+    assert pdf_response.status_code == 200
+    with session_factory() as session:
+        job = session.scalar(select(TranscriptionJob).where(TranscriptionJob.id == job_id))
+        assert job.status == JobStatus.COMPLETED
+
+
+def test_upload_api_local_queue_failure_marks_job_failed(tmp_path: Path) -> None:
+    client, _session_factory, _storage, queue = _client_with_local_queue(
+        tmp_path,
+        fail_stage=PipelineStage.DRUM_TRANSCRIPTION,
+    )
+
+    response = client.post(
+        "/api/v1/transcriptions",
+        files={"file": ("demo.wav", b"fake-wav", "audio/wav")},
+    )
+
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    queue.wait_for_all(timeout=5)
+
+    status_response = client.get(f"/api/v1/transcriptions/{job_id}/status")
+
+    assert status_response.status_code == 200
+    body = status_response.json()
+    assert body["status"] == "failed"
+    assert body["error"]["code"] == "DRUM_TRANSCRIPTION_FAILED"
+    assert body["error"]["stage"] == "drum_transcription"
 
 
 def test_result_api_uses_audio_contract(tmp_path: Path) -> None:

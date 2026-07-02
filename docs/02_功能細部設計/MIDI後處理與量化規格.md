@@ -92,7 +92,7 @@ drum_transcription completed → midi_post_processing started → processed_drum
 - 單元測試：velocity floor 過濾 noise。
 - 整合測試：raw MIDI → processed MIDI → drum_events.json。
 
-## 非 MVP 範圍
+## 非 V1 範圍
 
 - 複雜 tempo map。
 - ghost note 精細保留策略。

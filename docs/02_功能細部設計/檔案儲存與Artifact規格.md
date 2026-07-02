@@ -5,7 +5,7 @@
 ## 功能目標
 
 - 定義所有 pipeline 檔案與中間產物的儲存方式。
-- MVP 先支援 local filesystem，但介面必須可替換成 S3-compatible storage。
+- V1 先支援 local filesystem，但介面必須可替換成 S3-compatible storage。
 - 避免 API、worker、pipeline 直接依賴絕對路徑。
 
 ## 使用者情境
@@ -89,7 +89,7 @@ jobs/{job_id}/logs/pipeline.json
 
 ## 驗收標準
 
-- LocalStorageAdapter 可保存與讀取所有 MVP artifact。
+- LocalStorageAdapter 可保存與讀取所有 V1 artifact。
 - 所有 API response 不含 local absolute path。
 - Storage key 命名一致且以 job id 隔離。
 - 替換成 S3StorageAdapter 時不需修改業務流程。
@@ -102,7 +102,7 @@ jobs/{job_id}/logs/pipeline.json
 - 整合測試：upload original 後 worker 可讀取。
 - 整合測試：download API 從 ExportFile.storage_key 回傳檔案。
 
-## 非 MVP 範圍
+## 非 V1 範圍
 
 - S3 direct upload。
 - 檔案生命週期自動清理 UI。

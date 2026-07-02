@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -8,7 +9,8 @@ class Settings(BaseSettings):
     app_env: str = "local"
     log_level: str = "info"
     api_v1_prefix: str = "/api/v1"
-    database_url: str = "postgresql+psycopg://groovescribe:groovescribe@localhost:5432/groovescribe"
+    database_url: str = "sqlite+pysqlite:///./storage/local/groovescribe.db"
+    job_queue_backend: str = "local"
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str | None = None
     celery_result_backend: str | None = None
@@ -31,6 +33,22 @@ class Settings(BaseSettings):
     @property
     def resolved_celery_result_backend(self) -> str:
         return self.celery_result_backend or self.redis_url
+
+    @property
+    def normalized_job_queue_backend(self) -> str:
+        return self.job_queue_backend.lower().strip()
+
+    def ensure_local_app_data(self) -> None:
+        Path(self.storage_root).expanduser().resolve().mkdir(parents=True, exist_ok=True)
+        if self.database_url.startswith("sqlite"):
+            path_part = self._sqlite_path_part()
+            if path_part and path_part != ":memory:":
+                Path(path_part).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+
+    def _sqlite_path_part(self) -> str | None:
+        if ":///" not in self.database_url:
+            return None
+        return self.database_url.split(":///", maxsplit=1)[1]
 
 
 @lru_cache

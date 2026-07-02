@@ -83,7 +83,7 @@ Progress 建議：queued 0、preprocessing 10、source_separation 25、stem_vali
 - Worker timeout：`WORKER_TIMEOUT`。
 - Queue 消費後找不到 job：記錄 worker error，不建立新 job。
 - 狀態非法轉移：拒絕更新並記錄 `INVALID_JOB_STATE_TRANSITION`。
-- Worker crash 後 job 長時間停在 processing：由後續 watchdog 或人工操作標記 failed；MVP 可先以 timeout 控制。
+- Worker crash 後 job 長時間停在 processing：由後續 watchdog 或人工操作標記 failed；V1 可先以 timeout 控制。
 
 ## 驗收標準
 
@@ -100,7 +100,7 @@ Progress 建議：queued 0、preprocessing 10、source_separation 25、stem_vali
 - 整合測試：completed job result API 回傳 exports。
 - 整合測試：processing job result API 回傳 409。
 
-## 非 MVP 範圍
+## 非 V1 範圍
 
 - 取消任務 UI 與 cancel API。
 - 任務優先級與付費隊列。

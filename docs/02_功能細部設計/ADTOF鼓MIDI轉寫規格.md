@@ -23,7 +23,7 @@
 
 - API 層不 import ADTOF-pytorch。
 - Result API 只回傳摘要：event_count、confidence_label、warnings。
-- Download API 不提供 raw MIDI，MVP 只提供 processed MIDI；raw MIDI 保留供內部 debug。
+- Download API 不提供 raw MIDI，V1 只提供 processed MIDI；raw MIDI 保留供內部 debug。
 
 ## Worker / Pipeline 行為
 
@@ -92,7 +92,7 @@ stem_validation completed → drum_transcription started → raw_drum.mid writte
 - 錯誤測試：模型 process 非 0 exit。
 - Validation test：raw MIDI 無 note event。
 
-## 非 MVP 範圍
+## 非 V1 範圍
 
 - 多模型 ensemble。
 - 線上調整 threshold。
