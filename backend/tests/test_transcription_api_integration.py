@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +21,7 @@ from app.services.audio_metadata import AudioMetadata, AudioMetadataInspectionEr
 from app.services.job_queue import NoopJobQueue
 from app.services.local_job_queue import LocalJobQueue
 from app.services.local_pipeline_runner import LocalMockPipelineRunner
+from app.services.pipeline_service import PipelineServiceRunner
 from app.services.upload_service import UploadService
 from app.storage.dependencies import get_storage_adapter
 from app.storage.local import LocalStorageAdapter
@@ -65,7 +68,12 @@ def _client(tmp_path: Path, *, metadata_inspector: FakeMetadataInspector | None 
     return TestClient(app), session_factory, storage
 
 
-def _client_with_local_queue(tmp_path: Path, *, fail_stage: PipelineStage | None = None):
+def _client_with_local_queue(
+    tmp_path: Path,
+    *,
+    fail_stage: PipelineStage | None = None,
+    process_runner=None,
+):
     session_factory = _session_factory(tmp_path)
     storage = LocalStorageAdapter(tmp_path / "storage")
     settings = Settings(
@@ -73,15 +81,21 @@ def _client_with_local_queue(tmp_path: Path, *, fail_stage: PipelineStage | None
         storage_root=str(tmp_path / "storage"),
         job_queue_backend="local",
     )
-    queue = LocalJobQueue(
-        settings=settings,
-        session_factory=session_factory,
-        runner_factory=lambda: LocalMockPipelineRunner(
-            settings=settings,
-            storage=storage,
-            fail_stage=fail_stage,
-        ),
-    )
+    if process_runner is None:
+        def runner_factory():
+            return LocalMockPipelineRunner(
+                settings=settings,
+                storage=storage,
+                fail_stage=fail_stage,
+            )
+    else:
+        def runner_factory():
+            return PipelineServiceRunner(
+                settings=settings,
+                storage=storage,
+                process_runner=process_runner,
+            )
+    queue = LocalJobQueue(settings=settings, session_factory=session_factory, runner_factory=runner_factory)
     app = create_app()
 
     def override_db_session():
@@ -100,6 +114,42 @@ def _client_with_local_queue(tmp_path: Path, *, fail_stage: PipelineStage | None
     app.dependency_overrides[get_storage_adapter] = lambda: storage
     app.dependency_overrides[get_upload_service] = override_upload_service
     return TestClient(app), session_factory, storage, queue
+
+
+def _write_fake_pipeline_output(output_dir: Path) -> None:
+    artifact_paths = {
+        "normalized_audio": output_dir / "audio" / "normalized.wav",
+        "drums_stem": output_dir / "stems" / "drums.wav",
+        "raw_midi": output_dir / "midi" / "raw_drum.mid",
+        "processed_midi": output_dir / "midi" / "processed_drum.mid",
+        "drum_events": output_dir / "midi" / "drum_events.json",
+        "musicxml": output_dir / "notation" / "score.musicxml",
+        "pdf": output_dir / "exports" / "score.pdf",
+    }
+    for name, path in artifact_paths.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(f"{name}\n".encode("utf-8"))
+    log_payload = {
+        "schema_version": "1.0",
+        "status": "completed",
+        "artifacts": {name: str(path) for name, path in artifact_paths.items()},
+        "stages": [
+            {"name": "source_separation", "status": "completed", "report": {"separator": "mock"}},
+            {"name": "drum_transcription", "status": "completed", "report": {"transcriber": "mock", "event_count": 4}},
+            {
+                "name": "midi_post_processing",
+                "status": "completed",
+                "report": {"output_event_count": 4, "estimated_bpm": 120.0, "time_signature": "4/4"},
+            },
+            {
+                "name": "notation_generation",
+                "status": "completed",
+                "report": {"event_count": 4, "measure_count": 1, "pdf": {"status": "completed"}},
+            },
+        ],
+    }
+    (output_dir / "logs").mkdir(parents=True, exist_ok=True)
+    (output_dir / "logs" / "pipeline.json").write_text(json.dumps(log_payload), encoding="utf-8")
 
 
 def _seed_job(
@@ -233,7 +283,12 @@ def test_status_api_returns_all_core_states(tmp_path: Path) -> None:
 
 
 def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path) -> None:
-    client, session_factory, _storage, queue = _client_with_local_queue(tmp_path)
+    def fake_process(command, **_kwargs):
+        output_dir = Path(command[command.index("--output-dir") + 1])
+        _write_fake_pipeline_output(output_dir)
+        return subprocess.CompletedProcess(command, 0, stdout='{"status": "completed"}', stderr="")
+
+    client, session_factory, _storage, queue = _client_with_local_queue(tmp_path, process_runner=fake_process)
 
     response = client.post(
         "/api/v1/transcriptions",

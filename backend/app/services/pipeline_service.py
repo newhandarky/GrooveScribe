@@ -1,0 +1,518 @@
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from sqlalchemy.orm import Session, selectinload
+
+from app.core.config import Settings, get_settings
+from app.core.errors import ErrorCode
+from app.models import DrumTrack, ExportFile, TranscriptionJob
+from app.models.enums import (
+    ConfidenceLabel,
+    ExportFileStatus,
+    ExportFileType,
+    JobStatus,
+    PipelineStage,
+)
+from app.services.local_pipeline_runner import LocalPipelineRunResult, LocalPipelineRunnerError
+from app.storage import ArtifactRef, ArtifactType, LocalStorageAdapter, StorageAdapter, build_job_artifact_key
+from app.storage.types import CONTENT_TYPE_BY_ARTIFACT_TYPE
+
+ProcessRunner = Callable[..., subprocess.CompletedProcess[str]]
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_PIPELINE_SCRIPT = _REPO_ROOT / "scripts" / "run_local_pipeline.py"
+
+_PIPELINE_ARTIFACT_TYPES: dict[str, ArtifactType] = {
+    "normalized_audio": ArtifactType.NORMALIZED_AUDIO,
+    "drums_stem": ArtifactType.DRUMS_STEM,
+    "raw_midi": ArtifactType.RAW_MIDI,
+    "processed_midi": ArtifactType.PROCESSED_MIDI,
+    "drum_events": ArtifactType.DRUM_EVENTS,
+    "musicxml": ArtifactType.MUSICXML,
+    "pdf": ArtifactType.PDF,
+}
+
+_REQUIRED_PIPELINE_ARTIFACTS = (
+    "normalized_audio",
+    "drums_stem",
+    "raw_midi",
+    "processed_midi",
+    "drum_events",
+    "musicxml",
+)
+
+_AI_STAGE_TO_BACKEND_STAGE: dict[str, str] = {
+    "audio_preprocessing": PipelineStage.PREPROCESSING.value,
+    "source_separation": PipelineStage.SOURCE_SEPARATION.value,
+    "drum_transcription": PipelineStage.DRUM_TRANSCRIPTION.value,
+    "midi_post_processing": PipelineStage.MIDI_POST_PROCESSING.value,
+    "notation_generation": PipelineStage.NOTATION_GENERATION.value,
+}
+
+_AI_STAGE_TO_ERROR_CODE: dict[str, ErrorCode] = {
+    "audio_preprocessing": ErrorCode.AUDIO_DECODE_FAILED,
+    "source_separation": ErrorCode.SOURCE_SEPARATION_FAILED,
+    "drum_transcription": ErrorCode.DRUM_TRANSCRIPTION_FAILED,
+    "midi_post_processing": ErrorCode.MIDI_POST_PROCESSING_FAILED,
+    "notation_generation": ErrorCode.NOTATION_GENERATION_FAILED,
+}
+
+
+@dataclass(frozen=True)
+class PipelineProcessResult:
+    command: list[str]
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+class PipelineServiceRunner:
+    def __init__(
+        self,
+        *,
+        settings: Settings | None = None,
+        storage: StorageAdapter | None = None,
+        process_runner: ProcessRunner | None = None,
+        pipeline_script_path: Path | None = None,
+    ) -> None:
+        self.settings = settings or get_settings()
+        self.storage = storage or LocalStorageAdapter(self.settings.storage_root)
+        self.process_runner = process_runner or subprocess.run
+        self.pipeline_script_path = pipeline_script_path or _PIPELINE_SCRIPT
+
+    def run(
+        self,
+        db: Session,
+        *,
+        job_id: str,
+        pipeline_config_id: str | None = None,
+    ) -> LocalPipelineRunResult:
+        job = self._load_job(db, job_id)
+        workspace = self._workspace_path(job.id)
+        input_path = self._prepare_input_file(job, workspace)
+        output_dir = workspace / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        self._mark_processing(db, job)
+        db.commit()
+
+        command = self.build_command(
+            input_path=input_path,
+            output_dir=output_dir,
+            title=job.title or "GrooveScribe Drum Draft",
+        )
+        process = self._run_process(command)
+        payload = self._read_pipeline_payload(output_dir, process)
+        log_ref = self._store_pipeline_log(job.id, output_dir, payload, process, pipeline_config_id)
+
+        if process.returncode != 0 or payload.get("status") == "failed":
+            failed_stage = self._failed_stage(payload)
+            raise LocalPipelineRunnerError(
+                error_code=_AI_STAGE_TO_ERROR_CODE.get(failed_stage or "", ErrorCode.PIPELINE_FAILED),
+                error_stage=_AI_STAGE_TO_BACKEND_STAGE.get(failed_stage or "", job.stage.value),
+                internal_error_ref=log_ref.storage_key,
+            )
+
+        artifact_refs = self._store_artifacts(job, payload)
+        self._upsert_metadata(db, job, payload, artifact_refs)
+        self._mark_completed(job, payload, log_ref.storage_key)
+        db.flush()
+        return LocalPipelineRunResult(job_id=job.id, pipeline_log_storage_key=log_ref.storage_key)
+
+    def build_command(self, *, input_path: Path, output_dir: Path, title: str) -> list[str]:
+        command = [
+            self.settings.ai_python_path,
+            str(self.pipeline_script_path),
+            "--input",
+            str(input_path),
+            "--output-dir",
+            str(output_dir),
+            "--title",
+            title,
+            "--demucs-model-name",
+            self.settings.pipeline_demucs_model_name,
+            "--demucs-device",
+            self.settings.pipeline_demucs_device,
+            "--demucs-timeout-seconds",
+            str(self.settings.pipeline_demucs_timeout_seconds),
+            "--adtof-device",
+            self.settings.pipeline_adtof_device,
+            "--adtof-threshold",
+            str(self.settings.pipeline_adtof_threshold),
+            "--adtof-timeout-seconds",
+            str(self.settings.pipeline_adtof_timeout_seconds),
+        ]
+        if self.settings.pipeline_mock_ai:
+            command.append("--mock-ai")
+        if self.settings.pipeline_adtof_command_template:
+            command.extend(["--adtof-command-template", self.settings.pipeline_adtof_command_template])
+        if self.settings.pipeline_adtof_checkpoint_path:
+            command.extend(["--adtof-checkpoint", self.settings.pipeline_adtof_checkpoint_path])
+        if self.settings.pipeline_pdf_renderer:
+            command.extend(["--pdf-renderer", self.settings.pipeline_pdf_renderer])
+        if self.settings.pipeline_export_pdf:
+            command.append("--export-pdf")
+        if self.settings.pipeline_require_pdf:
+            command.append("--require-pdf")
+        return command
+
+    def _load_job(self, db: Session, job_id: str) -> TranscriptionJob:
+        job = (
+            db.query(TranscriptionJob)
+            .options(
+                selectinload(TranscriptionJob.audio_file),
+                selectinload(TranscriptionJob.drum_track),
+                selectinload(TranscriptionJob.export_files),
+            )
+            .filter(TranscriptionJob.id == job_id)
+            .one_or_none()
+        )
+        if job is None:
+            raise LocalPipelineRunnerError(
+                error_code=ErrorCode.JOB_NOT_FOUND,
+                error_stage=PipelineStage.QUEUED.value,
+            )
+        return job
+
+    def _workspace_path(self, job_id: str) -> Path:
+        return Path(self.settings.storage_root).expanduser().resolve() / "jobs" / job_id / "pipeline-work"
+
+    def _prepare_input_file(self, job: TranscriptionJob, workspace: Path) -> Path:
+        input_dir = workspace / "input"
+        if input_dir.exists():
+            shutil.rmtree(input_dir)
+        input_dir.mkdir(parents=True, exist_ok=True)
+        input_path = input_dir / job.audio_file.original_filename
+        with self.storage.open_reader(job.audio_file.original_storage_key) as reader:
+            input_path.write_bytes(reader.read())
+        return input_path
+
+    def _mark_processing(self, db: Session, job: TranscriptionJob) -> None:
+        job.status = JobStatus.PROCESSING
+        job.stage = PipelineStage.PREPROCESSING
+        job.progress = 1
+        job.started_at = job.started_at or datetime.now(UTC)
+        job.completed_at = None
+        job.failed_at = None
+        job.error_code = None
+        job.error_message = None
+        job.error_stage = None
+        job.internal_error_ref = None
+        db.flush()
+
+    def _run_process(self, command: list[str]) -> PipelineProcessResult:
+        try:
+            completed = self.process_runner(
+                command,
+                cwd=str(_REPO_ROOT),
+                capture_output=True,
+                text=True,
+                timeout=self.settings.pipeline_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise LocalPipelineRunnerError(
+                error_code=ErrorCode.WORKER_TIMEOUT,
+                error_stage=PipelineStage.PREPROCESSING.value,
+            ) from exc
+        except FileNotFoundError as exc:
+            raise LocalPipelineRunnerError(
+                error_code=ErrorCode.PIPELINE_FAILED,
+                error_stage=PipelineStage.PREPROCESSING.value,
+            ) from exc
+        return PipelineProcessResult(
+            command=command,
+            returncode=completed.returncode,
+            stdout=completed.stdout or "",
+            stderr=completed.stderr or "",
+        )
+
+    def _read_pipeline_payload(
+        self,
+        output_dir: Path,
+        process: PipelineProcessResult,
+    ) -> dict[str, Any]:
+        log_path = output_dir / "logs" / "pipeline.json"
+        if log_path.exists():
+            return json.loads(log_path.read_text(encoding="utf-8"))
+        stdout_payload = self._parse_stdout(process.stdout)
+        return {
+            "schema_version": "1.0",
+            "status": "failed" if process.returncode else stdout_payload.get("status", "completed"),
+            "artifacts": stdout_payload.get("artifacts", {}),
+            "stages": [],
+            "subprocess": {
+                "returncode": process.returncode,
+                "stdout": process.stdout,
+                "stderr": process.stderr,
+            },
+        }
+
+    def _parse_stdout(self, stdout: str) -> dict[str, Any]:
+        if not stdout.strip():
+            return {}
+        try:
+            payload = json.loads(stdout)
+        except json.JSONDecodeError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _store_pipeline_log(
+        self,
+        job_id: str,
+        output_dir: Path,
+        payload: dict[str, Any],
+        process: PipelineProcessResult,
+        pipeline_config_id: str | None,
+    ) -> ArtifactRef:
+        log_path = output_dir / "logs" / "pipeline.json"
+        if log_path.exists():
+            return self.storage.put_file(
+                log_path,
+                build_job_artifact_key(job_id, ArtifactType.PIPELINE_LOG),
+                CONTENT_TYPE_BY_ARTIFACT_TYPE[ArtifactType.PIPELINE_LOG],
+            )
+        fallback_path = output_dir / "logs" / "pipeline.json"
+        fallback_path.parent.mkdir(parents=True, exist_ok=True)
+        fallback_payload = {
+            **payload,
+            "runner": "backend.pipeline_service_subprocess",
+            "pipeline_config_id": pipeline_config_id,
+            "subprocess": {
+                "command": process.command,
+                "returncode": process.returncode,
+                "stdout": process.stdout,
+                "stderr": process.stderr,
+            },
+        }
+        fallback_path.write_text(json.dumps(fallback_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return self.storage.put_file(
+            fallback_path,
+            build_job_artifact_key(job_id, ArtifactType.PIPELINE_LOG),
+            CONTENT_TYPE_BY_ARTIFACT_TYPE[ArtifactType.PIPELINE_LOG],
+        )
+
+    def _store_artifacts(
+        self,
+        job: TranscriptionJob,
+        payload: dict[str, Any],
+    ) -> dict[ArtifactType, ArtifactRef]:
+        artifact_paths = self._artifact_paths(payload)
+        refs: dict[ArtifactType, ArtifactRef] = {}
+        for artifact_name in _REQUIRED_PIPELINE_ARTIFACTS:
+            if artifact_name not in artifact_paths:
+                raise LocalPipelineRunnerError(
+                    error_code=ErrorCode.ARTIFACT_NOT_FOUND,
+                    error_stage=PipelineStage.FAILED.value,
+                )
+        for artifact_name, artifact_type in _PIPELINE_ARTIFACT_TYPES.items():
+            path = artifact_paths.get(artifact_name)
+            if path is None:
+                continue
+            refs[artifact_type] = self.storage.put_file(
+                path,
+                build_job_artifact_key(job.id, artifact_type),
+                CONTENT_TYPE_BY_ARTIFACT_TYPE[artifact_type],
+            )
+        return refs
+
+    def _artifact_paths(self, payload: dict[str, Any]) -> dict[str, Path]:
+        raw_artifacts = payload.get("artifacts")
+        if not isinstance(raw_artifacts, dict):
+            return {}
+        artifact_paths: dict[str, Path] = {}
+        for name, value in raw_artifacts.items():
+            path = Path(str(value))
+            if path.exists() and path.is_file():
+                artifact_paths[str(name)] = path
+        return artifact_paths
+
+    def _upsert_metadata(
+        self,
+        db: Session,
+        job: TranscriptionJob,
+        payload: dict[str, Any],
+        artifact_refs: dict[ArtifactType, ArtifactRef],
+    ) -> None:
+        if ArtifactType.NORMALIZED_AUDIO in artifact_refs:
+            job.audio_file.normalized_storage_key = artifact_refs[ArtifactType.NORMALIZED_AUDIO].storage_key
+        self._upsert_drum_track(db, job, payload, artifact_refs)
+        self._upsert_export_files(db, job, payload, artifact_refs)
+
+    def _upsert_drum_track(
+        self,
+        db: Session,
+        job: TranscriptionJob,
+        payload: dict[str, Any],
+        artifact_refs: dict[ArtifactType, ArtifactRef],
+    ) -> None:
+        midi_report = self._stage_report(payload, "midi_post_processing")
+        transcription_report = self._stage_report(payload, "drum_transcription")
+        notation_report = self._stage_report(payload, "notation_generation")
+        drum_track = job.drum_track or DrumTrack(job=job)
+        drum_track.drums_stem_storage_key = self._storage_key(artifact_refs, ArtifactType.DRUMS_STEM)
+        drum_track.raw_midi_storage_key = self._storage_key(artifact_refs, ArtifactType.RAW_MIDI)
+        drum_track.processed_midi_storage_key = self._storage_key(artifact_refs, ArtifactType.PROCESSED_MIDI)
+        drum_track.drum_events_storage_key = self._storage_key(artifact_refs, ArtifactType.DRUM_EVENTS)
+        drum_track.estimated_bpm = self._float_or_none(midi_report.get("estimated_bpm")) or 120.0
+        drum_track.time_signature = str(midi_report.get("time_signature") or "4/4")
+        drum_track.event_count = self._event_count(midi_report, transcription_report, notation_report)
+        drum_track.confidence_label = ConfidenceLabel.MEDIUM if self.settings.pipeline_mock_ai else None
+        drum_track.warnings = self._warnings(payload)
+        db.add(drum_track)
+
+    def _upsert_export_files(
+        self,
+        db: Session,
+        job: TranscriptionJob,
+        payload: dict[str, Any],
+        artifact_refs: dict[ArtifactType, ArtifactRef],
+    ) -> None:
+        self._upsert_export_file(db, job, ExportFileType.MIDI, ArtifactType.PROCESSED_MIDI, artifact_refs)
+        self._upsert_export_file(db, job, ExportFileType.MUSICXML, ArtifactType.MUSICXML, artifact_refs)
+        if ArtifactType.PDF in artifact_refs:
+            self._upsert_export_file(db, job, ExportFileType.PDF, ArtifactType.PDF, artifact_refs)
+        elif self.settings.pipeline_export_pdf:
+            self._upsert_failed_pdf_export(db, job, payload)
+
+    def _upsert_export_file(
+        self,
+        db: Session,
+        job: TranscriptionJob,
+        export_type: ExportFileType,
+        artifact_type: ArtifactType,
+        artifact_refs: dict[ArtifactType, ArtifactRef],
+    ) -> None:
+        ref = artifact_refs[artifact_type]
+        export = self._find_export(job, export_type)
+        if export is None:
+            export = ExportFile(job=job, type=export_type)
+        export.status = ExportFileStatus.AVAILABLE
+        export.storage_key = ref.storage_key
+        export.content_type = ref.content_type
+        export.file_size_bytes = ref.file_size_bytes
+        export.checksum = ref.checksum
+        export.error_code = None
+        db.add(export)
+
+    def _upsert_failed_pdf_export(
+        self,
+        db: Session,
+        job: TranscriptionJob,
+        payload: dict[str, Any],
+    ) -> None:
+        export = self._find_export(job, ExportFileType.PDF)
+        if export is None:
+            export = ExportFile(job=job, type=ExportFileType.PDF)
+        export.status = ExportFileStatus.FAILED
+        export.storage_key = build_job_artifact_key(job.id, ArtifactType.PDF)
+        export.content_type = CONTENT_TYPE_BY_ARTIFACT_TYPE[ArtifactType.PDF]
+        export.file_size_bytes = None
+        export.checksum = None
+        export.error_code = self._pdf_error_code(payload)
+        db.add(export)
+
+    def _mark_completed(self, job: TranscriptionJob, payload: dict[str, Any], log_storage_key: str) -> None:
+        source_report = self._stage_report(payload, "source_separation")
+        transcription_report = self._stage_report(payload, "drum_transcription")
+        job.status = JobStatus.COMPLETED
+        job.stage = PipelineStage.COMPLETED
+        job.progress = 100
+        job.completed_at = datetime.now(UTC)
+        job.failed_at = None
+        job.error_code = None
+        job.error_message = None
+        job.error_stage = None
+        job.internal_error_ref = log_storage_key
+        job.pipeline_version = "ai-pipeline-local-runner-v1"
+        job.source_separator = str(source_report.get("separator") or "")
+        job.source_separator_version = str(source_report.get("model_name") or "local-runner")
+        job.drum_transcriber = str(transcription_report.get("transcriber") or "")
+        job.drum_transcriber_version = str(transcription_report.get("model_name") or "local-runner")
+
+    def _failed_stage(self, payload: dict[str, Any]) -> str | None:
+        for stage in self._stages(payload):
+            if stage.get("status") == "failed":
+                return str(stage.get("name") or stage.get("stage") or "")
+        return None
+
+    def _stage_report(self, payload: dict[str, Any], name: str) -> dict[str, Any]:
+        for stage in self._stages(payload):
+            if stage.get("name") == name or stage.get("stage") == name:
+                report = stage.get("report")
+                return report if isinstance(report, dict) else {}
+        return {}
+
+    def _stages(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        raw_stages = payload.get("stages") or payload.get("stage_reports") or []
+        if not isinstance(raw_stages, list):
+            return []
+        return [stage for stage in raw_stages if isinstance(stage, dict)]
+
+    def _warnings(self, payload: dict[str, Any]) -> list[str]:
+        warnings: list[str] = []
+        for stage in self._stages(payload):
+            report = stage.get("report")
+            if not isinstance(report, dict):
+                continue
+            raw_warnings = report.get("warnings")
+            if isinstance(raw_warnings, list):
+                warnings.extend(str(warning) for warning in raw_warnings)
+            pdf_report = report.get("pdf")
+            if isinstance(pdf_report, dict):
+                pdf_warnings = pdf_report.get("warnings")
+                if isinstance(pdf_warnings, list):
+                    warnings.extend(str(warning) for warning in pdf_warnings)
+                if pdf_report.get("status") == "failed":
+                    warnings.append("pdf_export_failed")
+        return list(dict.fromkeys(warnings))
+
+    def _event_count(
+        self,
+        midi_report: dict[str, Any],
+        transcription_report: dict[str, Any],
+        notation_report: dict[str, Any],
+    ) -> int:
+        for key, report in (
+            ("output_event_count", midi_report),
+            ("event_count", transcription_report),
+            ("event_count", notation_report),
+        ):
+            value = report.get(key)
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
+        return 0
+
+    def _pdf_error_code(self, payload: dict[str, Any]) -> str | None:
+        pdf_report = self._stage_report(payload, "notation_generation").get("pdf")
+        if isinstance(pdf_report, dict) and pdf_report.get("status") == "failed":
+            return ErrorCode.PDF_EXPORT_FAILED.value
+        return None
+
+    def _find_export(self, job: TranscriptionJob, export_type: ExportFileType) -> ExportFile | None:
+        return next((export for export in job.export_files if export.type == export_type), None)
+
+    def _storage_key(
+        self,
+        artifact_refs: dict[ArtifactType, ArtifactRef],
+        artifact_type: ArtifactType,
+    ) -> str | None:
+        ref = artifact_refs.get(artifact_type)
+        return ref.storage_key if ref else None
+
+    def _float_or_none(self, value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None

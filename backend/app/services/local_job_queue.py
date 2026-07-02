@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
 from threading import Lock
-from typing import Callable
+from typing import Callable, Protocol
 
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -12,10 +12,24 @@ from app.core.errors import ApiErrorException, ErrorCode, get_error_definition
 from app.db.session import SessionLocal
 from app.models import TranscriptionJob
 from app.models.enums import JobStatus, PipelineStage
-from app.services.local_pipeline_runner import LocalMockPipelineRunner, LocalPipelineRunnerError
+from app.services.local_pipeline_runner import LocalPipelineRunResult, LocalPipelineRunnerError
+from app.services.pipeline_service import PipelineServiceRunner
 
 SessionFactory = Callable[[], Session]
-RunnerFactory = Callable[[], LocalMockPipelineRunner]
+
+
+class LocalJobRunner(Protocol):
+    def run(
+        self,
+        db: Session,
+        *,
+        job_id: str,
+        pipeline_config_id: str | None = None,
+    ) -> LocalPipelineRunResult:
+        raise NotImplementedError
+
+
+RunnerFactory = Callable[[], LocalJobRunner]
 
 _DEFAULT_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="groovescribe-local-job")
 
@@ -31,7 +45,7 @@ class LocalJobQueue:
     ) -> None:
         self.settings = settings or get_settings()
         self.session_factory = session_factory or SessionLocal
-        self.runner_factory = runner_factory or (lambda: LocalMockPipelineRunner(settings=self.settings))
+        self.runner_factory = runner_factory or (lambda: PipelineServiceRunner(settings=self.settings))
         self.executor = executor or _DEFAULT_EXECUTOR
         self._futures: list[Future[object]] = []
         self._lock = Lock()
