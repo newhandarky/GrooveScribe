@@ -56,6 +56,7 @@ def test_local_job_queue_runs_mock_pipeline_and_writes_exports(tmp_path: Path) -
 
     queue.enqueue_transcription("job-local")
     queue.wait_for_all(timeout=5)
+    assert queue._futures == []
 
     with session_factory() as session:
         job = session.scalar(select(TranscriptionJob).where(TranscriptionJob.id == "job-local"))
@@ -96,6 +97,7 @@ def test_local_job_queue_marks_runner_failure_as_failed(tmp_path: Path) -> None:
 
     queue.enqueue_transcription("job-fail")
     queue.wait_for_all(timeout=5)
+    assert queue._futures == []
 
     with session_factory() as session:
         job = session.scalar(select(TranscriptionJob).where(TranscriptionJob.id == "job-fail"))

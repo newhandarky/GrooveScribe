@@ -20,14 +20,15 @@ if str(BACKEND_ROOT) not in sys.path:
 from app.core.config import Settings  # noqa: E402
 from app.core.errors import ApiErrorException  # noqa: E402
 from app.services.internal_job_detail_service import InternalJobDetailService  # noqa: E402
+from app.services.internal_snapshot_redaction import redact_pipeline_snapshot  # noqa: E402
 from app.storage.local import LocalStorageAdapter  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     settings = Settings()
-    database_url = args.database_url or settings.database_url
-    storage_root = args.storage_root or settings.storage_root
+    database_url = args.database_url or settings.resolved_database_url
+    storage_root = args.storage_root or settings.resolved_storage_root
 
     engine = create_engine(database_url, pool_pre_ping=True)
     session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -55,7 +56,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    print(_to_json(snapshot, pretty=args.pretty))
+    output = snapshot if args.raw else redact_pipeline_snapshot(snapshot)
+    print(_to_json(output, pretty=args.pretty))
     return 0
 
 
@@ -67,6 +69,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--database-url", help="Override backend database URL. Defaults to backend Settings.")
     parser.add_argument("--storage-root", help="Override storage root. Defaults to backend Settings.")
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+    parser.add_argument("--raw", action="store_true", help="Print unredacted internal debug fields.")
     return parser.parse_args(argv)
 
 

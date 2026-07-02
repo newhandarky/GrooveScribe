@@ -50,7 +50,11 @@ class Settings(BaseSettings):
     )
     pipeline_adtof_threshold: float = 0.5
     pipeline_adtof_timeout_seconds: int = 1800
-    pipeline_pdf_renderer: str | None = None
+    pipeline_pdf_renderer: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("PIPELINE_PDF_RENDERER", "GROOVESCRIBE_PDF_RENDERER"),
+    )
+    runtime_preflight_timeout_seconds: int = 30
     upload_max_size_bytes: int = 100 * 1024 * 1024
     upload_max_duration_seconds: int = 10 * 60
     upload_metadata_timeout_seconds: int = 5
@@ -73,17 +77,37 @@ class Settings(BaseSettings):
     def normalized_job_queue_backend(self) -> str:
         return self.job_queue_backend.lower().strip()
 
+    @property
+    def resolved_storage_root(self) -> str:
+        return str(self._resolve_local_path(self.storage_root))
+
+    @property
+    def resolved_database_url(self) -> str:
+        if not self.database_url.startswith("sqlite"):
+            return self.database_url
+        path_part = self._sqlite_path_part()
+        if path_part is None or path_part == ":memory:":
+            return self.database_url
+        scheme = self.database_url.split(":///", maxsplit=1)[0]
+        return f"{scheme}:///{self._resolve_local_path(path_part)}"
+
     def ensure_local_app_data(self) -> None:
-        Path(self.storage_root).expanduser().resolve().mkdir(parents=True, exist_ok=True)
+        Path(self.resolved_storage_root).mkdir(parents=True, exist_ok=True)
         if self.database_url.startswith("sqlite"):
             path_part = self._sqlite_path_part()
             if path_part and path_part != ":memory:":
-                Path(path_part).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+                self._resolve_local_path(path_part).parent.mkdir(parents=True, exist_ok=True)
 
     def _sqlite_path_part(self) -> str | None:
         if ":///" not in self.database_url:
             return None
         return self.database_url.split(":///", maxsplit=1)[1]
+
+    def _resolve_local_path(self, value: str) -> Path:
+        path = Path(value).expanduser()
+        if path.is_absolute():
+            return path.resolve()
+        return (_REPO_ROOT / path).resolve()
 
 
 @lru_cache

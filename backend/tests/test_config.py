@@ -3,6 +3,9 @@ from pathlib import Path
 from app.core.config import Settings
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
 def test_settings_default_to_local_first_backend(monkeypatch) -> None:
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("JOB_QUEUE_BACKEND", raising=False)
@@ -12,8 +15,10 @@ def test_settings_default_to_local_first_backend(monkeypatch) -> None:
     settings = Settings()
 
     assert settings.database_url == "sqlite+pysqlite:///./storage/local/groovescribe.db"
+    assert settings.resolved_database_url == f"sqlite+pysqlite:///{REPO_ROOT / 'storage/local/groovescribe.db'}"
     assert settings.normalized_job_queue_backend == "local"
     assert settings.storage_root == "./storage/local"
+    assert settings.resolved_storage_root == str(REPO_ROOT / "storage/local")
     assert settings.ai_python_path.endswith(".venv-ai/bin/python")
     assert settings.pipeline_mock_ai is True
     assert settings.pipeline_export_pdf is True
@@ -24,6 +29,7 @@ def test_settings_default_to_local_first_backend(monkeypatch) -> None:
     assert settings.pipeline_adtof_command_template is None
     assert settings.pipeline_adtof_device == "cpu"
     assert settings.pipeline_adtof_threshold == 0.5
+    assert settings.runtime_preflight_timeout_seconds == 30
 
 
 def test_settings_env_override_preserves_server_mode_options(monkeypatch) -> None:
@@ -39,6 +45,7 @@ def test_settings_env_override_preserves_server_mode_options(monkeypatch) -> Non
     settings = Settings()
 
     assert settings.database_url == "postgresql+psycopg://user:pass@localhost:5432/groovescribe"
+    assert settings.resolved_database_url == "postgresql+psycopg://user:pass@localhost:5432/groovescribe"
     assert settings.normalized_job_queue_backend == "celery"
     assert settings.ai_python_path == "/opt/groovescribe-ai/bin/python"
     assert settings.pipeline_demucs_device == "cpu"
@@ -56,3 +63,15 @@ def test_ensure_local_app_data_creates_storage_and_sqlite_parent(tmp_path: Path)
 
     assert Path(settings.storage_root).exists()
     assert db_path.parent.exists()
+
+
+def test_relative_local_paths_are_resolved_from_repo_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    settings = Settings(
+        database_url="sqlite+pysqlite:///./storage/local/groovescribe.db",
+        storage_root="./storage/local",
+    )
+
+    assert settings.resolved_storage_root == str(REPO_ROOT / "storage/local")
+    assert settings.resolved_database_url == f"sqlite+pysqlite:///{REPO_ROOT / 'storage/local/groovescribe.db'}"

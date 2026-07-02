@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
 from threading import Lock
@@ -32,6 +33,7 @@ class LocalJobRunner(Protocol):
 RunnerFactory = Callable[[], LocalJobRunner]
 
 _DEFAULT_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="groovescribe-local-job")
+_logger = logging.getLogger("groovescribe.local_job_queue")
 
 
 class LocalJobQueue:
@@ -59,6 +61,7 @@ class LocalJobQueue:
             raise ApiErrorException(ErrorCode.QUEUE_ENQUEUE_FAILED) from exc
         with self._lock:
             self._futures.append(future)
+        future.add_done_callback(self._forget_future)
 
     def wait_for_all(self, *, timeout: float | None = None) -> None:
         with self._lock:
@@ -75,6 +78,17 @@ class LocalJobQueue:
                 db.rollback()
                 self._mark_failed(db, job_id, exc)
                 db.commit()
+                _logger.warning(
+                    "local job failed: job_id=%s error_code=%s error_stage=%s",
+                    job_id,
+                    getattr(exc, "error_code", ErrorCode.PIPELINE_FAILED),
+                    getattr(exc, "error_stage", PipelineStage.FAILED.value),
+                )
+
+    def _forget_future(self, future: Future[object]) -> None:
+        with self._lock:
+            if future in self._futures:
+                self._futures.remove(future)
 
     def _mark_failed(self, db: Session, job_id: str, exc: Exception) -> None:
         job = db.get(TranscriptionJob, job_id)

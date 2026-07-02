@@ -25,10 +25,14 @@ PYTHON_PACKAGES = [
     "celery",
 ]
 COMMANDS = ["ffmpeg", "musescore", "mscore", "MuseScore"]
+DEMUCS_DEVICE_ENV = "GROOVESCRIBE_DEMUCS_DEVICE"
 ADTOF_TEMPLATE_ENV = "GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE"
 ADTOF_CHECKPOINT_ENV = "GROOVESCRIBE_ADTOF_CHECKPOINT"
+ADTOF_DEVICE_ENV = "GROOVESCRIBE_ADTOF_DEVICE"
+ADTOF_THRESHOLD_ENV = "GROOVESCRIBE_ADTOF_THRESHOLD"
 ADTOF_VERIFY_INPUT_ENV = "GROOVESCRIBE_ADTOF_VERIFY_INPUT"
 ADTOF_VERIFY_OUTPUT_DIR_ENV = "GROOVESCRIBE_ADTOF_VERIFY_OUTPUT_DIR"
+PDF_RENDERER_ENV = "GROOVESCRIBE_PDF_RENDERER"
 DEFAULT_ADTOF_TEMPLATE = (
     f"{sys.executable} -m adtof transcribe --input {{input}} --output {{output}} "
     "--device {device} --threshold {threshold}"
@@ -36,20 +40,26 @@ DEFAULT_ADTOF_TEMPLATE = (
 
 
 def main() -> int:
+    demucs_device = os.environ.get(DEMUCS_DEVICE_ENV, "auto")
     adtof_template = os.environ.get(ADTOF_TEMPLATE_ENV)
     adtof_checkpoint = os.environ.get(ADTOF_CHECKPOINT_ENV)
+    adtof_device = os.environ.get(ADTOF_DEVICE_ENV, "cpu")
+    adtof_threshold = os.environ.get(ADTOF_THRESHOLD_ENV, "0.5")
     adtof_verify_input = os.environ.get(ADTOF_VERIFY_INPUT_ENV)
     adtof_verify_output_dir = os.environ.get(ADTOF_VERIFY_OUTPUT_DIR_ENV)
+    pdf_renderer = os.environ.get(PDF_RENDERER_ENV)
     command_statuses = {name: _command_status(name) for name in COMMANDS}
     package_statuses = {name: _package_status(name) for name in PYTHON_PACKAGES}
-    demucs_check = _demucs_runtime_check(package_statuses)
+    demucs_check = _demucs_runtime_check(package_statuses, device=demucs_device)
     adtof_check = _adtof_runtime_check(
         adtof_template,
         adtof_checkpoint,
+        device=adtof_device,
+        threshold=adtof_threshold,
         verify_input=adtof_verify_input,
         verify_output_dir=adtof_verify_output_dir,
     )
-    musescore_check = _musescore_runtime_check(command_statuses)
+    musescore_check = _musescore_runtime_check(command_statuses, configured_renderer=pdf_renderer)
     ffmpeg_ready = command_statuses["ffmpeg"]["available"]
     true_pipeline_missing = _true_pipeline_missing(
         ffmpeg_ready=ffmpeg_ready,
@@ -67,8 +77,12 @@ def main() -> int:
         "environment": {
             ADTOF_TEMPLATE_ENV: _redact_empty(adtof_template),
             ADTOF_CHECKPOINT_ENV: _redact_empty(adtof_checkpoint),
+            DEMUCS_DEVICE_ENV: demucs_device,
+            ADTOF_DEVICE_ENV: adtof_device,
+            ADTOF_THRESHOLD_ENV: adtof_threshold,
             ADTOF_VERIFY_INPUT_ENV: _redact_empty(adtof_verify_input),
             ADTOF_VERIFY_OUTPUT_DIR_ENV: _redact_empty(adtof_verify_output_dir),
+            PDF_RENDERER_ENV: _redact_empty(pdf_renderer),
         },
         "runtime_checks": {
             "ffmpeg": {"ready": ffmpeg_ready},
@@ -145,12 +159,13 @@ def _package_status(name: str) -> dict:
     return {"available": available, "version": version}
 
 
-def _demucs_runtime_check(package_statuses: dict[str, dict]) -> dict:
+def _demucs_runtime_check(package_statuses: dict[str, dict], *, device: str) -> dict:
     command_probe = _run_probe([sys.executable, "-m", "demucs", "--help"], timeout=20)
     return {
         "ready": package_statuses["demucs"]["available"] and command_probe["exit_code"] == 0,
         "package": package_statuses["demucs"],
         "command": [sys.executable, "-m", "demucs", "--help"],
+        "device": device,
         "command_probe": command_probe,
     }
 
@@ -159,6 +174,8 @@ def _adtof_runtime_check(
     command_template: str | None,
     checkpoint: str | None,
     *,
+    device: str = "cpu",
+    threshold: str = "0.5",
     verify_input: str | None = None,
     verify_output_dir: str | None = None,
 ) -> dict:
@@ -171,6 +188,8 @@ def _adtof_runtime_check(
         input_path=Path("/tmp/groovescribe-stems/drums.wav"),
         output_path=Path("/tmp/groovescribe-midi/raw_drum.mid"),
         checkpoint=checkpoint,
+        device=device,
+        threshold=threshold,
     )
     executable_check = _command_or_module_available(example_command)
     module_status = _module_status("adtof")
@@ -181,6 +200,8 @@ def _adtof_runtime_check(
         checkpoint=checkpoint,
         verify_input=verify_input,
         verify_output_dir=verify_output_dir,
+        device=device,
+        threshold=threshold,
     )
     runtime_verified = output_verification["verified"]
     ready = runtime_verified
@@ -192,6 +213,8 @@ def _adtof_runtime_check(
         "runtime_verified": runtime_verified,
         "output_verified": output_verification["verified"],
         "configured": template_configured,
+        "device": device,
+        "threshold": threshold,
         "configuration_source": (
             ADTOF_TEMPLATE_ENV if template_configured else "default_adapter_template"
         ),
@@ -216,14 +239,17 @@ def _adtof_runtime_check(
     }
 
 
-def _musescore_runtime_check(command_statuses: dict[str, dict]) -> dict:
+def _musescore_runtime_check(command_statuses: dict[str, dict], *, configured_renderer: str | None) -> dict:
     available = [
         name for name in ("musescore", "mscore", "MuseScore") if command_statuses[name]["available"]
     ]
+    configured_available = bool(configured_renderer and Path(configured_renderer).expanduser().exists())
     return {
-        "ready": bool(available),
+        "ready": configured_available or bool(available),
         "optional_for_phase1": True,
         "available_candidates": available,
+        "configured_renderer": configured_renderer,
+        "configured_renderer_available": configured_available,
         "note": (
             "MusicXML generation can pass without MuseScore; "
             "PDF export requires one candidate in PATH."
@@ -293,12 +319,14 @@ def _format_adtof_template(
     input_path: Path,
     output_path: Path,
     checkpoint: str | None,
+    device: str = "cpu",
+    threshold: str = "0.5",
 ) -> list[str]:
     replacements = {
         "input": str(input_path),
         "output": str(output_path),
-        "device": "cpu",
-        "threshold": "0.5",
+        "device": device,
+        "threshold": threshold,
         "checkpoint": checkpoint or "",
     }
     return [part.format(**replacements) for part in parts if part.format(**replacements)]
@@ -310,6 +338,8 @@ def _verify_adtof_output(
     checkpoint: str | None,
     verify_input: str | None,
     verify_output_dir: str | None,
+    device: str = "cpu",
+    threshold: str = "0.5",
 ) -> dict:
     if not verify_input:
         return {
@@ -336,6 +366,8 @@ def _verify_adtof_output(
             input_path=input_path,
             output_path=raw_midi_path,
             checkpoint=checkpoint,
+            device=device,
+            threshold=threshold,
         )
         probe = _run_probe(command, timeout=300)
         if probe["exit_code"] != 0:

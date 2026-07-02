@@ -134,6 +134,11 @@ def _write_failed_pipeline_output(output_dir: Path) -> None:
     )
 
 
+def _read_storage_json(storage: LocalStorageAdapter, storage_key: str) -> dict:
+    with storage.open_reader(storage_key) as reader:
+        return json.loads(reader.read().decode("utf-8"))
+
+
 def test_pipeline_service_builds_subprocess_command(tmp_path: Path) -> None:
     settings = _settings(
         tmp_path,
@@ -222,6 +227,9 @@ def test_pipeline_service_runs_fake_subprocess_and_writes_metadata(tmp_path: Pat
         assert storage.exists("jobs/job-pipeline/midi/processed_drum.mid")
         assert storage.exists("jobs/job-pipeline/notation/score.musicxml")
         assert storage.exists("jobs/job-pipeline/exports/score.pdf")
+        log_payload = _read_storage_json(storage, "jobs/job-pipeline/logs/pipeline.json")
+        assert log_payload["artifacts"]["musicxml"] == "jobs/job-pipeline/notation/score.musicxml"
+        assert str(tmp_path) not in json.dumps(log_payload)
 
 
 def test_pipeline_service_allows_completed_job_when_optional_pdf_is_missing(tmp_path: Path) -> None:
@@ -279,3 +287,147 @@ def test_pipeline_service_maps_failed_stage_to_backend_error(tmp_path: Path) -> 
             assert exc.internal_error_ref == "jobs/job-failed/logs/pipeline.json"
         else:
             raise AssertionError("expected LocalPipelineRunnerError")
+
+
+def test_pipeline_service_rejects_artifact_path_outside_workspace(tmp_path: Path) -> None:
+    session_factory = _session_factory(tmp_path)
+    settings = _settings(tmp_path)
+    storage = LocalStorageAdapter(settings.storage_root)
+    _seed_job(session_factory, storage, "job-outside")
+    outside_musicxml = tmp_path / "outside.musicxml"
+    outside_musicxml.write_text("<score-partwise />", encoding="utf-8")
+
+    def fake_process(command, **_kwargs):
+        output_dir = Path(command[command.index("--output-dir") + 1])
+        _write_completed_pipeline_output(output_dir)
+        log_path = output_dir / "logs" / "pipeline.json"
+        payload = json.loads(log_path.read_text(encoding="utf-8"))
+        payload["artifacts"]["musicxml"] = str(outside_musicxml)
+        log_path.write_text(json.dumps(payload), encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout='{"status": "completed"}', stderr="")
+
+    runner = PipelineServiceRunner(settings=settings, storage=storage, process_runner=fake_process)
+
+    with session_factory() as session:
+        try:
+            runner.run(session, job_id="job-outside")
+        except LocalPipelineRunnerError as exc:
+            assert exc.error_code == "ARTIFACT_INVALID"
+            assert exc.error_stage == PipelineStage.NOTATION_GENERATION.value
+            assert exc.internal_error_ref == "jobs/job-outside/logs/pipeline.json"
+        else:
+            raise AssertionError("expected LocalPipelineRunnerError")
+
+    log_payload = _read_storage_json(storage, "jobs/job-outside/logs/pipeline.json")
+    assert log_payload["error"]["code"] == "ARTIFACT_INVALID"
+    assert str(outside_musicxml) not in json.dumps(log_payload)
+
+
+def test_pipeline_service_maps_missing_required_artifact_to_producer_stage(tmp_path: Path) -> None:
+    session_factory = _session_factory(tmp_path)
+    settings = _settings(tmp_path)
+    storage = LocalStorageAdapter(settings.storage_root)
+    _seed_job(session_factory, storage, "job-missing-musicxml")
+
+    def fake_process(command, **_kwargs):
+        output_dir = Path(command[command.index("--output-dir") + 1])
+        _write_completed_pipeline_output(output_dir)
+        log_path = output_dir / "logs" / "pipeline.json"
+        payload = json.loads(log_path.read_text(encoding="utf-8"))
+        del payload["artifacts"]["musicxml"]
+        log_path.write_text(json.dumps(payload), encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout='{"status": "completed"}', stderr="")
+
+    runner = PipelineServiceRunner(settings=settings, storage=storage, process_runner=fake_process)
+
+    with session_factory() as session:
+        try:
+            runner.run(session, job_id="job-missing-musicxml")
+        except LocalPipelineRunnerError as exc:
+            assert exc.error_code == "ARTIFACT_NOT_FOUND"
+            assert exc.error_stage == PipelineStage.NOTATION_GENERATION.value
+            assert exc.internal_error_ref == "jobs/job-missing-musicxml/logs/pipeline.json"
+        else:
+            raise AssertionError("expected LocalPipelineRunnerError")
+
+
+def test_pipeline_service_writes_failure_log_for_timeout(tmp_path: Path) -> None:
+    session_factory = _session_factory(tmp_path)
+    settings = _settings(tmp_path)
+    storage = LocalStorageAdapter(settings.storage_root)
+    _seed_job(session_factory, storage, "job-timeout")
+
+    def fake_process(command, **_kwargs):
+        raise subprocess.TimeoutExpired(command, timeout=123)
+
+    runner = PipelineServiceRunner(settings=settings, storage=storage, process_runner=fake_process)
+
+    with session_factory() as session:
+        try:
+            runner.run(session, job_id="job-timeout")
+        except LocalPipelineRunnerError as exc:
+            assert exc.error_code == "WORKER_TIMEOUT"
+            assert exc.internal_error_ref == "jobs/job-timeout/logs/pipeline.json"
+        else:
+            raise AssertionError("expected LocalPipelineRunnerError")
+
+    log_payload = _read_storage_json(storage, "jobs/job-timeout/logs/pipeline.json")
+    encoded = json.dumps(log_payload)
+    assert log_payload["error"]["code"] == "WORKER_TIMEOUT"
+    assert "stdout" not in encoded
+    assert "stderr" not in encoded
+    assert str(tmp_path) not in encoded
+
+
+def test_pipeline_service_writes_failure_log_for_missing_ai_python(tmp_path: Path) -> None:
+    session_factory = _session_factory(tmp_path)
+    settings = _settings(tmp_path)
+    storage = LocalStorageAdapter(settings.storage_root)
+    _seed_job(session_factory, storage, "job-missing-python")
+
+    def fake_process(*_args, **_kwargs):
+        raise FileNotFoundError("python missing")
+
+    runner = PipelineServiceRunner(settings=settings, storage=storage, process_runner=fake_process)
+
+    with session_factory() as session:
+        try:
+            runner.run(session, job_id="job-missing-python")
+        except LocalPipelineRunnerError as exc:
+            assert exc.error_code == "PIPELINE_FAILED"
+            assert exc.internal_error_ref == "jobs/job-missing-python/logs/pipeline.json"
+        else:
+            raise AssertionError("expected LocalPipelineRunnerError")
+
+    log_payload = _read_storage_json(storage, "jobs/job-missing-python/logs/pipeline.json")
+    assert log_payload["error"]["code"] == "PIPELINE_FAILED"
+
+
+def test_pipeline_service_writes_failure_log_for_invalid_pipeline_json(tmp_path: Path) -> None:
+    session_factory = _session_factory(tmp_path)
+    settings = _settings(tmp_path)
+    storage = LocalStorageAdapter(settings.storage_root)
+    _seed_job(session_factory, storage, "job-invalid-json")
+
+    def fake_process(command, **_kwargs):
+        output_dir = Path(command[command.index("--output-dir") + 1])
+        (output_dir / "logs").mkdir(parents=True, exist_ok=True)
+        (output_dir / "logs" / "pipeline.json").write_text("{not-json", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="Traceback at /tmp/private")
+
+    runner = PipelineServiceRunner(settings=settings, storage=storage, process_runner=fake_process)
+
+    with session_factory() as session:
+        try:
+            runner.run(session, job_id="job-invalid-json")
+        except LocalPipelineRunnerError as exc:
+            assert exc.error_code == "PIPELINE_FAILED"
+            assert exc.internal_error_ref == "jobs/job-invalid-json/logs/pipeline.json"
+        else:
+            raise AssertionError("expected LocalPipelineRunnerError")
+
+    log_payload = _read_storage_json(storage, "jobs/job-invalid-json/logs/pipeline.json")
+    encoded = json.dumps(log_payload)
+    assert log_payload["error"]["reason"] == "invalid_pipeline_json"
+    assert "Traceback" not in encoded
+    assert "/tmp/private" not in encoded

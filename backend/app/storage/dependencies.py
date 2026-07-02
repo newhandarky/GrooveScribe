@@ -8,4 +8,4 @@ from app.storage.local import LocalStorageAdapter
 @lru_cache
 def get_storage_adapter() -> StorageAdapter:
     settings = get_settings()
-    return LocalStorageAdapter(settings.storage_root)
+    return LocalStorageAdapter(settings.resolved_storage_root)

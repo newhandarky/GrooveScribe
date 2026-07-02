@@ -206,3 +206,64 @@ def test_read_pipeline_snapshot_cli_outputs_missing_pipeline_log_state(tmp_path,
     assert body["stage_reports"] == []
     assert body["warnings"] == []
     assert body["artifacts"] == {"original_audio": "jobs/job-no-log/original/demo.wav"}
+
+
+def test_read_pipeline_snapshot_cli_redacts_by_default_and_raw_is_explicit(tmp_path, capsys) -> None:
+    module = _load_script_module()
+    database_url = _database_url(tmp_path)
+    storage = LocalStorageAdapter(tmp_path / "storage")
+    with _prepare_db(database_url) as session:
+        _create_job(session, job_id="job-redacted", status=JobStatus.FAILED, stage=PipelineStage.FAILED, with_outputs=False)
+    _write_pipeline_log(
+        storage,
+        "job-redacted",
+        {
+            "job_id": "job-redacted",
+            "stage_reports": [
+                {
+                    "name": "drum_transcription",
+                    "status": "failed",
+                    "report": {
+                        "command_template": "/Users/dev/private/adtof --input {input}",
+                        "stderr": "Traceback at /tmp/private",
+                    },
+                    "error": {
+                        "code": "DRUM_TRANSCRIPTION_FAILED",
+                        "message": "/Users/dev/private/adtof failed",
+                    },
+                }
+            ],
+        },
+    )
+
+    default_exit_code = module.main(
+        [
+            "--job-id",
+            "job-redacted",
+            "--database-url",
+            database_url,
+            "--storage-root",
+            str(storage.root),
+        ]
+    )
+    default_output = capsys.readouterr().out
+
+    raw_exit_code = module.main(
+        [
+            "--job-id",
+            "job-redacted",
+            "--database-url",
+            database_url,
+            "--storage-root",
+            str(storage.root),
+            "--raw",
+        ]
+    )
+    raw_output = capsys.readouterr().out
+
+    assert default_exit_code == 0
+    assert raw_exit_code == 0
+    assert "/Users/dev/private" not in default_output
+    assert "Traceback" not in default_output
+    assert "[redacted]" in default_output
+    assert "/Users/dev/private" in raw_output

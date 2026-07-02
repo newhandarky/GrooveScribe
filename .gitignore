@@ -38,6 +38,7 @@ storage/local/*
 !storage/local/jobs/
 storage/local/jobs/*
 !storage/local/jobs/.gitkeep
+backend/storage/
 
 # Model/cache artifacts
 /models/

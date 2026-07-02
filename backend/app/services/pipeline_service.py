@@ -49,6 +49,29 @@ _REQUIRED_PIPELINE_ARTIFACTS = (
     "musicxml",
 )
 
+_ARTIFACT_TO_BACKEND_STAGE: dict[str, str] = {
+    "normalized_audio": PipelineStage.PREPROCESSING.value,
+    "drums_stem": PipelineStage.SOURCE_SEPARATION.value,
+    "raw_midi": PipelineStage.DRUM_TRANSCRIPTION.value,
+    "processed_midi": PipelineStage.MIDI_POST_PROCESSING.value,
+    "drum_events": PipelineStage.MIDI_POST_PROCESSING.value,
+    "musicxml": PipelineStage.NOTATION_GENERATION.value,
+    "pdf": PipelineStage.NOTATION_GENERATION.value,
+}
+
+_SENSITIVE_KEY_PARTS = (
+    "command",
+    "template",
+    "checkpoint",
+    "stderr",
+    "stdout",
+    "stack",
+    "traceback",
+    "token",
+    "secret",
+    "env",
+)
+
 _AI_STAGE_TO_BACKEND_STAGE: dict[str, str] = {
     "audio_preprocessing": PipelineStage.PREPROCESSING.value,
     "source_separation": PipelineStage.SOURCE_SEPARATION.value,
@@ -84,7 +107,7 @@ class PipelineServiceRunner:
         pipeline_script_path: Path | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self.storage = storage or LocalStorageAdapter(self.settings.storage_root)
+        self.storage = storage or LocalStorageAdapter(self.settings.resolved_storage_root)
         self.process_runner = process_runner or subprocess.run
         self.pipeline_script_path = pipeline_script_path or _PIPELINE_SCRIPT
 
@@ -109,8 +132,40 @@ class PipelineServiceRunner:
             output_dir=output_dir,
             title=job.title or "GrooveScribe Drum Draft",
         )
-        process = self._run_process(command)
-        payload = self._read_pipeline_payload(output_dir, process)
+        try:
+            process = self._run_process(command)
+        except LocalPipelineRunnerError as exc:
+            log_ref = self._store_pipeline_failure_log(
+                job.id,
+                output_dir,
+                payload={},
+                process=None,
+                pipeline_config_id=pipeline_config_id,
+                error_code=exc.error_code,
+                error_stage=exc.error_stage,
+            )
+            exc.internal_error_ref = log_ref.storage_key
+            raise
+
+        try:
+            payload = self._read_pipeline_payload(output_dir, process)
+        except json.JSONDecodeError as exc:
+            log_ref = self._store_pipeline_failure_log(
+                job.id,
+                output_dir,
+                payload={},
+                process=process,
+                pipeline_config_id=pipeline_config_id,
+                error_code=ErrorCode.PIPELINE_FAILED.value,
+                error_stage=PipelineStage.PREPROCESSING.value,
+                failure_reason="invalid_pipeline_json",
+            )
+            raise LocalPipelineRunnerError(
+                error_code=ErrorCode.PIPELINE_FAILED,
+                error_stage=PipelineStage.PREPROCESSING.value,
+                internal_error_ref=log_ref.storage_key,
+            ) from exc
+
         log_ref = self._store_pipeline_log(job.id, output_dir, payload, process, pipeline_config_id)
 
         if process.returncode != 0 or payload.get("status") == "failed":
@@ -121,8 +176,30 @@ class PipelineServiceRunner:
                 internal_error_ref=log_ref.storage_key,
             )
 
-        artifact_refs = self._store_artifacts(job, payload)
+        try:
+            artifact_refs = self._store_artifacts(job, payload, output_dir, log_ref.storage_key)
+        except LocalPipelineRunnerError as exc:
+            exc.internal_error_ref = exc.internal_error_ref or log_ref.storage_key
+            self._store_pipeline_failure_log(
+                job.id,
+                output_dir,
+                payload=payload,
+                process=process,
+                pipeline_config_id=pipeline_config_id,
+                error_code=exc.error_code,
+                error_stage=exc.error_stage,
+                failure_reason=exc.error_code,
+            )
+            raise
         self._upsert_metadata(db, job, payload, artifact_refs)
+        log_ref = self._store_pipeline_log(
+            job.id,
+            output_dir,
+            payload,
+            process,
+            pipeline_config_id,
+            artifact_storage_keys=self._artifact_storage_keys(artifact_refs),
+        )
         self._mark_completed(job, payload, log_ref.storage_key)
         db.flush()
         return LocalPipelineRunResult(job_id=job.id, pipeline_log_storage_key=log_ref.storage_key)
@@ -183,7 +260,7 @@ class PipelineServiceRunner:
         return job
 
     def _workspace_path(self, job_id: str) -> Path:
-        return Path(self.settings.storage_root).expanduser().resolve() / "jobs" / job_id / "pipeline-work"
+        return Path(self.settings.resolved_storage_root) / "jobs" / job_id / "pipeline-work"
 
     def _prepare_input_file(self, job: TranscriptionJob, workspace: Path) -> Path:
         input_dir = workspace / "input"
@@ -271,46 +348,98 @@ class PipelineServiceRunner:
         payload: dict[str, Any],
         process: PipelineProcessResult,
         pipeline_config_id: str | None,
+        *,
+        artifact_storage_keys: dict[str, str] | None = None,
     ) -> ArtifactRef:
-        log_path = output_dir / "logs" / "pipeline.json"
-        if log_path.exists():
-            return self.storage.put_file(
-                log_path,
-                build_job_artifact_key(job_id, ArtifactType.PIPELINE_LOG),
-                CONTENT_TYPE_BY_ARTIFACT_TYPE[ArtifactType.PIPELINE_LOG],
-            )
-        fallback_path = output_dir / "logs" / "pipeline.json"
-        fallback_path.parent.mkdir(parents=True, exist_ok=True)
-        fallback_payload = {
-            **payload,
-            "runner": "backend.pipeline_service_subprocess",
-            "pipeline_config_id": pipeline_config_id,
-            "subprocess": {
-                "command": process.command,
-                "returncode": process.returncode,
-                "stdout": process.stdout,
-                "stderr": process.stderr,
-            },
-        }
-        fallback_path.write_text(json.dumps(fallback_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        log_path = self._write_sanitized_pipeline_log(
+            output_dir=output_dir,
+            payload=payload,
+            process=process,
+            pipeline_config_id=pipeline_config_id,
+            artifact_storage_keys=artifact_storage_keys,
+        )
         return self.storage.put_file(
-            fallback_path,
+            log_path,
             build_job_artifact_key(job_id, ArtifactType.PIPELINE_LOG),
             CONTENT_TYPE_BY_ARTIFACT_TYPE[ArtifactType.PIPELINE_LOG],
         )
+
+    def _store_pipeline_failure_log(
+        self,
+        job_id: str,
+        output_dir: Path,
+        *,
+        payload: dict[str, Any],
+        process: PipelineProcessResult | None,
+        pipeline_config_id: str | None,
+        error_code: str,
+        error_stage: str,
+        failure_reason: str | None = None,
+    ) -> ArtifactRef:
+        failure_payload = {
+            **payload,
+            "status": "failed",
+            "runner": "backend.pipeline_service_subprocess",
+            "pipeline_config_id": pipeline_config_id,
+            "error": {
+                "code": error_code,
+                "stage": error_stage,
+                "reason": failure_reason or error_code,
+            },
+        }
+        log_path = self._write_sanitized_pipeline_log(
+            output_dir=output_dir,
+            payload=failure_payload,
+            process=process,
+            pipeline_config_id=pipeline_config_id,
+        )
+        return self.storage.put_file(
+            log_path,
+            build_job_artifact_key(job_id, ArtifactType.PIPELINE_LOG),
+            CONTENT_TYPE_BY_ARTIFACT_TYPE[ArtifactType.PIPELINE_LOG],
+        )
+
+    def _write_sanitized_pipeline_log(
+        self,
+        *,
+        output_dir: Path,
+        payload: dict[str, Any],
+        process: PipelineProcessResult | None,
+        pipeline_config_id: str | None,
+        artifact_storage_keys: dict[str, str] | None = None,
+    ) -> Path:
+        log_path = output_dir / "logs" / "pipeline.json"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        sanitized_payload = self._sanitize_pipeline_payload(
+            payload,
+            artifact_storage_keys=artifact_storage_keys,
+        )
+        sanitized_payload["runner"] = "backend.pipeline_service_subprocess"
+        sanitized_payload["pipeline_config_id"] = pipeline_config_id
+        if process is not None:
+            sanitized_payload["subprocess"] = {
+                "returncode": process.returncode,
+                "executable": Path(process.command[0]).name if process.command else None,
+                "script": Path(process.command[1]).name if len(process.command) > 1 else None,
+            }
+        log_path.write_text(json.dumps(sanitized_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return log_path
 
     def _store_artifacts(
         self,
         job: TranscriptionJob,
         payload: dict[str, Any],
+        output_dir: Path,
+        pipeline_log_storage_key: str,
     ) -> dict[ArtifactType, ArtifactRef]:
-        artifact_paths = self._artifact_paths(payload)
+        artifact_paths = self._artifact_paths(payload, output_dir, pipeline_log_storage_key)
         refs: dict[ArtifactType, ArtifactRef] = {}
         for artifact_name in _REQUIRED_PIPELINE_ARTIFACTS:
             if artifact_name not in artifact_paths:
                 raise LocalPipelineRunnerError(
                     error_code=ErrorCode.ARTIFACT_NOT_FOUND,
-                    error_stage=PipelineStage.FAILED.value,
+                    error_stage=_ARTIFACT_TO_BACKEND_STAGE[artifact_name],
+                    internal_error_ref=pipeline_log_storage_key,
                 )
         for artifact_name, artifact_type in _PIPELINE_ARTIFACT_TYPES.items():
             path = artifact_paths.get(artifact_name)
@@ -323,16 +452,129 @@ class PipelineServiceRunner:
             )
         return refs
 
-    def _artifact_paths(self, payload: dict[str, Any]) -> dict[str, Path]:
+    def _artifact_paths(
+        self,
+        payload: dict[str, Any],
+        output_dir: Path,
+        pipeline_log_storage_key: str,
+    ) -> dict[str, Path]:
         raw_artifacts = payload.get("artifacts")
         if not isinstance(raw_artifacts, dict):
             return {}
         artifact_paths: dict[str, Path] = {}
         for name, value in raw_artifacts.items():
-            path = Path(str(value))
-            if path.exists() and path.is_file():
-                artifact_paths[str(name)] = path
+            artifact_name = str(name)
+            if artifact_name not in _PIPELINE_ARTIFACT_TYPES:
+                continue
+            path = self._validated_artifact_path(
+                artifact_name=artifact_name,
+                raw_value=value,
+                output_dir=output_dir,
+                pipeline_log_storage_key=pipeline_log_storage_key,
+            )
+            artifact_paths[artifact_name] = path
         return artifact_paths
+
+    def _validated_artifact_path(
+        self,
+        *,
+        artifact_name: str,
+        raw_value: Any,
+        output_dir: Path,
+        pipeline_log_storage_key: str,
+    ) -> Path:
+        output_root = output_dir.resolve()
+        raw_path = Path(str(raw_value))
+        path = raw_path if raw_path.is_absolute() else output_root / raw_path
+        resolved = path.resolve()
+        error_stage = _ARTIFACT_TO_BACKEND_STAGE[artifact_name]
+        if resolved != output_root and output_root not in resolved.parents:
+            raise LocalPipelineRunnerError(
+                error_code=ErrorCode.ARTIFACT_INVALID,
+                error_stage=error_stage,
+                internal_error_ref=pipeline_log_storage_key,
+            )
+        if not path.exists() or not path.is_file():
+            raise LocalPipelineRunnerError(
+                error_code=ErrorCode.ARTIFACT_NOT_FOUND,
+                error_stage=error_stage,
+                internal_error_ref=pipeline_log_storage_key,
+            )
+        if path.stat().st_size == 0:
+            raise LocalPipelineRunnerError(
+                error_code=ErrorCode.ARTIFACT_INVALID,
+                error_stage=error_stage,
+                internal_error_ref=pipeline_log_storage_key,
+            )
+        return resolved
+
+    def _artifact_storage_keys(self, artifact_refs: dict[ArtifactType, ArtifactRef]) -> dict[str, str]:
+        keys: dict[str, str] = {}
+        for artifact_name, artifact_type in _PIPELINE_ARTIFACT_TYPES.items():
+            ref = artifact_refs.get(artifact_type)
+            if ref:
+                keys[artifact_name] = ref.storage_key
+        return keys
+
+    def _sanitize_pipeline_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        artifact_storage_keys: dict[str, str] | None,
+    ) -> dict[str, Any]:
+        sanitized = self._sanitize_sensitive(payload)
+        if not isinstance(sanitized, dict):
+            return {}
+        sanitized["artifacts"] = artifact_storage_keys or self._sanitized_artifact_placeholders(payload)
+        sanitized.pop("input_path", None)
+        sanitized.pop("output_dir", None)
+        sanitized.pop("log_path", None)
+        return sanitized
+
+    def _sanitized_artifact_placeholders(self, payload: dict[str, Any]) -> dict[str, str]:
+        raw_artifacts = payload.get("artifacts")
+        if not isinstance(raw_artifacts, dict):
+            return {}
+        return {
+            str(name): "[redacted]"
+            for name in raw_artifacts
+            if str(name) in _PIPELINE_ARTIFACT_TYPES
+        }
+
+    def _sanitize_sensitive(self, value: Any, *, key: str = "") -> Any:
+        if self._is_sensitive_key(key):
+            return "[redacted]"
+        if isinstance(value, dict):
+            return {str(item_key): self._sanitize_sensitive(item, key=str(item_key)) for item_key, item in value.items()}
+        if isinstance(value, list):
+            return [self._sanitize_sensitive(item, key=key) for item in value]
+        if isinstance(value, tuple):
+            return [self._sanitize_sensitive(item, key=key) for item in value]
+        if isinstance(value, str):
+            return self._redact_local_text(value)
+        return value
+
+    def _is_sensitive_key(self, key: str) -> bool:
+        lowered = key.lower()
+        return any(part in lowered for part in _SENSITIVE_KEY_PARTS)
+
+    def _redact_local_text(self, value: str) -> str:
+        redacted = value
+        for source, target in (
+            (str(_REPO_ROOT), "<repo>"),
+            (str(Path.home()), "<home>"),
+            (self.settings.ai_python_path, "<ai_python>"),
+            (self.settings.resolved_storage_root, "<storage>"),
+        ):
+            if source:
+                redacted = redacted.replace(source, target)
+        for prefix in ("/Users/", "/tmp/", "/private/tmp/", "/var/folders/", "/private/var/"):
+            if redacted.startswith(prefix):
+                return "[redacted]"
+        lowered = redacted.lower()
+        if "traceback" in lowered or "stack trace" in lowered:
+            return "[redacted]"
+        return redacted
 
     def _upsert_metadata(
         self,
