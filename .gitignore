@@ -28,6 +28,9 @@ node_modules/
 .pnpm-store/
 frontend/dist/
 frontend/.vite/
+playwright-report/
+test-results/
+blob-report/
 
 # Logs
 *.log

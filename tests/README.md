@@ -52,3 +52,21 @@ PYTHONPATH=. "$PYTHON" scripts/run_true_ai_smoke_baseline.py \
 
 若 Demucs 或 ADTOF runtime 尚未 ready，保留 `manual_eval/manual_eval_template.csv`，不要填入假結果。
 可保存 `baseline.json` 的 `status=blocked` 與 `blocked_reason`，等 runtime ready 後再填分數。
+
+## Browser Smoke / Visual QA
+
+V1 mock browser smoke 使用 Playwright 啟動 localhost frontend，並在測試內 mock `/api/v1/*` response；不啟動 true-AI、不依賴 PDF renderer，也不寫入 repo-local storage / SQLite。
+
+首次執行或 Chromium browser cache 不存在時：
+
+```bash
+npx playwright install chromium
+```
+
+重跑 browser smoke：
+
+```bash
+npm run test:e2e
+```
+
+此 gate 覆蓋 desktop / mobile viewport、upload -> completed -> result page、MIDI / MusicXML download 可見、MusicXML preview/fallback 可見、PDF optional unavailable / failed 狀態，以及 rendered page 不暴露本機路徑、traceback、stdout/stderr、raw command 或 `command_template`。
