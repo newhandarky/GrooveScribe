@@ -38,4 +38,17 @@ PYTHONPATH=. "$PYTHON" scripts/check_ai_runtime.py
 PYTHONPATH=. "$PYTHON" scripts/run_local_pipeline.py --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav --output-dir /tmp/groovescribe-true-ai-run --demucs-device cpu --adtof-command-template "$GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE" --adtof-device cpu --adtof-threshold 0.5
 ```
 
+建立 true-AI artifact inspection baseline：
+
+```bash
+PYTHONPATH=. "$PYTHON" scripts/run_true_ai_smoke_baseline.py \
+  --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav \
+  --output-root /tmp/groovescribe-true-ai-baseline \
+  --demucs-device cpu \
+  --adtof-command-template "$GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE" \
+  --adtof-device cpu \
+  --adtof-threshold 0.5
+```
+
 若 Demucs 或 ADTOF runtime 尚未 ready，保留 `manual_eval/manual_eval_template.csv`，不要填入假結果。
+可保存 `baseline.json` 的 `status=blocked` 與 `blocked_reason`，等 runtime ready 後再填分數。

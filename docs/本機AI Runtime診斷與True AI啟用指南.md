@@ -140,6 +140,27 @@ RUN_TRUE_AI_SMOKE=1 .venv-ai/bin/python -m pytest tests/pipeline -k true_ai_smok
 - pipeline log 存在
 - PDF optional；PDF failed / unavailable 不阻塞 true-AI smoke
 
+## True AI Baseline Runner
+
+若要同時保存 runtime blocked reason、pipeline result 與 artifact inspection，可使用 baseline runner。它仍是 opt-in，不會讓一般 CI 必跑 true AI：
+
+```bash
+PYTHONPATH=. "$PYTHON" scripts/run_true_ai_smoke_baseline.py \
+  --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav \
+  --output-root /tmp/groovescribe-true-ai-baseline \
+  --demucs-device cpu \
+  --adtof-command-template "$GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE" \
+  --adtof-device cpu \
+  --adtof-threshold 0.5
+```
+
+行為：
+
+- preflight 若仍是 `degraded`，會寫出 `baseline.json`，`status=blocked`，並記錄 `blocked_reason`、`missing_requirements`、`checks.adtof.status_code` 摘要。
+- preflight 若 `true_ai_ready=true`，才執行不帶 `--mock-ai` 的 `run_local_pipeline.py`。
+- completed baseline 會記錄 raw / processed MIDI inspection、`drum_events.json` warnings、MusicXML / PDF artifact 狀態與 pipeline stage summary。
+- PDF 維持 optional；`pdf.status=unavailable` 不阻塞 MIDI / MusicXML baseline。
+
 ## Artifact Inspection
 
 true-AI smoke 完成後，先不要直接判定品質通過。請逐項檢查：
@@ -157,6 +178,16 @@ true-AI smoke 完成後，先不要直接判定品質通過。請逐項檢查：
 PYTHONPATH=. "$PYTHON" scripts/inspect_midi.py /path/to/raw_drum.mid
 PYTHONPATH=. "$PYTHON" scripts/inspect_midi.py /path/to/processed_drum.mid
 ```
+
+Baseline report 裡至少應包含：
+
+- `status`：`completed`、`blocked` 或 `failed`
+- `runtime`：AI Python、Demucs device、ADTOF template 是否設定、threshold、checkpoint 是否設定
+- `preflight`：mock / true AI readiness、missing requirements、ADTOF status code、verification event count
+- `artifacts`：normalized audio、drums stem、raw MIDI、processed MIDI、drum events、MusicXML、PDF、pipeline log
+- `inspection.raw_midi` 與 `inspection.processed_midi`：event count、note histogram、mapped drum counts
+- `inspection.drum_events`：processed drum counts、raw note histogram、warnings
+- `blocked_reason`：只有 blocked baseline 必填
 
 本機 storage cleanup 第一版只做 dry-run：
 

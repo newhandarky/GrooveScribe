@@ -136,6 +136,20 @@ RUN_TRUE_AI_SMOKE=1 .venv-ai/bin/python -m pytest tests/pipeline -k true_ai_smok
 
 這些 smoke 不屬於一般 CI 必跑條件；PDF 維持 optional，MIDI、MusicXML 與 pipeline log 是 true-AI smoke 的核心輸出。
 
+Artifact inspection baseline：
+
+```bash
+PYTHONPATH=. "$PYTHON" scripts/run_true_ai_smoke_baseline.py \
+  --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav \
+  --output-root /tmp/groovescribe-true-ai-baseline \
+  --demucs-device cpu \
+  --adtof-command-template "$GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE" \
+  --adtof-device cpu \
+  --adtof-threshold 0.5
+```
+
+此 command 會先跑 `scripts/check_ai_runtime.py`。若 true-AI runtime 還是 degraded，會寫出 `baseline.json` 並標記 `status=blocked`；若 ready，才會執行不帶 `--mock-ai` 的 local pipeline，並記錄 raw / processed MIDI inspection、MusicXML / PDF export 狀態與 pipeline warnings。
+
 ### PDF Export
 
 MuseScore CLI 已安裝於 `/opt/homebrew/bin/mscore`。PDF artifact smoke command：

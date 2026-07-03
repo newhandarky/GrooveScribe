@@ -14,6 +14,7 @@
 - `check_ai_runtime.py`：輸出本機 ffmpeg、Demucs、ADTOF command/template、MuseScore、Python package 可用性，並列出真 AI local pipeline 缺口。
 - `prepare_adtof_verify_input.py`：用 full mix fixture 執行 normalize + Demucs，產生 ADTOF verification 所需的 `drums.wav`；支援 `--dry-run`。
 - `inspect_midi.py`：讀 raw / processed MIDI，輸出 note histogram、mapped drum counts、event count 與 tempo/time signature。
+- `run_true_ai_smoke_baseline.py`：opt-in 執行 true-AI preflight / pipeline smoke，並輸出 `baseline.json`；runtime degraded 時保存 blocked reason。
 - `cleanup_storage.py`：檢查 repo-local `storage/local` 狀態；目前只支援 dry-run，不刪檔。
 - `read_pipeline_snapshot.py`：internal/debug CLI，用 `job_id` 從 backend DB 與 `jobs/{job_id}/logs/pipeline.json` 讀取 pipeline snapshot；不改正式前端 API。
 
@@ -62,6 +63,20 @@ backend/.venv/bin/python -m pytest backend/tests/test_pipeline_service_true_ai_s
 
 RUN_TRUE_AI_SMOKE=1 .venv-ai/bin/python -m pytest tests/pipeline -k true_ai_smoke
 ```
+
+若需要保存 artifact inspection baseline：
+
+```bash
+PYTHONPATH=. "$PYTHON" scripts/run_true_ai_smoke_baseline.py \
+  --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav \
+  --output-root /tmp/groovescribe-true-ai-baseline \
+  --demucs-device cpu \
+  --adtof-command-template "$GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE" \
+  --adtof-device cpu \
+  --adtof-threshold 0.5
+```
+
+`baseline.json` 可能是 `completed`、`failed` 或 `blocked`。`blocked` 代表 true-AI runtime 尚未 ready，應保留 blocked reason，不要填入假 manual eval 分數。
 
 詳細修復流程見 `docs/本機AI Runtime診斷與True AI啟用指南.md`。
 
