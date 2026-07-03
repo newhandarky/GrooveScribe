@@ -46,6 +46,8 @@ class MidiPostProcessReport:
     estimated_bpm: float
     time_signature: str
     warnings: tuple[str, ...] = ()
+    raw_note_histogram: dict[int, int] | None = None
+    processed_drum_counts: dict[str, int] | None = None
 
 
 @dataclass(frozen=True)

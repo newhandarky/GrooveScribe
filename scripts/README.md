@@ -12,6 +12,9 @@
 - `generate_score.py`：從 `drum_events.json` 產生 `score.musicxml`，可選用 MuseScore CLI 轉出 PDF。
 - `generate_test_fixtures.py`：產生 Phase 1 pipeline smoke test 用的合成音檔與 manifest。
 - `check_ai_runtime.py`：輸出本機 ffmpeg、Demucs、ADTOF command/template、MuseScore、Python package 可用性，並列出真 AI local pipeline 缺口。
+- `prepare_adtof_verify_input.py`：用 full mix fixture 執行 normalize + Demucs，產生 ADTOF verification 所需的 `drums.wav`；支援 `--dry-run`。
+- `inspect_midi.py`：讀 raw / processed MIDI，輸出 note histogram、mapped drum counts、event count 與 tempo/time signature。
+- `cleanup_storage.py`：檢查 repo-local `storage/local` 狀態；目前只支援 dry-run，不刪檔。
 - `read_pipeline_snapshot.py`：internal/debug CLI，用 `job_id` 從 backend DB 與 `jobs/{job_id}/logs/pipeline.json` 讀取 pipeline snapshot；不改正式前端 API。
 
 ## Runtime gate
@@ -39,6 +42,14 @@ PYTHONPATH=. "$PYTHON" scripts/run_demucs_separation.py \
   --device cpu
 
 export GROOVESCRIBE_ADTOF_VERIFY_INPUT="/tmp/groovescribe-stems/drums.wav"
+```
+
+或用 helper 串起同一流程：
+
+```bash
+PYTHONPATH=. "$PYTHON" scripts/prepare_adtof_verify_input.py \
+  --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav \
+  --device cpu
 ```
 
 true-AI smoke 是 opt-in，不是一般 CI 必跑：
@@ -79,5 +90,4 @@ curl -H "Authorization: Bearer <token>" \
 
 ## 預期後續 script
 
-- `inspect_midi.py`
-- `cleanup_storage.py`
+- storage cleanup execute mode，必須另做安全設計與人工確認，不能在 V1 預設自動刪檔。

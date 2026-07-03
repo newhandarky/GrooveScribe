@@ -73,4 +73,22 @@ export interface TranscriptionResultResponse {
     checksum: string | null;
     download_url: string | null;
   }>;
+  pipeline?: {
+    mode: 'mock' | 'true_ai' | 'unknown' | string;
+    status: string | null;
+    stages: Array<{
+      name: string;
+      status: string;
+      runtime_seconds: number | null;
+      warnings: string[];
+    }>;
+    artifacts: Array<{
+      type: string;
+      available: boolean;
+      file_size_bytes: number | null;
+      status: string | null;
+    }>;
+    warnings: string[];
+    pipeline_log_available: boolean;
+  } | null;
 }

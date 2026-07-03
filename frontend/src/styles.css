@@ -200,7 +200,8 @@ input {
 .metric span,
 .checkItem span,
 .resultHeader p,
-.formNote {
+.formNote,
+.guidanceText {
   color: #69736d;
   font-size: 13px;
 }
@@ -477,6 +478,35 @@ input {
   justify-content: flex-end;
 }
 
+.resultMetaStack {
+  align-items: flex-end;
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
+.pipelineBadge {
+  background: #eef3f6;
+  border: 1px solid #c8d3d9;
+  border-radius: 999px;
+  color: #344851;
+  font-size: 12px;
+  font-weight: 760;
+  padding: 6px 9px;
+}
+
+.pipelineBadge.mock {
+  background: #fff4d6;
+  border-color: #dfc775;
+  color: #765700;
+}
+
+.pipelineBadge.trueAi {
+  background: #dbeee2;
+  border-color: #9bc9aa;
+  color: #1e5732;
+}
+
 .scoreStats span {
   background: #edf6f3;
   border: 1px solid #c0d8cf;
@@ -485,6 +515,55 @@ input {
   font-size: 12px;
   font-weight: 720;
   padding: 6px 9px;
+}
+
+.pipelineReview {
+  background: #ffffff;
+  border: 1px solid #d6e0e5;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.reviewHeader,
+.stageRow {
+  align-items: baseline;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.reviewHeader span,
+.stageRow span {
+  color: #69736d;
+  font-size: 13px;
+}
+
+.stageList {
+  display: grid;
+  gap: 6px;
+}
+
+.stageRow {
+  border-top: 1px solid #e3eaed;
+  padding-top: 6px;
+}
+
+.inlineWarnings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inlineWarnings span {
+  background: #fff4d6;
+  border: 1px solid #dfc775;
+  border-radius: 999px;
+  color: #765700;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 8px;
 }
 
 .downloadGrid {
@@ -508,6 +587,10 @@ input {
 .exportList {
   display: grid;
   gap: 8px;
+}
+
+.exportList.compact {
+  gap: 6px;
 }
 
 .exportRow {

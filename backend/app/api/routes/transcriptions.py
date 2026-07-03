@@ -47,9 +47,10 @@ def get_job_query_service() -> JobQueryService:
 
 def get_result_service(
     settings: Annotated[Settings, Depends(get_settings)],
+    storage: Annotated[StorageAdapter, Depends(get_storage_adapter)],
     job_query_service: Annotated[JobQueryService, Depends(get_job_query_service)],
 ) -> ResultService:
-    return ResultService(settings=settings, job_query_service=job_query_service)
+    return ResultService(settings=settings, storage=storage, job_query_service=job_query_service)
 
 
 def get_download_service(
@@ -194,4 +195,5 @@ def _build_result_response(
             )
             for export in sorted(job.export_files, key=lambda item: item.type.value)
         ],
+        pipeline=result_service.pipeline_summary(job),
     )

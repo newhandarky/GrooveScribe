@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
 from ai_pipeline.midi.errors import NoUsableDrumEventsError, ProcessedMidiInvalidError
@@ -43,6 +44,14 @@ class MidiPostProcessor:
         )
         self._validate_processed_midi(processed_midi_path)
 
+        raw_note_histogram = Counter(event.note for event in midi_data.notes)
+        processed_drum_counts = Counter(event.drum for event in deduped_events)
+        quality_warnings = self._quality_warnings(
+            input_event_count=len(midi_data.notes),
+            output_event_count=len(deduped_events),
+            dropped_event_count=len(midi_data.notes) - len(deduped_events),
+            processed_drum_counts=processed_drum_counts,
+        )
         report = MidiPostProcessReport(
             input_event_count=len(midi_data.notes),
             output_event_count=len(deduped_events),
@@ -50,7 +59,9 @@ class MidiPostProcessor:
             quantize_grid=self.config.quantize_grid,
             estimated_bpm=estimated_bpm,
             time_signature=midi_data.time_signature,
-            warnings=tuple(sorted(mapping_warnings)),
+            warnings=tuple(sorted(mapping_warnings | quality_warnings)),
+            raw_note_histogram=dict(sorted(raw_note_histogram.items())),
+            processed_drum_counts=dict(sorted(processed_drum_counts.items())),
         )
         drum_events_path.write_text(
             json.dumps(
@@ -128,6 +139,30 @@ class MidiPostProcessor:
         if event_count <= 0:
             raise ProcessedMidiInvalidError("processed MIDI contains no note-on events")
 
+    def _quality_warnings(
+        self,
+        *,
+        input_event_count: int,
+        output_event_count: int,
+        dropped_event_count: int,
+        processed_drum_counts: Counter[str],
+    ) -> set[str]:
+        warnings: set[str] = set()
+        if output_event_count < 4:
+            warnings.add("too_few_events")
+        if input_event_count and dropped_event_count / input_event_count >= 0.5:
+            warnings.add("high_drop_ratio")
+        hihat_count = sum(
+            processed_drum_counts.get(drum, 0)
+            for drum in ("closed_hat", "pedal_hat", "open_hat")
+        )
+        if output_event_count >= 4 and hihat_count == 0:
+            warnings.add("hihat_missing_likely")
+        tom_count = processed_drum_counts.get("tom", 0)
+        if output_event_count >= 3 and tom_count / output_event_count >= 0.75:
+            warnings.add("mostly_tom_output")
+        return warnings
+
     def _build_events_payload(
         self,
         events: list[ProcessedDrumEvent],
@@ -142,6 +177,8 @@ class MidiPostProcessor:
             "quantize_grid": report.quantize_grid,
             "event_count": len(events),
             "warnings": list(report.warnings),
+            "raw_note_histogram": {str(key): value for key, value in (report.raw_note_histogram or {}).items()},
+            "processed_drum_counts": report.processed_drum_counts or {},
             "events": [
                 {
                     "index": index,

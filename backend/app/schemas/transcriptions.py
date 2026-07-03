@@ -66,6 +66,29 @@ class PreviewResult(BaseModel):
     musicxml_url: str | None = None
 
 
+class PipelineStageSummary(BaseModel):
+    name: str
+    status: str
+    runtime_seconds: float | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class PipelineArtifactSummary(BaseModel):
+    type: str
+    available: bool
+    file_size_bytes: int | None = None
+    status: str | None = None
+
+
+class PipelineSummaryResult(BaseModel):
+    mode: str
+    status: str | None = None
+    stages: list[PipelineStageSummary] = Field(default_factory=list)
+    artifacts: list[PipelineArtifactSummary] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    pipeline_log_available: bool = False
+
+
 class TranscriptionResultResponse(BaseModel):
     job_id: str
     status: str
@@ -77,3 +100,4 @@ class TranscriptionResultResponse(BaseModel):
     drum_track: DrumTrackResult | None = None
     preview: PreviewResult
     exports: list[ExportFileResult]
+    pipeline: PipelineSummaryResult | None = None

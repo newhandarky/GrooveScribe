@@ -92,6 +92,25 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
         download_url: null,
       },
     ],
+    pipeline: {
+      mode: 'mock',
+      status: 'completed',
+      stages: [
+        {
+          name: 'midi_post_processing',
+          status: 'completed',
+          runtime_seconds: 0.12,
+          warnings: ['too_few_events'],
+        },
+      ],
+      artifacts: [
+        { type: 'midi', available: true, file_size_bytes: 128, status: 'available' },
+        { type: 'musicxml', available: true, file_size_bytes: 256, status: 'available' },
+        { type: 'pdf', available: false, file_size_bytes: null, status: 'failed' },
+      ],
+      warnings: ['mock_ai_enabled', 'too_few_events'],
+      pipeline_log_available: true,
+    },
     ...overrides,
   };
 }
@@ -173,12 +192,55 @@ describe('local app smoke rendering', () => {
     const html = renderToStaticMarkup(<ResultCard result={resultFixture()} />);
 
     expect(html).toContain('Demo Groove');
+    expect(html).toContain('MOCK');
+    expect(html).toContain('Pipeline summary');
+    expect(html).toContain('Midi Post Processing');
+    expect(html).toContain('mock_ai_enabled');
     expect(html).toContain('5 events');
     expect(html).toContain('/api/v1/transcriptions/job-1/download/midi');
     expect(html).toContain('/api/v1/transcriptions/job-1/download/musicxml');
     expect(html).toContain('PDF');
     expect(html).toContain('failed');
     expect(html).not.toContain('href="#"');
+  });
+
+  it('renders true AI pipeline summary without local paths or traceback', () => {
+    const html = renderToStaticMarkup(
+      <ResultCard
+        result={resultFixture({
+          drum_track: {
+            id: 'track-1',
+            estimated_bpm: 118,
+            time_signature: '4/4',
+            event_count: 48,
+            confidence_label: null,
+            warnings: [],
+          },
+          pipeline: {
+            mode: 'true_ai',
+            status: 'completed',
+            stages: [
+              {
+                name: 'drum_transcription',
+                status: 'completed',
+                runtime_seconds: 8.5,
+                warnings: [],
+              },
+            ],
+            artifacts: [],
+            warnings: ['hihat_missing_likely'],
+            pipeline_log_available: true,
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain('TRUE AI');
+    expect(html).toContain('Drum Transcription');
+    expect(html).toContain('hihat_missing_likely');
+    expect(html).not.toContain('/Users/');
+    expect(html).not.toContain('/tmp/');
+    expect(html).not.toContain('Traceback');
   });
 
   it('renders interrupted job status as terminal state feedback', () => {
@@ -201,6 +263,7 @@ describe('local app smoke rendering', () => {
 
     expect(html).toContain('interrupted');
     expect(html).toContain('分析流程中斷');
+    expect(html).toContain('本機服務曾在分析中停止');
     expect(html).toContain('Progress 45%');
   });
 });
