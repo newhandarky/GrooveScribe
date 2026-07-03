@@ -280,3 +280,56 @@ ADTOF quality diagnosis:
 - MuseScore CLI 已安裝且 PDF artifact smoke 已產生非空 PDF；MuseScore 非零 return code + 非空 PDF 目前回報為 `completed_with_warning`。
 - ADTOF-pytorch CLI 已確認，且授權真實鼓聲 fixture 已跑通；仍需要更多授權測試音檔與 ground-truth / manual eval criteria 才能判定 MVP 品質門檻。
 - 這次 true AI smoke 證明 pipeline 可跑通；manual eval 顯示 synthetic fixture 輸出品質偏低，真實鼓聲 fixture 的 kick/snare 明顯改善，但 hi-hat 仍缺失。
+
+## 2026-07-03 V1 True AI Baseline
+
+本輪使用 local-first V1 baseline runner，目標是驗證目前 main 狀態下 true-AI runtime 是否 ready，並保存 artifact inspection baseline。true AI 仍是 opt-in，不是一般 CI 必跑條件。
+
+Runtime:
+
+- Python：`.venv-ai/bin/python`，`3.11.15`
+- Demucs：`htdemucs`，CPU
+- ADTOF：CLI template `.venv-ai/bin/adtof --audio {input} --out {output} --device {device} --threshold {threshold}`，CPU，threshold `0.5`
+- ADTOF checkpoint：未設定
+- Preflight：`runtime_checks.local_pipeline.true_ai_ready=true`
+- ADTOF verification：`status_code=ready`，`event_count=7`
+
+Baseline command:
+
+```bash
+PYTHONPATH=. GROOVESCRIBE_DEMUCS_DEVICE=cpu GROOVESCRIBE_ADTOF_DEVICE=cpu GROOVESCRIBE_ADTOF_THRESHOLD=0.5 \
+GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE="$(pwd)/.venv-ai/bin/adtof --audio {input} --out {output} --device {device} --threshold {threshold}" \
+GROOVESCRIBE_ADTOF_VERIFY_INPUT=/tmp/groovescribe-stems/drums.wav \
+GROOVESCRIBE_ADTOF_VERIFY_OUTPUT_DIR=/tmp/groovescribe-adtof-verify \
+.venv-ai/bin/python scripts/run_true_ai_smoke_baseline.py \
+  --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav \
+  --output-root /tmp/groovescribe-true-ai-baseline \
+  --run-id 20260703Ttrue-ai-baseline \
+  --demucs-device cpu \
+  --adtof-command-template "$(pwd)/.venv-ai/bin/adtof --audio {input} --out {output} --device {device} --threshold {threshold}" \
+  --adtof-device cpu \
+  --adtof-threshold 0.5
+```
+
+Baseline result:
+
+- Baseline report：`/tmp/groovescribe-true-ai-baseline/20260703Ttrue-ai-baseline/baseline.json`
+- Status：`completed`
+- MIDI export：available
+- MusicXML export：available
+- PDF export：unavailable，但 optional，未阻塞 baseline
+- Pipeline warnings：`hihat_missing_likely`、`mostly_tom_output`
+- Raw MIDI inspection：`event_count=7`，note histogram `{35: 1, 47: 6}`，mapped drum counts `{kick: 1, tom: 6}`
+- Processed MIDI inspection：`event_count=7`，note histogram `{36: 1, 45: 6}`，mapped drum counts `{kick: 1, tom: 6}`
+- Manual eval：`tests/manual_eval/2026-07-03_true_ai_baseline_eval.csv`
+
+Opt-in smoke cross-check:
+
+- `RUN_TRUE_AI_SMOKE=1 .venv-ai/bin/python -m pytest tests/pipeline -k true_ai_smoke` passed.
+- `RUN_TRUE_AI_SMOKE=1 backend/.venv/bin/python -m pytest backend/tests/test_pipeline_service_true_ai_smoke.py` passed when run from `backend/` with `PYTHONPATH=..`.
+
+Quality conclusion:
+
+- True-AI runtime and artifact contract are ready enough for continued V1 validation.
+- Synthetic fixture transcription quality remains low: ADTOF output is mostly tom events and misses snare / hi-hat.
+- This is a quality baseline, not a V1 quality pass. Next quality work should focus on better authorized real-drum fixtures and postprocessing / model-output diagnosis, not on changing the local-first runtime default.
