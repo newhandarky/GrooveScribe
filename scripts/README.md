@@ -128,11 +128,11 @@ curl -H "Authorization: Bearer <token>" \
 
 ## Mock browser smoke path
 
-V1 release 前至少重跑一次 deterministic smoke：
+V1 release 前至少重跑一次 deterministic browser smoke：
 
 ```bash
-backend/.venv/bin/python -m pytest backend/tests/test_transcription_api_integration.py -k default_local_queue
-npm --prefix frontend run test -- App.test.tsx
+npx playwright install chromium
+npm run test:e2e
 ```
 
-此 smoke 使用 synthetic fixture / mock pipeline 驗證 upload -> completed -> result page contract、MIDI/MusicXML download 可見、PDF optional status 可見。若之後導入 Playwright，仍不得讓 true-AI 或 PDF renderer 成為一般 CI 必跑條件。
+此 smoke 使用 Playwright 啟動 localhost frontend，並以 mocked `/api/v1/*` contract 驗證 upload -> completed -> result page、MIDI/MusicXML download 可見、MusicXML preview/fallback 可見、PDF optional unavailable / failed 狀態可見。true-AI 與 PDF renderer 仍不得成為一般 CI 必跑條件，也不得提交 `frontend/dist`、`storage/`、DB 或 Playwright report artifacts。

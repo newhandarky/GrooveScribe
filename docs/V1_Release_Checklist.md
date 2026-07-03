@@ -18,7 +18,8 @@
 - [x] Result 顯示 DrumTrack metadata、warnings、exports。
 - [x] MIDI、MusicXML 可下載。
 - [x] PDF available / failed / unavailable 狀態清楚；PDF 不阻塞 MIDI / MusicXML。
-- [ ] Mock smoke 可重跑：`backend/.venv/bin/python -m pytest backend/tests/test_transcription_api_integration.py -k default_local_queue` 與 `npm --prefix frontend run test -- App.test.tsx`。
+- [ ] Mock browser smoke 可重跑：`npm run test:e2e` 覆蓋 desktop / mobile localhost UI、upload -> completed -> result page、MIDI / MusicXML download、MusicXML preview/fallback 與 PDF optional unavailable / failed 狀態。
+- [ ] Deterministic API / component smoke 可重跑：`cd backend && .venv/bin/python -m pytest tests/test_transcription_api_integration.py tests/test_runtime_preflight_api.py tests/test_transcription_apis.py`、`npm --prefix frontend run test`。
 
 ## True AI Opt-in Gate
 
@@ -53,7 +54,7 @@
 
 ## Manual Evaluation
 
-- [ ] 至少一輪 mock-ai browser smoke 有記錄。
+- [ ] 至少一輪 mock-ai browser smoke 有記錄；預設使用 Playwright mocked API，不啟動 true-AI，也不依賴 PDF renderer。
 - [x] 至少一輪 true-AI opt-in smoke 有 artifact inspection 記錄，或有明確 blocked reason。
 - [x] `tests/manual_eval` CSV 記錄 date、fixture、runtime mode、baseline report ref、pipeline/runtime version、event counts、drum counts、quality flags、artifact ref、reviewer。
 - [x] `scripts/generate_manual_eval_row.py` 可從 completed / blocked `baseline.json` 產生 schema-compatible CSV row，且不輸出本機絕對路徑。
@@ -63,6 +64,7 @@
 ## Artifact / DB Hygiene
 
 - [ ] `git status --short` 不包含 `storage/`、SQLite/DB、`frontend/dist`、tmp artifacts。
+- [ ] `playwright-report/`、`test-results/`、`blob-report/` 只作為本機測試輸出，不提交。
 - [ ] public API、frontend rendered HTML、baseline report、manual eval row 不含 `/Users/`、`/tmp/`、`/private/tmp/`、`/var/folders/`、`Traceback`、`stdout`、`stderr`、raw command 或 command template。
 
 ## Non-goals For V1
