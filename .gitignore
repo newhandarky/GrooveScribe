@@ -5,6 +5,7 @@
 .env
 .env.*
 !.env.example
+!.env.true-ai.example
 
 # Python
 __pycache__/

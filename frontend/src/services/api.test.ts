@@ -118,11 +118,20 @@ describe('api client', () => {
             download_url: '/api/v1/transcriptions/job-1/download/musicxml',
           },
         ],
+        pipeline: {
+          mode: 'mock',
+          status: 'completed',
+          stages: [],
+          artifacts: [],
+          warnings: ['mock_ai_enabled'],
+          pipeline_log_available: true,
+        },
       });
 
     const result = await getTranscriptionResult('job-1', fetcher as typeof fetch);
 
     expect(result.exports[0].download_url).toBe('/api/v1/transcriptions/job-1/download/musicxml');
+    expect(result.pipeline?.mode).toBe('mock');
     expect(downloadUrl(result.exports[0].download_url)).toBe('/api/v1/transcriptions/job-1/download/musicxml');
     expect(downloadUrl(null)).toBe('#');
   });

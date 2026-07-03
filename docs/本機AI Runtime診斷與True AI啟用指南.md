@@ -52,6 +52,18 @@ export GROOVESCRIBE_ADTOF_CHECKPOINT="/path/to/model.ckpt"
 ```bash
 export PYTHON="$(pwd)/.venv-ai/bin/python"
 
+PYTHONPATH=. "$PYTHON" scripts/prepare_adtof_verify_input.py \
+  --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav \
+  --device cpu
+
+export GROOVESCRIBE_ADTOF_VERIFY_INPUT="/tmp/groovescribe-stems/drums.wav"
+```
+
+等同於手動執行 normalize 與 Demucs：
+
+```bash
+export PYTHON="$(pwd)/.venv-ai/bin/python"
+
 PYTHONPATH=. "$PYTHON" scripts/run_normalize_audio.py \
   --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav \
   --output-dir /tmp/groovescribe-normalized
@@ -64,6 +76,13 @@ PYTHONPATH=. "$PYTHON" scripts/run_demucs_separation.py \
 
 export GROOVESCRIBE_ADTOF_VERIFY_INPUT="/tmp/groovescribe-stems/drums.wav"
 ```
+
+輸入與輸出角色請固定區分：
+
+- full song input：原始 WAV/MP3，用於 normalize。
+- normalized wav：`normalized.wav`，用於 Demucs。
+- Demucs drums stem：`drums.wav`，用於 `GROOVESCRIBE_ADTOF_VERIFY_INPUT`。
+- ADTOF raw MIDI output：preflight 驗證時產出的 `raw_drum.mid`。
 
 ## Preflight 與狀態碼
 
@@ -120,6 +139,32 @@ RUN_TRUE_AI_SMOKE=1 .venv-ai/bin/python -m pytest tests/pipeline -k true_ai_smok
 - MusicXML available
 - pipeline log 存在
 - PDF optional；PDF failed / unavailable 不阻塞 true-AI smoke
+
+## Artifact Inspection
+
+true-AI smoke 完成後，先不要直接判定品質通過。請逐項檢查：
+
+1. `raw_drum.mid` 可解析，且 note-on events 大於 0。
+2. `processed_drum.mid` 可解析，且 postprocess report 沒有 `no usable events` 類錯誤。
+3. `drum_events.json` 包含 `raw_note_histogram`、`processed_drum_counts`、warnings。
+4. `score.musicxml` 可被 MusicXML parser 或 notation tool 開啟。
+5. `score.pdf` 若存在可開啟；若 failed / unavailable，確認 MIDI 與 MusicXML 沒被阻塞。
+6. `pipeline.json` 不暴露完整本機路徑、traceback 或 raw stderr。
+
+可用 MIDI inspection helper：
+
+```bash
+PYTHONPATH=. "$PYTHON" scripts/inspect_midi.py /path/to/raw_drum.mid
+PYTHONPATH=. "$PYTHON" scripts/inspect_midi.py /path/to/processed_drum.mid
+```
+
+本機 storage cleanup 第一版只做 dry-run：
+
+```bash
+backend/.venv/bin/python scripts/cleanup_storage.py
+```
+
+它只列出 local storage 狀態，不會刪除檔案。
 
 ## 明確不在本切片處理
 

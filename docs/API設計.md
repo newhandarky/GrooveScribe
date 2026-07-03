@@ -186,11 +186,41 @@ Failed response 範例：
       "download_url": "/api/v1/transcriptions/job_01HZABC123/download/pdf"
     }
   ],
+  "pipeline": {
+    "mode": "true_ai",
+    "status": "completed",
+    "pipeline_log_available": true,
+    "stages": [
+      {
+        "name": "midi_post_processing",
+        "status": "completed",
+        "runtime_seconds": 0.42,
+        "warnings": ["hihat_missing_likely"]
+      }
+    ],
+    "artifacts": [
+      {
+        "type": "midi",
+        "available": true,
+        "file_size_bytes": 2048,
+        "status": "available"
+      },
+      {
+        "type": "pdf",
+        "available": false,
+        "file_size_bytes": null,
+        "status": "failed"
+      }
+    ],
+    "warnings": ["hihat_missing_likely"]
+  },
   "preview": {
     "musicxml_url": "/api/v1/transcriptions/job_01HZABC123/download/musicxml"
   }
 }
 ```
+
+`pipeline` 是 result review 用的 redacted summary，只包含 stage 狀態、warnings、export 狀態與 mock / true AI 模式；不得暴露 internal snapshot、filesystem path、raw command、stderr/stdout 或 traceback。PDF 仍是 optional，`pdf.status=failed` 不代表 MIDI / MusicXML 失敗。
 
 若 job 尚未完成：`409 Conflict`
 

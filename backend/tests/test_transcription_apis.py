@@ -9,7 +9,9 @@ from app.models.enums import ExportFileStatus, ExportFileType, JobStatus, Pipeli
 from app.services.download_service import DownloadService
 from app.services.job_query_service import JobQueryService
 from app.services.result_service import ResultService
+from app.storage.keys import build_job_artifact_key
 from app.storage.local import LocalStorageAdapter
+from app.storage.types import ArtifactType
 
 
 def _session():
@@ -127,6 +129,53 @@ def test_result_service_returns_completed_job_with_related_metadata() -> None:
         assert job.audio_file.original_filename == "demo.wav"
         assert job.drum_track.event_count == 4
         assert service.download_url(job.id, "midi") == "/api/v1/transcriptions/job-1/download/midi"
+
+
+def test_result_service_builds_redacted_pipeline_summary(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    storage.put_bytes(
+        b"""
+        {
+          "status": "completed",
+          "stages": [
+            {
+              "name": "midi_post_processing",
+              "status": "completed",
+              "runtime_seconds": 1.25,
+              "report": {
+                "warnings": ["too_few_events", "/Users/private/path"]
+              }
+            }
+          ],
+          "artifacts": {"processed_midi": "jobs/job-1/midi/processed_drum.mid"}
+        }
+        """,
+        build_job_artifact_key("job-1", ArtifactType.PIPELINE_LOG),
+        "application/json",
+    )
+    with _session() as session:
+        job = _create_job(
+            session,
+            status=JobStatus.COMPLETED,
+            stage=PipelineStage.COMPLETED,
+            export_status=ExportFileStatus.AVAILABLE,
+        )
+        service = ResultService(settings=Settings(), storage=storage)
+
+        summary = service.pipeline_summary(job)
+
+        assert summary["pipeline_log_available"] is True
+        assert summary["mode"] == "unknown"
+        assert summary["stages"] == [
+            {
+                "name": "midi_post_processing",
+                "status": "completed",
+                "runtime_seconds": 1.25,
+                "warnings": ["too_few_events"],
+            }
+        ]
+        assert summary["artifacts"][0]["type"] == "midi"
+        assert "/Users/" not in str(summary)
 
 
 def test_result_service_rejects_non_completed_job() -> None:

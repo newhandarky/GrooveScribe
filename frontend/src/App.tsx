@@ -401,6 +401,13 @@ function JobPanel({
 }
 
 export function JobStatusCard({ status }: { status: JobStatusResponse }) {
+  const guidance =
+    status.status === 'interrupted'
+      ? '本機服務曾在分析中停止。請重新上傳音檔或保留 artifacts 後再執行新的轉寫。'
+      : status.status === 'failed'
+        ? '分析失敗時請先查看錯誤 stage；mock flow 可重試，true AI flow 請先回到 runtime diagnostics 修復環境。'
+        : null;
+
   return (
     <div className="statusCard">
       <div className="statusLine">
@@ -411,6 +418,7 @@ export function JobStatusCard({ status }: { status: JobStatusResponse }) {
         <div className="progressFill" style={{ width: `${Math.max(0, Math.min(100, status.progress))}%` }} />
       </div>
       <p>{status.message}</p>
+      {guidance ? <p className="guidanceText">{guidance}</p> : null}
       <dl className="detailList">
         <div>
           <dt>Job ID</dt>
@@ -434,6 +442,7 @@ export function JobStatusCard({ status }: { status: JobStatusResponse }) {
 export function ResultCard({ result }: { result: TranscriptionResultResponse }) {
   const availableExports = result.exports.filter((item) => item.status === 'available');
   const unavailableExports = result.exports.filter((item) => item.status !== 'available');
+  const pipelineMode = result.pipeline?.mode ?? 'unknown';
 
   return (
     <div className="resultCard">
@@ -444,14 +453,23 @@ export function ResultCard({ result }: { result: TranscriptionResultResponse }) 
             {result.audio.content_type} · {formatBytes(result.audio.file_size_bytes)}
           </p>
         </div>
-        {result.drum_track ? (
-          <div className="scoreStats">
-            <span>{result.drum_track.event_count} events</span>
-            <span>{result.drum_track.time_signature}</span>
-            <span>{result.drum_track.estimated_bpm ? `${Math.round(result.drum_track.estimated_bpm)} BPM` : 'BPM -'}</span>
-          </div>
-        ) : null}
+        <div className="resultMetaStack">
+          <span className={`pipelineBadge ${pipelineMode === 'true_ai' ? 'trueAi' : pipelineMode}`}>
+            {pipelineMode === 'true_ai' ? 'TRUE AI' : pipelineMode.toUpperCase()}
+          </span>
+          {result.drum_track ? (
+            <div className="scoreStats">
+              <span>{result.drum_track.event_count} events</span>
+              <span>{result.drum_track.time_signature}</span>
+              <span>
+                {result.drum_track.estimated_bpm ? `${Math.round(result.drum_track.estimated_bpm)} BPM` : 'BPM -'}
+              </span>
+            </div>
+          ) : null}
+        </div>
       </div>
+
+      <PipelineReview pipeline={result.pipeline} exports={result.exports} />
 
       {result.drum_track?.warnings.length ? (
         <div className="alert warn">
@@ -480,6 +498,56 @@ export function ResultCard({ result }: { result: TranscriptionResultResponse }) 
               <span>{item.type.toUpperCase()}</span>
               <span>{item.status}</span>
             </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PipelineReview({
+  pipeline,
+  exports,
+}: {
+  pipeline: TranscriptionResultResponse['pipeline'];
+  exports: TranscriptionResultResponse['exports'];
+}) {
+  if (!pipeline) return null;
+  const stages = pipeline.stages ?? [];
+  const warnings = pipeline.warnings ?? [];
+
+  return (
+    <div className="pipelineReview">
+      <div className="reviewHeader">
+        <strong>Pipeline summary</strong>
+        <span>{pipeline.pipeline_log_available ? 'log available' : 'log unavailable'}</span>
+      </div>
+      {stages.length ? (
+        <div className="stageList">
+          {stages.map((stage) => (
+            <div className="stageRow" key={`${stage.name}-${stage.status}`}>
+              <span>{stageLabel(stage.name)}</span>
+              <span>{stage.status}</span>
+              <span>{stage.runtime_seconds !== null ? `${stage.runtime_seconds.toFixed(2)}s` : '-'}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <div className="exportList compact">
+        {exports.map((item) => (
+          <div className="exportRow" key={`summary-${item.type}`}>
+            <span>{item.type.toUpperCase()}</span>
+            <span>
+              {item.status}
+              {item.type === 'pdf' && item.status !== 'available' ? ' · optional' : ''}
+            </span>
+          </div>
+        ))}
+      </div>
+      {warnings.length ? (
+        <div className="inlineWarnings">
+          {warnings.map((warning) => (
+            <span key={warning}>{warning}</span>
           ))}
         </div>
       ) : null}
