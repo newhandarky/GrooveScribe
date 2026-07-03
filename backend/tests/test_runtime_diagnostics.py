@@ -38,6 +38,7 @@ def _payload(*, mock_ai_ready: bool = True, true_ai_ready: bool = True) -> dict:
             },
             "adtof_pytorch": {
                 "ready": true_ai_ready,
+                "status_code": "ready" if true_ai_ready else "verify_input_missing",
                 "configured": true_ai_ready,
                 "template_configured": true_ai_ready,
                 "template_executable": true_ai_ready,
@@ -47,6 +48,18 @@ def _payload(*, mock_ai_ready: bool = True, true_ai_ready: bool = True) -> dict:
                 "threshold": "0.5",
                 "missing_placeholders": [],
                 "required_env": ["GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE"],
+                "optional_env": [
+                    "GROOVESCRIBE_ADTOF_CHECKPOINT",
+                    "GROOVESCRIBE_ADTOF_VERIFY_INPUT",
+                    "GROOVESCRIBE_ADTOF_VERIFY_OUTPUT_DIR",
+                ],
+                "output_verification": {
+                    "verified": true_ai_ready,
+                    "attempted": true_ai_ready,
+                    "status_code": "ready" if true_ai_ready else "verify_input_missing",
+                    "event_count": 7 if true_ai_ready else None,
+                    "reason": None if true_ai_ready else "GROOVESCRIBE_ADTOF_VERIFY_INPUT is not set",
+                },
             },
             "musescore_pdf": {
                 "ready": True,
@@ -82,6 +95,8 @@ def test_runtime_diagnostics_ready_response(tmp_path: Path) -> None:
         assert env["GROOVESCRIBE_ADTOF_THRESHOLD"] == "0.42"
         assert env["GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE"] == "adtof --input {input} --output {output}"
         assert env["GROOVESCRIBE_ADTOF_CHECKPOINT"] == "/tmp/private/model.ckpt"
+        assert env["GROOVESCRIBE_ADTOF_VERIFY_INPUT"] == "/tmp/private/drums.wav"
+        assert env["GROOVESCRIBE_ADTOF_VERIFY_OUTPUT_DIR"] == "/tmp/private/adtof-check"
         assert env["GROOVESCRIBE_PDF_RENDERER"] == "/tmp/private/mscore"
         return _completed(_payload(true_ai_ready=True))
 
@@ -93,6 +108,8 @@ def test_runtime_diagnostics_ready_response(tmp_path: Path) -> None:
             pipeline_adtof_threshold=0.42,
             pipeline_adtof_command_template="adtof --input {input} --output {output}",
             pipeline_adtof_checkpoint_path="/tmp/private/model.ckpt",
+            pipeline_adtof_verify_input_path="/tmp/private/drums.wav",
+            pipeline_adtof_verify_output_dir="/tmp/private/adtof-check",
             pipeline_pdf_renderer="/tmp/private/mscore",
         ),
         process_runner=fake_runner,
@@ -104,6 +121,10 @@ def test_runtime_diagnostics_ready_response(tmp_path: Path) -> None:
     assert response.checks["ffmpeg"]["ready"] is True
     assert response.checks["ai_python"]["executable"] == "ai-python"
     assert response.checks["adtof"]["device"] == "cpu"
+    assert response.checks["adtof"]["status_code"] == "ready"
+    assert response.checks["adtof"]["event_count"] == 7
+    assert response.checks["adtof"]["summary"]
+    assert response.checks["adtof"]["next_steps"]
     assert response.checks["musescore_pdf"]["configured_renderer"] == "<local-path>"
 
 
@@ -119,6 +140,8 @@ def test_runtime_diagnostics_degraded_response(tmp_path: Path) -> None:
     assert response.mock_ai_ready is True
     assert response.true_ai_ready is False
     assert response.missing_requirements == ["ADTOF runtime is not verified"]
+    assert response.checks["adtof"]["status_code"] == "verify_input_missing"
+    assert response.checks["adtof"]["output_verification_reason"] == "GROOVESCRIBE_ADTOF_VERIFY_INPUT is not set"
 
 
 def test_runtime_diagnostics_not_ready_response(tmp_path: Path) -> None:
@@ -198,3 +221,19 @@ def test_runtime_diagnostics_redacts_local_paths_from_smoke_commands(tmp_path: P
     assert "/Users/dev" not in encoded
     assert "Traceback" not in encoded
     assert "<local-path>" in encoded
+
+
+def test_runtime_diagnostics_redacts_adtof_output_reason(tmp_path: Path) -> None:
+    payload = _payload(mock_ai_ready=True, true_ai_ready=False)
+    payload["runtime_checks"]["adtof_pytorch"]["output_verification"]["reason"] = (
+        "verification input does not exist: /tmp/private/drums.wav"
+    )
+    service = RuntimeDiagnosticsService(
+        settings=_settings(tmp_path),
+        process_runner=lambda *_args, **_kwargs: _completed(payload),
+    )
+
+    response = service.get_preflight()
+
+    assert response.checks["adtof"]["output_verification_reason"] == "verification input does not exist: <local-path>"
+    assert "/tmp/private" not in response.model_dump_json()

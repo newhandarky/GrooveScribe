@@ -180,7 +180,47 @@ def _adtof_runtime_check(
     verify_output_dir: str | None = None,
 ) -> dict:
     template = command_template or DEFAULT_ADTOF_TEMPLATE
-    parts = shlex.split(template)
+    try:
+        parts = shlex.split(template)
+    except ValueError as exc:
+        return {
+            "ready": False,
+            "status_code": "template_invalid",
+            "template_configured": command_template is not None,
+            "template_executable": False,
+            "command_probe_passed": False,
+            "runtime_verified": False,
+            "output_verified": False,
+            "configured": command_template is not None,
+            "device": device,
+            "threshold": threshold,
+            "configuration_source": (
+                ADTOF_TEMPLATE_ENV if command_template is not None else "default_adapter_template"
+            ),
+            "command_template": template,
+            "required_env": [ADTOF_TEMPLATE_ENV],
+            "optional_env": [
+                ADTOF_CHECKPOINT_ENV,
+                ADTOF_VERIFY_INPUT_ENV,
+                ADTOF_VERIFY_OUTPUT_DIR_ENV,
+            ],
+            "checkpoint_path": checkpoint,
+            "placeholders": [],
+            "missing_placeholders": ["input", "output"],
+            "example_command": [],
+            "executable_check": {"available": False, "reason": f"template parse failed: {exc}"},
+            "output_verification": {
+                "verified": False,
+                "attempted": False,
+                "status_code": "template_invalid",
+                "reason": f"template parse failed: {exc}",
+            },
+            "python_module": _module_status("adtof"),
+            "note": (
+                "ADTOF ready means a configured template actually produced a parseable "
+                "raw_drum.mid with note-on events. Executable template checks alone are not enough."
+            ),
+        }
     placeholders = sorted(_find_placeholders(parts))
     missing_placeholders = [name for name in ("input", "output") if name not in placeholders]
     example_command = _format_adtof_template(
@@ -195,18 +235,36 @@ def _adtof_runtime_check(
     module_status = _module_status("adtof")
     template_configured = command_template is not None
     template_executable = not missing_placeholders and executable_check["available"]
-    output_verification = _verify_adtof_output(
-        parts,
-        checkpoint=checkpoint,
-        verify_input=verify_input,
-        verify_output_dir=verify_output_dir,
-        device=device,
-        threshold=threshold,
-    )
+    if not template_configured:
+        output_verification = _verification_skipped(
+            status_code="not_configured",
+            reason=f"{ADTOF_TEMPLATE_ENV} is not set",
+        )
+    elif missing_placeholders:
+        output_verification = _verification_skipped(
+            status_code="template_invalid",
+            reason="ADTOF command template must include {input} and {output}",
+        )
+    elif not executable_check["available"]:
+        output_verification = _verification_skipped(
+            status_code="executable_missing",
+            reason="ADTOF command executable or Python module is not available",
+        )
+    else:
+        output_verification = _verify_adtof_output(
+            parts,
+            checkpoint=checkpoint,
+            verify_input=verify_input,
+            verify_output_dir=verify_output_dir,
+            device=device,
+            threshold=threshold,
+        )
     runtime_verified = output_verification["verified"]
-    ready = runtime_verified
+    status_code = output_verification["status_code"]
+    ready = status_code == "ready"
     return {
         "ready": ready,
+        "status_code": status_code,
         "template_configured": template_configured,
         "template_executable": template_executable,
         "command_probe_passed": template_executable,
@@ -345,6 +403,7 @@ def _verify_adtof_output(
         return {
             "verified": False,
             "attempted": False,
+            "status_code": "verify_input_missing",
             "reason": f"{ADTOF_VERIFY_INPUT_ENV} is not set",
         }
 
@@ -353,6 +412,7 @@ def _verify_adtof_output(
         return {
             "verified": False,
             "attempted": False,
+            "status_code": "verify_input_not_found",
             "reason": f"verification input does not exist: {input_path}",
         }
 
@@ -374,6 +434,7 @@ def _verify_adtof_output(
             return {
                 "verified": False,
                 "attempted": True,
+                "status_code": "command_failed",
                 "command": command,
                 "output_path": str(raw_midi_path),
                 "command_probe": probe,
@@ -383,6 +444,7 @@ def _verify_adtof_output(
             return {
                 "verified": False,
                 "attempted": True,
+                "status_code": "output_missing",
                 "command": command,
                 "output_path": str(raw_midi_path),
                 "command_probe": probe,
@@ -394,6 +456,7 @@ def _verify_adtof_output(
             return {
                 "verified": False,
                 "attempted": True,
+                "status_code": "output_unparseable",
                 "command": command,
                 "output_path": str(raw_midi_path),
                 "command_probe": probe,
@@ -402,12 +465,22 @@ def _verify_adtof_output(
         return {
             "verified": event_count > 0,
             "attempted": True,
+            "status_code": "ready" if event_count > 0 else "output_no_events",
             "command": command,
             "output_path": str(raw_midi_path),
             "command_probe": probe,
             "event_count": event_count,
             "reason": None if event_count > 0 else "raw_drum.mid contains no note-on events",
         }
+
+
+def _verification_skipped(*, status_code: str, reason: str) -> dict:
+    return {
+        "verified": False,
+        "attempted": False,
+        "status_code": status_code,
+        "reason": reason,
+    }
 
 
 def _command_or_module_available(command: list[str]) -> dict:

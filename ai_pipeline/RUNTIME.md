@@ -50,6 +50,8 @@ export GROOVESCRIBE_ADTOF_VERIFY_INPUT='/tmp/groovescribe-stems/drums.wav'
 
 `scripts/check_ai_runtime.py` 只有在 ADTOF command 實際產生可解析且包含 note-on event 的 `raw_drum.mid` 後，才會將 `runtime_checks.adtof_pytorch.ready` 標示為 `true`。任意可執行命令或只會 echo path 的 template 不算 ADTOF ready。
 
+`runtime_checks.adtof_pytorch.status_code` 會提供固定診斷碼：`ready`、`not_configured`、`template_invalid`、`executable_missing`、`verify_input_missing`、`verify_input_not_found`、`command_failed`、`output_missing`、`output_unparseable`、`output_no_events`。完整修復流程見 `docs/本機AI Runtime診斷與True AI啟用指南.md`。
+
 ## 安裝建議
 
 在乾淨環境中先建立 AI 專用虛擬環境，再安裝 Phase 1 runtime 依賴：
@@ -120,6 +122,19 @@ PYTHONPATH=. "$PYTHON" scripts/run_local_pipeline.py \
   --adtof-device cpu \
   --adtof-threshold 0.5
 ```
+
+Opt-in pytest smoke：
+
+```bash
+RUN_TRUE_AI_SMOKE=1 \
+GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE="$GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE" \
+GROOVESCRIBE_ADTOF_VERIFY_INPUT="$GROOVESCRIBE_ADTOF_VERIFY_INPUT" \
+backend/.venv/bin/python -m pytest backend/tests/test_pipeline_service_true_ai_smoke.py
+
+RUN_TRUE_AI_SMOKE=1 .venv-ai/bin/python -m pytest tests/pipeline -k true_ai_smoke
+```
+
+這些 smoke 不屬於一般 CI 必跑條件；PDF 維持 optional，MIDI、MusicXML 與 pipeline log 是 true-AI smoke 的核心輸出。
 
 ### PDF Export
 

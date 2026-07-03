@@ -29,6 +29,8 @@ def test_settings_default_to_local_first_backend(monkeypatch) -> None:
     assert settings.pipeline_adtof_command_template is None
     assert settings.pipeline_adtof_device == "cpu"
     assert settings.pipeline_adtof_threshold == 0.5
+    assert settings.pipeline_adtof_verify_input_path is None
+    assert settings.pipeline_adtof_verify_output_dir is None
     assert settings.runtime_preflight_timeout_seconds == 30
 
 
@@ -41,6 +43,9 @@ def test_settings_env_override_preserves_server_mode_options(monkeypatch) -> Non
         "GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE",
         "/opt/groovescribe-ai/bin/adtof --audio {input} --out {output}",
     )
+    monkeypatch.setenv("GROOVESCRIBE_ADTOF_THRESHOLD", "0.42")
+    monkeypatch.setenv("GROOVESCRIBE_ADTOF_VERIFY_INPUT", "/tmp/groovescribe-stems/drums.wav")
+    monkeypatch.setenv("GROOVESCRIBE_ADTOF_VERIFY_OUTPUT_DIR", "/tmp/groovescribe-adtof-check")
 
     settings = Settings()
 
@@ -50,6 +55,9 @@ def test_settings_env_override_preserves_server_mode_options(monkeypatch) -> Non
     assert settings.ai_python_path == "/opt/groovescribe-ai/bin/python"
     assert settings.pipeline_demucs_device == "cpu"
     assert settings.pipeline_adtof_command_template == "/opt/groovescribe-ai/bin/adtof --audio {input} --out {output}"
+    assert settings.pipeline_adtof_threshold == 0.42
+    assert settings.pipeline_adtof_verify_input_path == "/tmp/groovescribe-stems/drums.wav"
+    assert settings.pipeline_adtof_verify_output_dir == "/tmp/groovescribe-adtof-check"
 
 
 def test_ensure_local_app_data_creates_storage_and_sqlite_parent(tmp_path: Path) -> None:

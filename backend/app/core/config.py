@@ -48,7 +48,18 @@ class Settings(BaseSettings):
         default="cpu",
         validation_alias=AliasChoices("PIPELINE_ADTOF_DEVICE", "GROOVESCRIBE_ADTOF_DEVICE"),
     )
-    pipeline_adtof_threshold: float = 0.5
+    pipeline_adtof_threshold: float = Field(
+        default=0.5,
+        validation_alias=AliasChoices("PIPELINE_ADTOF_THRESHOLD", "GROOVESCRIBE_ADTOF_THRESHOLD"),
+    )
+    pipeline_adtof_verify_input_path: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("PIPELINE_ADTOF_VERIFY_INPUT", "GROOVESCRIBE_ADTOF_VERIFY_INPUT"),
+    )
+    pipeline_adtof_verify_output_dir: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("PIPELINE_ADTOF_VERIFY_OUTPUT_DIR", "GROOVESCRIBE_ADTOF_VERIFY_OUTPUT_DIR"),
+    )
     pipeline_adtof_timeout_seconds: int = 1800
     pipeline_pdf_renderer: str | None = Field(
         default=None,

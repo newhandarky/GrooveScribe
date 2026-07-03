@@ -23,7 +23,36 @@ export PYTHON="$(pwd)/.venv-ai/bin/python"
 PYTHONPATH=. "$PYTHON" scripts/check_ai_runtime.py
 ```
 
-若 `runtime_checks.local_pipeline.true_ai_ready` 不是 `true`，不要宣告 `GS-P1-003` / `GS-P1-004` / 非 mock `GS-P1-007` 完成；依輸出的 `missing_requirements` 補安裝 Demucs/PyTorch 或設定 `GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE`。
+若 `runtime_checks.local_pipeline.true_ai_ready` 不是 `true`，不要宣告 true-AI smoke 完成；依輸出的 `missing_requirements` 與 `runtime_checks.adtof_pytorch.status_code` 補安裝 Demucs/PyTorch、設定 `GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE`，或提供 `GROOVESCRIBE_ADTOF_VERIFY_INPUT`。
+
+ADTOF verification input 必須是已存在的 drums stem，不是完整歌曲。可先執行：
+
+```bash
+PYTHONPATH=. "$PYTHON" scripts/run_normalize_audio.py \
+  --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav \
+  --output-dir /tmp/groovescribe-normalized
+
+PYTHONPATH=. "$PYTHON" scripts/run_demucs_separation.py \
+  --input /tmp/groovescribe-normalized/normalized.wav \
+  --output-dir /tmp/groovescribe-stems \
+  --model-name htdemucs \
+  --device cpu
+
+export GROOVESCRIBE_ADTOF_VERIFY_INPUT="/tmp/groovescribe-stems/drums.wav"
+```
+
+true-AI smoke 是 opt-in，不是一般 CI 必跑：
+
+```bash
+RUN_TRUE_AI_SMOKE=1 \
+GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE="$GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE" \
+GROOVESCRIBE_ADTOF_VERIFY_INPUT="$GROOVESCRIBE_ADTOF_VERIFY_INPUT" \
+backend/.venv/bin/python -m pytest backend/tests/test_pipeline_service_true_ai_smoke.py
+
+RUN_TRUE_AI_SMOKE=1 .venv-ai/bin/python -m pytest tests/pipeline -k true_ai_smoke
+```
+
+詳細修復流程見 `docs/本機AI Runtime診斷與True AI啟用指南.md`。
 
 ## Internal pipeline snapshot debug
 

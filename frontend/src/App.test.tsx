@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { JobStatusCard, ResultCard, RuntimePanel } from './App';
+import { JobStatusCard, ResultCard, RuntimePanel, UploadPanel } from './App';
 import type {
   JobStatusResponse,
   RuntimePreflightResponse,
@@ -18,7 +18,17 @@ function runtimeFixture(overrides: Partial<RuntimePreflightResponse> = {}): Runt
       ai_python: { available: true },
       ffmpeg: { ready: true },
       demucs: { ready: true },
-      adtof: { ready: false },
+      adtof: {
+        ready: false,
+        status_code: 'verify_input_missing',
+        summary: '尚未提供 ADTOF verification input drums stem。',
+        next_steps: [
+          '先執行 normalize 與 Demucs separation，產生 drums.wav。',
+          '設定 GROOVESCRIBE_ADTOF_VERIFY_INPUT 指向該 drums.wav。',
+        ],
+        optional_env: ['GROOVESCRIBE_ADTOF_CHECKPOINT', 'GROOVESCRIBE_ADTOF_VERIFY_INPUT'],
+        output_verification_reason: 'GROOVESCRIBE_ADTOF_VERIFY_INPUT is not set',
+      },
       musescore_pdf: { ready: false },
     },
     smoke_commands: {
@@ -104,8 +114,59 @@ describe('local app smoke rendering', () => {
 
     expect(html).toContain('本機 AI 環境');
     expect(html).toContain(status === 'ready' ? 'True AI' : 'Mock pipeline');
+    expect(html).toContain('ADTOF diagnosis');
+    expect(html).toContain('verify_input_missing');
     expect(html).not.toContain('/Users/dev/private');
     expect(html).not.toContain('check_ai_runtime.py');
+  });
+
+  it('explains degraded runtime and ADTOF repair steps without raw local paths', () => {
+    const html = renderToStaticMarkup(
+      <RuntimePanel runtime={runtimeFixture()} loading={false} error={null} onRefresh={() => undefined} />,
+    );
+
+    expect(html).toContain('Mock pipeline 可用');
+    expect(html).toContain('true AI runtime 尚未 ready');
+    expect(html).toContain('先執行 normalize 與 Demucs separation');
+    expect(html).toContain('GROOVESCRIBE_ADTOF_VERIFY_INPUT');
+    expect(html).not.toContain('/tmp/');
+    expect(html).not.toContain('Traceback');
+  });
+
+  it('keeps upload available for degraded mock-ready runtime', () => {
+    const html = renderToStaticMarkup(
+      <UploadPanel
+        canUpload
+        uploading={false}
+        selectedFile={{ name: 'demo.wav' } as File}
+        title=""
+        runtime={runtimeFixture()}
+        onFileChange={() => undefined}
+        onTitleChange={() => undefined}
+        onSubmit={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('開始本機分析');
+    expect(html).not.toContain('disabled=""');
+  });
+
+  it('keeps upload disabled when runtime is not ready', () => {
+    const html = renderToStaticMarkup(
+      <UploadPanel
+        canUpload={false}
+        uploading={false}
+        selectedFile={{ name: 'demo.wav' } as File}
+        title=""
+        runtime={runtimeFixture({ status: 'not_ready', mock_ai_ready: false })}
+        onFileChange={() => undefined}
+        onTitleChange={() => undefined}
+        onSubmit={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('Mock pipeline 尚未 ready');
+    expect(html).toContain('disabled=""');
   });
 
   it('renders completed result downloads while leaving optional PDF unavailable', () => {

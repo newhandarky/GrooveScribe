@@ -17,7 +17,7 @@ Base path：
 
 ## 2. Runtime / Health API
 
-### `GET /api/v1/runtime`
+### `GET /api/v1/runtime/preflight`
 
 用途：回傳本機 runtime preflight 狀態。
 
@@ -25,15 +25,39 @@ Base path：
 
 ```json
 {
-  "status": "ready",
+  "status": "degraded",
+  "mock_ai_ready": true,
+  "true_ai_ready": false,
+  "missing_requirements": [
+    "ADTOF runtime has not produced and verified raw_drum.mid; set GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE and GROOVESCRIBE_ADTOF_VERIFY_INPUT for output verification"
+  ],
   "checks": {
-    "ffmpeg": {"ready": true, "version": "ffmpeg version 8.0"},
-    "demucs": {"ready": true, "version": "4.0.1"},
-    "adtof": {"ready": false, "message": "GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE is not configured"},
-    "musescore": {"ready": true, "path": "/opt/homebrew/bin/mscore"}
-  }
+    "ffmpeg": {"ready": true, "available": true, "command": "ffmpeg"},
+    "demucs": {"ready": true, "package_available": true},
+    "adtof": {
+      "ready": false,
+      "status_code": "verify_input_missing",
+      "summary": "尚未提供 ADTOF verification input drums stem。",
+      "next_steps": [
+        "先執行 normalize 與 Demucs separation，產生 drums.wav。",
+        "設定 GROOVESCRIBE_ADTOF_VERIFY_INPUT 指向該 drums.wav。"
+      ],
+      "required_env": ["GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE"],
+      "optional_env": [
+        "GROOVESCRIBE_ADTOF_CHECKPOINT",
+        "GROOVESCRIBE_ADTOF_VERIFY_INPUT",
+        "GROOVESCRIBE_ADTOF_VERIFY_OUTPUT_DIR"
+      ]
+    },
+    "musescore_pdf": {"ready": true, "optional_for_v1": true}
+  },
+  "smoke_commands": {},
+  "checked_at": "2026-07-02T10:00:00Z",
+  "error": null
 }
 ```
+
+`status=degraded` 表示 mock-ai flow 可用，但 true AI runtime 尚未 ready。V1 預設 upload gating 只要求 `mock_ai_ready=true`；true AI smoke 是 opt-in，不是一般 CI 必跑條件。
 
 ## 3. 上傳音檔 API
 

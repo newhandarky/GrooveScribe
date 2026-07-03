@@ -212,6 +212,7 @@ export function RuntimePanel({
 
       {error ? <div className="alert error">{error}</div> : null}
       {runtime?.error ? <div className="alert error">{runtime.error.message}</div> : null}
+      <RuntimeStatusNote runtime={runtime} />
 
       <div className="runtimeSummary">
         <Metric label="Mock pipeline" value={runtime?.mock_ai_ready ? 'ready' : 'not ready'} />
@@ -237,11 +238,67 @@ export function RuntimePanel({
         <RuntimeCheck label="ADTOF" value={checks.adtof} />
         <RuntimeCheck label="PDF" value={checks.musescore_pdf} />
       </div>
+
+      <AdtofDiagnostic value={checks.adtof} />
     </section>
   );
 }
 
-function UploadPanel({
+function RuntimeStatusNote({ runtime }: { runtime: RuntimePreflightResponse | null }) {
+  if (!runtime) {
+    return <div className="alert warn">Runtime 尚未完成檢查，完成後才能判斷本機 pipeline 可用範圍。</div>;
+  }
+
+  const descriptions: Record<string, string> = {
+    ready: 'Mock pipeline 與 true AI runtime 都可用。V1 預設仍可使用 mock-ai smoke 驗證流程。',
+    degraded: 'Mock pipeline 可用，true AI runtime 尚未 ready；你仍可用本機 mock-ai flow 上傳與驗證 UI / artifact contract。',
+    not_ready: 'Mock pipeline 也尚未 ready；請先修復 runtime 缺口，upload 會維持停用。',
+    error: 'Runtime preflight 本身失敗；請先修復 AI Python 或 diagnostics script 執行問題。',
+  };
+
+  return <div className={`runtimeNote ${runtimeStatusTone(runtime.status)}`}>{descriptions[runtime.status]}</div>;
+}
+
+function AdtofDiagnostic({ value }: { value: unknown }) {
+  const check = recordFromUnknown(value);
+  if (!Object.keys(check).length) return null;
+  const statusCode = stringFromUnknown(check.status_code) ?? 'unknown';
+  const summary = stringFromUnknown(check.summary) ?? 'ADTOF runtime 尚未 ready。';
+  const nextSteps = stringListFromUnknown(check.next_steps);
+  const optionalEnv = stringListFromUnknown(check.optional_env);
+  const reason = stringFromUnknown(check.output_verification_reason);
+
+  return (
+    <div className="diagnosticBlock">
+      <div className="diagnosticHeader">
+        <div>
+          <span>ADTOF diagnosis</span>
+          <strong>{statusCode}</strong>
+        </div>
+        <span className={check.ready ? 'statusText ready' : 'statusText warn'}>
+          {check.ready ? 'ready' : 'needs attention'}
+        </span>
+      </div>
+      <p>{summary}</p>
+      {reason ? <p className="diagnosticReason">{reason}</p> : null}
+      {nextSteps.length ? (
+        <div>
+          <strong>Next steps</strong>
+          <ul>
+            {nextSteps.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {optionalEnv.length ? (
+        <p className="diagnosticMeta">Optional env: {optionalEnv.join(', ')}</p>
+      ) : null}
+    </div>
+  );
+}
+
+export function UploadPanel({
   canUpload,
   uploading,
   selectedFile,
@@ -431,7 +488,7 @@ export function ResultCard({ result }: { result: TranscriptionResultResponse }) 
 }
 
 function RuntimeCheck({ label, value }: { label: string; value: unknown }) {
-  const check = typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+  const check = recordFromUnknown(value);
   const ready = Boolean(check.ready ?? check.available);
   return (
     <div className="checkItem">
@@ -442,6 +499,18 @@ function RuntimeCheck({ label, value }: { label: string; value: unknown }) {
       </div>
     </div>
   );
+}
+
+function recordFromUnknown(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+function stringFromUnknown(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function stringListFromUnknown(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

@@ -103,6 +103,10 @@ class RuntimeDiagnosticsService:
             env["GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE"] = self.settings.pipeline_adtof_command_template
         if self.settings.pipeline_adtof_checkpoint_path:
             env["GROOVESCRIBE_ADTOF_CHECKPOINT"] = self.settings.pipeline_adtof_checkpoint_path
+        if self.settings.pipeline_adtof_verify_input_path:
+            env["GROOVESCRIBE_ADTOF_VERIFY_INPUT"] = self.settings.pipeline_adtof_verify_input_path
+        if self.settings.pipeline_adtof_verify_output_dir:
+            env["GROOVESCRIBE_ADTOF_VERIFY_OUTPUT_DIR"] = self.settings.pipeline_adtof_verify_output_dir
         if self.settings.pipeline_pdf_renderer:
             env["GROOVESCRIBE_PDF_RENDERER"] = self.settings.pipeline_pdf_renderer
         return env
@@ -197,18 +201,81 @@ class RuntimeDiagnosticsService:
 
     def _adtof_check(self, runtime_checks: dict[str, Any]) -> dict[str, Any]:
         adtof = self._dict(runtime_checks.get("adtof_pytorch"))
+        output_verification = self._dict(adtof.get("output_verification"))
+        status_code = self._string_or_none(adtof.get("status_code")) or "not_configured"
+        output_reason = self._string_or_none(output_verification.get("reason"))
         return {
             "ready": bool(adtof.get("ready")),
+            "status_code": status_code,
+            "summary": self._adtof_summary(status_code),
+            "next_steps": self._adtof_next_steps(status_code),
             "configured": bool(adtof.get("configured")),
             "template_configured": bool(adtof.get("template_configured")),
             "template_executable": bool(adtof.get("template_executable")),
             "runtime_verified": bool(adtof.get("runtime_verified")),
             "output_verified": bool(adtof.get("output_verified")),
+            "output_verification_attempted": bool(output_verification.get("attempted")),
+            "output_verification_reason": self._redact_text(output_reason) if output_reason else None,
+            "event_count": output_verification.get("event_count"),
             "device": self._string_or_none(adtof.get("device")),
             "threshold": self._string_or_none(adtof.get("threshold")),
             "missing_placeholders": self._string_list(adtof.get("missing_placeholders")),
             "required_env": self._string_list(adtof.get("required_env")),
+            "optional_env": self._string_list(adtof.get("optional_env")),
         }
+
+    def _adtof_summary(self, status_code: str) -> str:
+        return {
+            "ready": "ADTOF 已成功產生可解析且含 note-on events 的 raw_drum.mid。",
+            "not_configured": "尚未設定 ADTOF command template。",
+            "template_invalid": "ADTOF command template 格式不完整或無法解析。",
+            "executable_missing": "ADTOF command executable 或 Python module 不可用。",
+            "verify_input_missing": "尚未提供 ADTOF verification input drums stem。",
+            "verify_input_not_found": "ADTOF verification input 路徑不存在。",
+            "command_failed": "ADTOF verification command 執行失敗。",
+            "output_missing": "ADTOF command 未產生 raw_drum.mid。",
+            "output_unparseable": "ADTOF 產生的 raw_drum.mid 無法解析。",
+            "output_no_events": "ADTOF 產生的 raw_drum.mid 沒有 note-on events。",
+        }.get(status_code, "ADTOF runtime 尚未 ready。")
+
+    def _adtof_next_steps(self, status_code: str) -> list[str]:
+        return {
+            "ready": ["可以執行 opt-in true-AI smoke；V1 預設仍維持 mock-ai flow。"],
+            "not_configured": [
+                "設定 GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE，template 必須包含 {input} 與 {output}。",
+                "可選擇加入 {device}、{threshold}、{checkpoint} placeholder。",
+            ],
+            "template_invalid": [
+                "修正 GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE，確認 shell quoting 可被 shlex 解析。",
+                "確認 template 包含 {input} 與 {output}。",
+            ],
+            "executable_missing": [
+                "確認 ADTOF CLI 或 adtof Python module 已安裝在 AI runtime。",
+                "若使用 CLI，請確認 command template 的第一個可執行檔在 PATH 或為絕對路徑。",
+            ],
+            "verify_input_missing": [
+                "先執行 normalize 與 Demucs separation，產生 drums.wav。",
+                "設定 GROOVESCRIBE_ADTOF_VERIFY_INPUT 指向該 drums.wav。",
+            ],
+            "verify_input_not_found": [
+                "確認 GROOVESCRIBE_ADTOF_VERIFY_INPUT 指向已存在的 drums.wav。",
+            ],
+            "command_failed": [
+                "直接執行 redacted smoke command 對照本機 stderr。",
+                "檢查 checkpoint、device、threshold 與 ADTOF CLI 參數是否符合安裝版本。",
+            ],
+            "output_missing": [
+                "確認 ADTOF template 的 {output} 對應到 raw MIDI 輸出參數。",
+                "檢查 ADTOF CLI 是否需要不同的輸出 flag，例如 --out 或 --output。",
+            ],
+            "output_unparseable": [
+                "確認 ADTOF 輸出為 MIDI 檔，不是 log、JSON 或空檔。",
+            ],
+            "output_no_events": [
+                "換用更清楚的 drums stem 或調整 threshold。",
+                "確認 checkpoint/model 是否適用於目前輸入音訊。",
+            ],
+        }.get(status_code, ["查看 runtime preflight missing requirements 並依文件逐項修復。"])
 
     def _musescore_check(self, runtime_checks: dict[str, Any]) -> dict[str, Any]:
         musescore = self._dict(runtime_checks.get("musescore_pdf"))

@@ -12,6 +12,7 @@ from app.db.base import Base
 from app.models import AudioFile, ExportFile, TranscriptionJob
 from app.models.enums import ExportFileStatus, ExportFileType, JobStatus, PipelineStage
 from app.services.pipeline_service import PipelineServiceRunner
+from app.services.runtime_diagnostics import RuntimeDiagnosticsService
 from app.storage.local import LocalStorageAdapter
 
 
@@ -28,6 +29,18 @@ def test_pipeline_service_true_ai_smoke_with_synthetic_fixture(tmp_path: Path) -
     if not fixture.exists():
         pytest.skip(f"missing fixture: {fixture}")
 
+    diagnostic_settings = Settings(
+        pipeline_adtof_command_template=adtof_template,
+        pipeline_adtof_verify_input_path=os.environ.get("GROOVESCRIBE_ADTOF_VERIFY_INPUT"),
+        pipeline_adtof_verify_output_dir=os.environ.get("GROOVESCRIBE_ADTOF_VERIFY_OUTPUT_DIR"),
+        pipeline_adtof_device=os.environ.get("GROOVESCRIBE_ADTOF_DEVICE", "cpu"),
+        pipeline_adtof_threshold=float(os.environ.get("GROOVESCRIBE_ADTOF_THRESHOLD", "0.5")),
+    )
+    preflight = RuntimeDiagnosticsService(settings=diagnostic_settings).get_preflight()
+    if preflight.checks.get("adtof", {}).get("status_code") != "ready":
+        reason = preflight.checks.get("adtof", {}).get("summary", "ADTOF runtime is not verified")
+        pytest.skip(f"ADTOF true-AI smoke requires ready runtime: {reason}")
+
     settings = Settings(
         database_url=f"sqlite+pysqlite:///{tmp_path / 'true-ai-smoke.db'}",
         storage_root=str(tmp_path / "storage"),
@@ -37,6 +50,8 @@ def test_pipeline_service_true_ai_smoke_with_synthetic_fixture(tmp_path: Path) -
         pipeline_demucs_device=os.environ.get("GROOVESCRIBE_DEMUCS_DEVICE", "cpu"),
         pipeline_adtof_command_template=adtof_template,
         pipeline_adtof_device=os.environ.get("GROOVESCRIBE_ADTOF_DEVICE", "cpu"),
+        pipeline_adtof_threshold=float(os.environ.get("GROOVESCRIBE_ADTOF_THRESHOLD", "0.5")),
+        pipeline_adtof_checkpoint_path=os.environ.get("GROOVESCRIBE_ADTOF_CHECKPOINT"),
         pipeline_timeout_seconds=int(os.environ.get("PIPELINE_TRUE_AI_TIMEOUT_SECONDS", "3600")),
     )
     storage = LocalStorageAdapter(settings.storage_root)

@@ -266,6 +266,81 @@ input {
   border: 1px solid #d89b91;
 }
 
+.runtimeNote,
+.diagnosticBlock {
+  border-radius: 8px;
+  line-height: 1.45;
+  margin-bottom: 14px;
+  padding: 12px;
+}
+
+.runtimeNote.ready {
+  background: #e3f2e8;
+  border: 1px solid #a9d2b7;
+}
+
+.runtimeNote.degraded {
+  background: #fff4d6;
+  border: 1px solid #dfc775;
+}
+
+.runtimeNote.notReady,
+.runtimeNote.error {
+  background: #fae0dc;
+  border: 1px solid #d89b91;
+}
+
+.diagnosticBlock {
+  background: #f7f9fa;
+  border: 1px solid #d6e0e5;
+  margin: 14px 0 0;
+}
+
+.diagnosticBlock p {
+  margin: 10px 0 0;
+}
+
+.diagnosticBlock ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.diagnosticHeader {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.diagnosticHeader span,
+.diagnosticMeta,
+.diagnosticReason {
+  color: #69736d;
+  font-size: 13px;
+}
+
+.diagnosticHeader strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.statusText {
+  border-radius: 999px;
+  font-weight: 720;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+
+.statusText.ready {
+  background: #dbeee2;
+  color: #1e5732;
+}
+
+.statusText.warn {
+  background: #fff1c7;
+  color: #765700;
+}
+
 .uploadForm {
   display: grid;
   gap: 12px;
