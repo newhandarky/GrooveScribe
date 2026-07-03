@@ -12,6 +12,16 @@ def test_parse_phase1_local_runner_pipeline_log() -> None:
             "processed_event_count": 7,
             "quality_flags": ["hihat_missing_likely"],
         },
+        "validation": {
+            "musicxml": {"available": True, "parseable": True, "error_code": None, "warnings": []},
+            "pdf": {
+                "available": False,
+                "optional": True,
+                "openable": None,
+                "error_code": "pdf_unavailable",
+                "warnings": ["pdf_optional_unavailable"],
+            },
+        },
         "stages": [
             {
                 "name": "notation_generation",
@@ -34,6 +44,8 @@ def test_parse_phase1_local_runner_pipeline_log() -> None:
     assert result.artifact_keys["drum_events"] == "/tmp/job/midi/drum_events.json"
     assert result.quality["raw_event_count"] == 7
     assert result.quality["quality_flags"] == ["hihat_missing_likely"]
+    assert result.validation["musicxml"]["parseable"] is True
+    assert result.validation["pdf"]["error_code"] == "pdf_unavailable"
     assert result.stage_reports[0].name == "notation_generation"
     assert result.stage_reports[0].warnings == ["renderer_nonzero_exit"]
 

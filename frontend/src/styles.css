@@ -535,6 +535,65 @@ input {
   padding: 10px;
 }
 
+.artifactValidation,
+.validationGrid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.artifactValidation div,
+.validationStatus {
+  background: #ffffff;
+  border: 1px solid #d6e0e5;
+  border-radius: 6px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.artifactValidation span,
+.validationStatus span {
+  color: #69736d;
+  font-size: 12px;
+}
+
+.artifactValidation strong,
+.validationStatus strong {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.musicXmlPreview {
+  background: #ffffff;
+  border: 1px solid #d6e0e5;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.musicXmlCanvas {
+  background: #f7f9fa;
+  border: 1px solid #d6e0e5;
+  border-radius: 6px;
+  min-height: 220px;
+  overflow: auto;
+  padding: 10px;
+}
+
+.previewFallback {
+  color: #69736d;
+  display: block;
+  font-size: 13px;
+  margin: -4px 0 0;
+}
+
+.musicXmlRenderTarget {
+  min-height: 198px;
+}
+
 .qualityMetrics {
   display: grid;
   gap: 8px;
@@ -649,6 +708,8 @@ input {
   .layoutGrid,
   .runtimeSummary,
   .checkGrid,
+  .artifactValidation,
+  .validationGrid,
   .qualityMetrics,
   .downloadGrid {
     grid-template-columns: 1fr;

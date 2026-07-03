@@ -11,8 +11,14 @@ def test_cleanup_storage_dry_run_lists_orphan_job_dirs(tmp_path: Path) -> None:
     report = inspect_storage(storage_root, tmp_path / "missing.db")
 
     assert report["dry_run"] is True
+    assert report["status"] == "dry_run"
+    assert report["execute_supported"] is False
+    assert report["execute_refused"] is False
+    assert report["storage_root_name"] == "storage"
+    assert report["job_dir_count"] == 1
     assert report["job_dirs"] == ["orphan-job"]
     assert report["database_found"] is False
+    assert report["database_status"] == "missing"
     assert report["deleted"] == []
 
 

@@ -92,6 +92,20 @@ class PipelineQualitySummary(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class PipelineArtifactValidation(BaseModel):
+    available: bool
+    parseable: bool | None = None
+    optional: bool | None = None
+    openable: bool | None = None
+    error_code: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class PipelineValidationSummary(BaseModel):
+    musicxml: PipelineArtifactValidation
+    pdf: PipelineArtifactValidation
+
+
 class PipelineSummaryResult(BaseModel):
     mode: str
     status: str | None = None
@@ -99,6 +113,7 @@ class PipelineSummaryResult(BaseModel):
     artifacts: list[PipelineArtifactSummary] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     quality: PipelineQualitySummary | None = None
+    validation: PipelineValidationSummary | None = None
     pipeline_log_available: bool = False
 
 

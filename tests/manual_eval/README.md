@@ -9,7 +9,8 @@
 3. 若使用第三方音源，記錄來源、授權與是否可提交到 repo。
 4. 針對 raw MIDI 與 processed MIDI 跑 `scripts/inspect_pipeline_artifacts.py`，記錄 note histogram、processed drum counts、event count 與 quality flags；單檔 MIDI 可用 `scripts/inspect_midi.py`。
 5. 若使用 `scripts/run_true_ai_smoke_baseline.py`，可直接從 `baseline.json` 讀取 runtime、artifact、inspection 與 blocked reason。
-6. 每次模型、threshold、後處理策略改動後，保留一份新的評估結果檔。
+6. 可用 `scripts/generate_manual_eval_row.py <baseline.json>` 先產生符合 `manual_eval_template.csv` 的一列，再由 reviewer 補分數。
+7. 每次模型、threshold、後處理策略改動後，保留一份新的評估結果檔。
 
 ## 分數定義
 
@@ -36,6 +37,8 @@
 - `warnings`：pipeline / postprocess warning。
 - `blocked_reason`：true AI 尚無法完成時必填。
 
+所有 `baseline_report_ref` / `artifact_ref` 必須使用 `baseline:<run_id>`、`external:<label>` 或 repo-relative fixture 名稱，不填 `/Users`、`/tmp`、`/private/tmp`、`/var/folders` 等本機絕對路徑。
+
 ## Blocked Baseline
 
 若 true AI runtime 仍是 `degraded`，不要填入假分數。請新增一列並填：
@@ -50,3 +53,19 @@
 - `notes`：貼上 baseline report 路徑或 ADTOF `status_code`
 
 評分欄位留空，等 runtime ready 後再補一份 completed baseline。
+
+## CSV Row Generator
+
+從 true-AI baseline 產出 row：
+
+```bash
+PYTHONPATH=. .venv-ai/bin/python scripts/generate_manual_eval_row.py \
+  /tmp/groovescribe-true-ai-baseline/<run-id>/baseline.json
+```
+
+`completed` baseline 會帶入 runtime、artifact ref、raw/processed event count、note histogram、drum counts、quality flags、warnings。`blocked` baseline 會保留 blocked reason，分數欄位維持空白。
+
+## Fixture 與外部音檔
+
+- Synthetic fixture 可提交到 repo，適合 regression / mock browser smoke。
+- 外部授權音檔只記錄授權來源與 redacted label，不提交音檔、stem、MIDI、MusicXML、PDF 或完整本機 artifact 路徑。

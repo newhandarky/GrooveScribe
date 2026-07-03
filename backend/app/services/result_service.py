@@ -109,6 +109,7 @@ class ResultService:
             ],
             "warnings": sorted(set(warnings)),
             "quality": _pipeline_quality_summary(pipeline_log, job),
+            "validation": _pipeline_validation_summary(pipeline_log),
             "pipeline_log_available": pipeline_log is not None,
         }
 
@@ -134,7 +135,8 @@ def _is_public_safe_text(value: str) -> bool:
             "/var/folders/",
             "stderr",
             "stdout",
-            "command",
+            "command_template",
+            "raw command",
         )
     )
 
@@ -163,6 +165,64 @@ def _pipeline_quality_summary(pipeline_log, job: TranscriptionJob) -> dict | Non
         "estimated_measure_count": None,
         "quality_flags": _quality_flag_subset(flags),
         "warnings": sorted(set(flags)),
+    }
+
+
+def _pipeline_validation_summary(pipeline_log) -> dict | None:
+    if pipeline_log is None:
+        return None
+    if pipeline_log.validation:
+        return _sanitize_validation_summary(pipeline_log.validation)
+    for stage in pipeline_log.stage_reports:
+        if stage.name == "notation_generation":
+            validation = stage.report.get("validation")
+            if isinstance(validation, dict):
+                return _sanitize_validation_summary(validation)
+    return None
+
+
+def _sanitize_validation_summary(raw: dict) -> dict | None:
+    musicxml = _sanitize_validation_item(raw.get("musicxml"), artifact="musicxml")
+    pdf = _sanitize_validation_item(raw.get("pdf"), artifact="pdf")
+    if musicxml is None and pdf is None:
+        return None
+    return {
+        "musicxml": musicxml
+        or {
+            "available": False,
+            "parseable": False,
+            "error_code": "musicxml_unavailable",
+            "warnings": ["musicxml_unavailable"],
+        },
+        "pdf": pdf
+        or {
+            "available": False,
+            "optional": True,
+            "openable": None,
+            "error_code": "pdf_unavailable",
+            "warnings": ["pdf_optional_unavailable"],
+        },
+    }
+
+
+def _sanitize_validation_item(value: object, *, artifact: str) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    warnings = [item for item in _string_list(value.get("warnings")) if _is_public_safe_text(item)]
+    error_code = _safe_code(value.get("error_code"))
+    if artifact == "pdf":
+        return {
+            "available": bool(value.get("available")),
+            "optional": bool(value.get("optional", True)),
+            "openable": _bool_or_none(value.get("openable")),
+            "error_code": error_code,
+            "warnings": warnings,
+        }
+    return {
+        "available": bool(value.get("available")),
+        "parseable": _bool_or_none(value.get("parseable")),
+        "error_code": error_code,
+        "warnings": warnings,
     }
 
 
@@ -201,6 +261,17 @@ def _sanitize_quality_summary(raw: dict) -> dict:
 
 def _quality_flag_subset(warnings: list[str]) -> list[str]:
     return sorted({warning for warning in warnings if warning in _QUALITY_FLAG_CODES})
+
+
+def _safe_code(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return text if _is_public_safe_text(text) else None
+
+
+def _bool_or_none(value: object) -> bool | None:
+    return value if isinstance(value, bool) else None
 
 
 def _int_dict(value: object) -> dict[str, int]:

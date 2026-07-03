@@ -16,6 +16,7 @@
 - `inspect_midi.py`：讀 raw / processed MIDI，輸出 note histogram、mapped drum counts、event count、duration / measure estimate 與 quality flags。
 - `inspect_pipeline_artifacts.py`：合併 raw / processed MIDI inspection，輸出 manual eval 與 result API 可重用的 quality summary。
 - `run_true_ai_smoke_baseline.py`：opt-in 執行 true-AI preflight / pipeline smoke，並輸出 `baseline.json`；runtime degraded 時保存 blocked reason。
+- `generate_manual_eval_row.py`：從 `baseline.json` 產生一列符合 `tests/manual_eval/manual_eval_template.csv` 的 CSV row；artifact ref 只輸出 redacted label。
 - `cleanup_storage.py`：檢查 repo-local `storage/local` 狀態；目前只支援 dry-run，不刪檔。
 - `read_pipeline_snapshot.py`：internal/debug CLI，用 `job_id` 從 backend DB 與 `jobs/{job_id}/logs/pipeline.json` 讀取 pipeline snapshot；不改正式前端 API。
 
@@ -79,6 +80,15 @@ PYTHONPATH=. "$PYTHON" scripts/run_true_ai_smoke_baseline.py \
 
 `baseline.json` 可能是 `completed`、`failed` 或 `blocked`。`blocked` 代表 true-AI runtime 尚未 ready，應保留 blocked reason，不要填入假 manual eval 分數。
 
+baseline report v2 會包含 raw/processed MIDI inspection、MusicXML validation、PDF optional status、pipeline quality 與 `baseline:<run-id>` ref。PDF unavailable 不阻塞 baseline；MusicXML validation 會標出 parseable / warning code，供 result review 與 manual eval 判讀。
+
+從 baseline 產出 manual eval row：
+
+```bash
+PYTHONPATH=. "$PYTHON" scripts/generate_manual_eval_row.py \
+  /tmp/groovescribe-true-ai-baseline/<run>/baseline.json
+```
+
 也可以針對既有 artifact 產出 inspection JSON：
 
 ```bash
@@ -115,3 +125,14 @@ curl -H "Authorization: Bearer <token>" \
 ## 預期後續 script
 
 - storage cleanup execute mode，必須另做安全設計與人工確認，不能在 V1 預設自動刪檔。
+
+## Mock browser smoke path
+
+V1 release 前至少重跑一次 deterministic smoke：
+
+```bash
+backend/.venv/bin/python -m pytest backend/tests/test_transcription_api_integration.py -k default_local_queue
+npm --prefix frontend run test -- App.test.tsx
+```
+
+此 smoke 使用 synthetic fixture / mock pipeline 驗證 upload -> completed -> result page contract、MIDI/MusicXML download 可見、PDF optional status 可見。若之後導入 Playwright，仍不得讓 true-AI 或 PDF renderer 成為一般 CI 必跑條件。

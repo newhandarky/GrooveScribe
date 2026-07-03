@@ -11,9 +11,17 @@ from pathlib import Path
 from typing import Any, Callable
 
 from scripts.inspect_midi import inspect_midi
+from ai_pipeline.notation.validation import validate_score_artifacts
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 ProcessRunner = Callable[..., subprocess.CompletedProcess[str]]
+_QUALITY_FLAG_CODES = {
+    "too_few_events",
+    "sparse_transcription",
+    "hihat_missing_likely",
+    "mostly_tom_output",
+    "no_snare_detected",
+}
 
 
 @dataclass(frozen=True)
@@ -232,6 +240,7 @@ def _blocked_report(
         "schema_version": "1.0",
         "status": "blocked",
         "checked_at": checked_at.isoformat(),
+        "baseline_ref": f"baseline:{config.run_id}",
         "input_fixture": _display_path(config.input_path),
         "output_dir_name": output_dir.name,
         "blocked_reason": reason,
@@ -256,6 +265,11 @@ def _completed_or_failed_report(
     drum_events = _read_json(artifact_paths["drum_events"]["path"])
     raw_inspection = _inspect_optional_midi(artifact_paths["raw_midi"]["path"])
     processed_inspection = _inspect_optional_midi(artifact_paths["processed_midi"]["path"])
+    validation = validate_score_artifacts(
+        artifact_paths["musicxml"]["path"],
+        artifact_paths["pdf"]["path"] if artifact_paths["pdf"]["available"] else None,
+    )
+    quality = _quality_summary(raw_inspection, processed_inspection, drum_events, validation)
     required_available = all(
         artifact_paths[name]["available"]
         for name in ("raw_midi", "processed_midi", "musicxml", "pipeline_log")
@@ -265,6 +279,7 @@ def _completed_or_failed_report(
         "schema_version": "1.0",
         "status": status,
         "checked_at": checked_at.isoformat(),
+        "baseline_ref": f"baseline:{config.run_id}",
         "input_fixture": _display_path(config.input_path),
         "output_dir_name": output_dir.name,
         "runtime": _runtime_summary(config, preflight),
@@ -277,6 +292,8 @@ def _completed_or_failed_report(
             "warnings": _collect_pipeline_warnings(pipeline_log, drum_events),
         },
         "artifacts": {name: _artifact_report(item, output_dir) for name, item in artifact_paths.items()},
+        "quality": quality,
+        "validation": validation,
         "inspection": {
             "raw_midi": raw_inspection,
             "processed_midi": processed_inspection,
@@ -344,6 +361,28 @@ def _drum_events_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "processed_drum_counts": _dict(payload.get("processed_drum_counts")),
         "raw_note_histogram": _dict(payload.get("raw_note_histogram")),
         "warnings": _list(payload.get("warnings")),
+    }
+
+
+def _quality_summary(
+    raw_inspection: dict[str, Any],
+    processed_inspection: dict[str, Any],
+    drum_events: dict[str, Any],
+    validation: dict[str, Any],
+) -> dict[str, Any]:
+    warnings = set(str(item) for item in _list(drum_events.get("warnings")))
+    warnings.update(str(item) for item in _list(raw_inspection.get("quality_flags")))
+    warnings.update(str(item) for item in _list(processed_inspection.get("quality_flags")))
+    for item in (validation.get("musicxml"), validation.get("pdf")):
+        warnings.update(str(warning) for warning in _list(_dict(item).get("warnings")))
+    return {
+        "raw_event_count": raw_inspection.get("event_count"),
+        "processed_event_count": processed_inspection.get("event_count"),
+        "raw_note_histogram": _dict(raw_inspection.get("note_histogram")),
+        "processed_drum_counts": _dict(processed_inspection.get("mapped_drum_counts"))
+        or _dict(drum_events.get("processed_drum_counts")),
+        "quality_flags": sorted(warning for warning in warnings if warning in _QUALITY_FLAG_CODES),
+        "warnings": sorted(warnings),
     }
 
 

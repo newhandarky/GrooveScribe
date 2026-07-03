@@ -443,6 +443,7 @@ export function ResultCard({ result }: { result: TranscriptionResultResponse }) 
   const availableExports = result.exports.filter((item) => item.status === 'available');
   const unavailableExports = result.exports.filter((item) => item.status !== 'available');
   const pipelineMode = result.pipeline?.mode ?? 'unknown';
+  const validation = result.pipeline?.validation ?? null;
 
   return (
     <div className="resultCard">
@@ -470,6 +471,7 @@ export function ResultCard({ result }: { result: TranscriptionResultResponse }) 
       </div>
 
       <PipelineReview pipeline={result.pipeline} exports={result.exports} />
+      <MusicXmlPreview url={result.preview.musicxml_url} validation={validation} />
 
       {result.drum_track?.warnings.length ? (
         <div className="alert warn">
@@ -505,6 +507,117 @@ export function ResultCard({ result }: { result: TranscriptionResultResponse }) 
   );
 }
 
+function MusicXmlPreview({
+  url,
+  validation,
+}: {
+  url: string | null;
+  validation: NonNullable<NonNullable<TranscriptionResultResponse['pipeline']>['validation']> | null;
+}) {
+  const renderTargetRef = useRef<HTMLDivElement | null>(null);
+  const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable' | 'error'>(
+    url ? 'idle' : 'unavailable',
+  );
+
+  useEffect(() => {
+    if (!url || !renderTargetRef.current) {
+      setStatus('unavailable');
+      return;
+    }
+    let canceled = false;
+    setStatus('loading');
+    renderTargetRef.current.replaceChildren();
+    void import('opensheetmusicdisplay')
+      .then(async ({ OpenSheetMusicDisplay }) => {
+        if (canceled || !renderTargetRef.current) return;
+        const osmd = new OpenSheetMusicDisplay(renderTargetRef.current, {
+          autoResize: true,
+          backend: 'svg',
+          drawTitle: false,
+        });
+        await osmd.load(url);
+        if (canceled) return;
+        await osmd.render();
+        if (!canceled) setStatus('ready');
+      })
+      .catch(() => {
+        if (!canceled) setStatus('error');
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [url]);
+
+  const musicxml = validation?.musicxml;
+  const pdf = validation?.pdf;
+  const musicxmlStatus = validation
+    ? musicxml?.parseable
+      ? 'parseable'
+      : musicxml?.available
+        ? 'needs review'
+        : 'unavailable'
+    : 'not reported';
+  const pdfStatus = validation
+    ? pdf?.available
+      ? pdf.openable
+        ? 'available'
+        : 'needs review'
+      : 'optional unavailable'
+    : 'not reported';
+
+  return (
+    <div className="musicXmlPreview">
+      <div className="reviewHeader">
+        <strong>MusicXML preview</strong>
+        <span>{previewStatusLabel(status)}</span>
+      </div>
+      <div className="validationGrid">
+        <ValidationStatus
+          label="MusicXML validation"
+          status={musicxmlStatus}
+          warnings={musicxml?.warnings ?? []}
+        />
+        <ValidationStatus
+          label="PDF validation"
+          status={pdfStatus}
+          warnings={pdf?.warnings ?? []}
+        />
+      </div>
+      <div className="musicXmlCanvas">
+        <div className="musicXmlRenderTarget" ref={renderTargetRef} />
+      </div>
+      {status === 'unavailable' ? <p className="previewFallback">MusicXML preview unavailable</p> : null}
+      {status === 'loading' || status === 'idle' ? <p className="previewFallback">Loading preview</p> : null}
+      {status === 'error' ? (
+        <p className="previewFallback">Preview renderer unavailable; download remains available.</p>
+      ) : null}
+    </div>
+  );
+}
+
+function ValidationStatus({ label, status, warnings }: { label: string; status: string; warnings: string[] }) {
+  return (
+    <div className="validationStatus">
+      <span>{label}</span>
+      <strong>{status}</strong>
+      {warnings.length ? (
+        <div className="inlineWarnings">
+          {warnings.map((warning) => (
+            <span key={warning}>{warning}</span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function previewStatusLabel(status: 'idle' | 'loading' | 'ready' | 'unavailable' | 'error'): string {
+  if (status === 'ready') return 'rendered';
+  if (status === 'error') return 'fallback';
+  if (status === 'unavailable') return 'unavailable';
+  return 'loading';
+}
+
 function PipelineReview({
   pipeline,
   exports,
@@ -516,6 +629,7 @@ function PipelineReview({
   const stages = pipeline.stages ?? [];
   const warnings = pipeline.warnings ?? [];
   const quality = pipeline.quality;
+  const validation = pipeline.validation;
 
   return (
     <div className="pipelineReview">
@@ -524,6 +638,7 @@ function PipelineReview({
         <span>{pipeline.pipeline_log_available ? 'log available' : 'log unavailable'}</span>
       </div>
       {quality ? <QualityReview quality={quality} /> : null}
+      {validation ? <ArtifactValidationSummary validation={validation} /> : null}
       {stages.length ? (
         <div className="stageList">
           {stages.map((stage) => (
@@ -553,6 +668,27 @@ function PipelineReview({
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function ArtifactValidationSummary({
+  validation,
+}: {
+  validation: NonNullable<NonNullable<TranscriptionResultResponse['pipeline']>['validation']>;
+}) {
+  const pdfStatus = validation.pdf.available ? (validation.pdf.openable ? 'openable' : 'needs review') : 'optional unavailable';
+  const musicxmlStatus = validation.musicxml.parseable ? 'parseable' : 'needs review';
+  return (
+    <div className="artifactValidation">
+      <div>
+        <span>MusicXML</span>
+        <strong>{musicxmlStatus}</strong>
+      </div>
+      <div>
+        <span>PDF</span>
+        <strong>{pdfStatus}</strong>
+      </div>
     </div>
   );
 }
