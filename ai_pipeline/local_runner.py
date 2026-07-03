@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ai_pipeline.midi import MidiPostProcessor
+from ai_pipeline.midi.quality import quality_flag_subset
 from ai_pipeline.midi.simple_midi import write_drum_midi
 from ai_pipeline.midi.types import ProcessedDrumEvent
 from ai_pipeline.notation import MusicXmlGenerator, MuseScorePdfExporter, NotationConfig, NotationError
@@ -221,6 +222,11 @@ class LocalPipelineRunner:
             "estimated_bpm": result.report.estimated_bpm,
             "time_signature": result.report.time_signature,
             "warnings": list(result.report.warnings),
+            "raw_note_histogram": {
+                str(key): value for key, value in (result.report.raw_note_histogram or {}).items()
+            },
+            "processed_drum_counts": result.report.processed_drum_counts or {},
+            "quality_flags": quality_flag_subset(result.report.warnings),
         }
 
     def _run_notation_generation(
@@ -276,6 +282,7 @@ class LocalPipelineRunner:
             "mock_ai": self.config.mock_ai,
             "artifacts": {name: str(path) for name, path in artifacts.items()},
             "stages": [asdict(stage_log) for stage_log in stage_logs],
+            "quality": _build_quality_summary(stage_logs),
         }
         log_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -290,3 +297,49 @@ def _serialize_error(exc: Exception) -> dict[str, str]:
         "code": getattr(exc, "code", exc.__class__.__name__),
         "message": str(exc),
     }
+
+
+def _build_quality_summary(stage_logs: list[StageLog]) -> dict | None:
+    midi_report = _stage_report(stage_logs, "midi_post_processing")
+    if midi_report is None:
+        return None
+    notation_report = _stage_report(stage_logs, "notation_generation") or {}
+
+    warnings = [str(warning) for warning in midi_report.get("warnings", []) if isinstance(warning, str)]
+    return {
+        "schema_version": "1.0",
+        "raw_event_count": midi_report.get("input_event_count"),
+        "processed_event_count": midi_report.get("output_event_count"),
+        "raw_note_histogram": _string_int_dict(midi_report.get("raw_note_histogram")),
+        "processed_drum_counts": _string_int_dict(midi_report.get("processed_drum_counts")),
+        "duration_seconds": _first_number(stage_logs, "audio_preprocessing", "duration_seconds"),
+        "tempo_bpm": midi_report.get("estimated_bpm"),
+        "estimated_measure_count": notation_report.get("measure_count"),
+        "quality_flags": midi_report.get("quality_flags") or quality_flag_subset(warnings),
+        "warnings": sorted(set(warnings)),
+    }
+
+
+def _stage_report(stage_logs: list[StageLog], name: str) -> dict | None:
+    for stage_log in stage_logs:
+        if stage_log.name == name and stage_log.status == "completed":
+            return stage_log.report
+    return None
+
+
+def _first_number(stage_logs: list[StageLog], stage_name: str, key: str) -> float | None:
+    report = _stage_report(stage_logs, stage_name)
+    if report is None:
+        return None
+    value = report.get(key)
+    return value if isinstance(value, int | float) else None
+
+
+def _string_int_dict(value: object) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, int] = {}
+    for key, item in value.items():
+        if isinstance(item, int):
+            result[str(key)] = item
+    return dict(sorted(result.items()))

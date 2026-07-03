@@ -21,6 +21,19 @@ Future optional：
 - S3-compatible storage。
 - cloud sync / SaaS deployment。
 
+## 目前完成狀態摘要
+
+截至 2026-07-03，local-first V1 已完成下列可驗收能力：
+
+- local web app vertical slice：localhost UI 可做 runtime preflight、upload、job polling、result download。
+- runtime diagnostics：`GET /api/v1/runtime/preflight` 與 ADTOF diagnostics 可回傳 structured status / next steps。
+- true-AI baseline record：`tests/manual_eval/2026-07-03_true_ai_baseline_eval.csv` 已記錄 synthetic fixture baseline。
+- result API pipeline summary：`GET /api/v1/transcriptions/{job_id}` 的 optional `pipeline` 欄位可顯示 stage summary、warnings、exports 與 quality summary。
+- cleanup dry-run：local storage cleanup 可 dry-run 檢查。
+- manual eval template：`tests/manual_eval/manual_eval_template.csv` 已包含 baseline report、event counts、drum counts、quality flags 與 blocked reason。
+
+下一階段主線是 quality diagnostics / result review / manual eval gate：強化 artifact inspection、穩定 warning policy、讓結果頁能判讀 mock / true AI 輸出品質，並以 manual eval 決定 V1 是否可進 release。
+
 ## Ticket 總表
 
 | Ticket ID | Phase | Ticket 名稱 | 優先級 | 預估難度 | 相依任務 | 對應文件 | 完成狀態 |
@@ -77,14 +90,10 @@ Future optional：
 ## 建議開發順序
 
 ```text
-Phase 1：Local runtime baseline
-→ Phase 2：SQLite / local storage foundation
-→ Phase 3：local job manager
-→ Phase 4：production pipeline service
-→ Phase 5：local web app
-→ Phase 6：preview / export / artifact UX
-→ Phase 7：quality / diagnostics / acceptance
-→ Phase 8：local startup / release checklist
+Phase 7：quality diagnostics / result review / manual eval gate
+→ Phase 6：MusicXML preview polish / optional PDF clarity
+→ Phase 8：local startup / release checklist hardening
+→ Future：desktop shell、server mode、cloud sync
 ```
 
 ## 完整 V1 完成條件摘要

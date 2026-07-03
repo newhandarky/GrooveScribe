@@ -109,6 +109,17 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
         { type: 'pdf', available: false, file_size_bytes: null, status: 'failed' },
       ],
       warnings: ['mock_ai_enabled', 'too_few_events'],
+      quality: {
+        raw_event_count: 7,
+        processed_event_count: 5,
+        raw_note_histogram: { '35': 2, '38': 1, '42': 4 },
+        processed_drum_counts: { closed_hat: 2, kick: 2, snare: 1 },
+        duration_seconds: 12,
+        tempo_bpm: 120,
+        estimated_measure_count: 4,
+        quality_flags: ['sparse_transcription'],
+        warnings: ['sparse_transcription'],
+      },
       pipeline_log_available: true,
     },
     ...overrides,
@@ -194,6 +205,10 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('Demo Groove');
     expect(html).toContain('MOCK');
     expect(html).toContain('Pipeline summary');
+    expect(html).toContain('Raw events');
+    expect(html).toContain('Processed events');
+    expect(html).toContain('closed_hat: 2');
+    expect(html).toContain('sparse_transcription');
     expect(html).toContain('Midi Post Processing');
     expect(html).toContain('mock_ai_enabled');
     expect(html).toContain('5 events');
@@ -229,6 +244,17 @@ describe('local app smoke rendering', () => {
             ],
             artifacts: [],
             warnings: ['hihat_missing_likely'],
+            quality: {
+              raw_event_count: 7,
+              processed_event_count: 7,
+              raw_note_histogram: { '35': 1, '47': 6 },
+              processed_drum_counts: { kick: 1, tom: 6 },
+              duration_seconds: 30,
+              tempo_bpm: 118,
+              estimated_measure_count: 8,
+              quality_flags: ['hihat_missing_likely', 'mostly_tom_output'],
+              warnings: ['hihat_missing_likely', 'mostly_tom_output'],
+            },
             pipeline_log_available: true,
           },
         })}
@@ -238,6 +264,7 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('TRUE AI');
     expect(html).toContain('Drum Transcription');
     expect(html).toContain('hihat_missing_likely');
+    expect(html).toContain('tom: 6');
     expect(html).not.toContain('/Users/');
     expect(html).not.toContain('/tmp/');
     expect(html).not.toContain('Traceback');

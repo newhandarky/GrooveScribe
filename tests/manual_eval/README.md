@@ -7,7 +7,7 @@
 1. 對同一批 fixture 或授權測試音檔跑 local pipeline。
 2. 將結果填入 `manual_eval_template.csv`。
 3. 若使用第三方音源，記錄來源、授權與是否可提交到 repo。
-4. 針對 raw MIDI 與 processed MIDI 跑 `scripts/inspect_midi.py`，記錄 note histogram、processed drum counts、event count。
+4. 針對 raw MIDI 與 processed MIDI 跑 `scripts/inspect_pipeline_artifacts.py`，記錄 note histogram、processed drum counts、event count 與 quality flags；單檔 MIDI 可用 `scripts/inspect_midi.py`。
 5. 若使用 `scripts/run_true_ai_smoke_baseline.py`，可直接從 `baseline.json` 讀取 runtime、artifact、inspection 與 blocked reason。
 6. 每次模型、threshold、後處理策略改動後，保留一份新的評估結果檔。
 
@@ -22,11 +22,17 @@
 
 ## V1 Gate 記錄要求
 
+- `date`：人工評估日期。
+- `fixture_name`：repo 內 fixture 或授權外部音檔名稱。
+- `runtime_mode`：`mock`、`true_ai` 或 `unknown`。
 - `pipeline_version`：backend / ai pipeline 版本或 commit。
 - `runtime_version`：AI Python、Demucs、ADTOF template / checkpoint 摘要。
+- `baseline_report_ref`：`baseline.json` 或 artifact inspection report 參照。
 - `artifact_ref`：repo 外 artifact 位置或 redacted storage key。
+- `raw_event_count` / `processed_event_count`：raw 與 processed MIDI note-on event 數量。
 - `raw_note_histogram`：raw MIDI note 分布。
 - `processed_drum_counts`：postprocess 後的 drum 分布。
+- `quality_flags`：`too_few_events`、`sparse_transcription`、`hihat_missing_likely`、`mostly_tom_output`、`no_snare_detected` 等穩定診斷 code。
 - `warnings`：pipeline / postprocess warning。
 - `blocked_reason`：true AI 尚無法完成時必填。
 
@@ -34,10 +40,12 @@
 
 若 true AI runtime 仍是 `degraded`，不要填入假分數。請新增一列並填：
 
-- `evaluation_date`
-- `audio_fixture`
+- `date`
+- `fixture_name`
+- `runtime_mode`
 - `pipeline_version`
 - `runtime_version`
+- `baseline_report_ref`
 - `blocked_reason`
 - `notes`：貼上 baseline report 路徑或 ADTOF `status_code`
 

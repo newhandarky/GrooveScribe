@@ -133,6 +133,14 @@ def _write_fake_pipeline_output(output_dir: Path) -> None:
         "schema_version": "1.0",
         "status": "completed",
         "artifacts": {name: str(path) for name, path in artifact_paths.items()},
+        "quality": {
+            "raw_event_count": 7,
+            "processed_event_count": 7,
+            "raw_note_histogram": {"35": 1, "47": 6},
+            "processed_drum_counts": {"kick": 1, "tom": 6},
+            "quality_flags": ["hihat_missing_likely", "mostly_tom_output"],
+            "warnings": ["hihat_missing_likely", "mostly_tom_output"],
+        },
         "stages": [
             {"name": "source_separation", "status": "completed", "report": {"separator": "mock"}},
             {"name": "drum_transcription", "status": "completed", "report": {"transcriber": "mock", "event_count": 4}},
@@ -311,6 +319,10 @@ def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path)
     assert result_response.status_code == 200
     result_body = result_response.json()
     assert {export["type"] for export in result_body["exports"]} == {"midi", "musicxml", "pdf"}
+    assert result_body["pipeline"]["quality"]["raw_event_count"] == 7
+    assert result_body["pipeline"]["quality"]["processed_drum_counts"] == {"kick": 1, "tom": 6}
+    assert "mostly_tom_output" in result_body["pipeline"]["quality"]["quality_flags"]
+    assert "/tmp/" not in str(result_body["pipeline"])
     assert midi_response.status_code == 200
     assert musicxml_response.status_code == 200
     assert pdf_response.status_code == 200

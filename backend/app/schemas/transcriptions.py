@@ -80,12 +80,25 @@ class PipelineArtifactSummary(BaseModel):
     status: str | None = None
 
 
+class PipelineQualitySummary(BaseModel):
+    raw_event_count: int | None = None
+    processed_event_count: int | None = None
+    raw_note_histogram: dict[str, int] = Field(default_factory=dict)
+    processed_drum_counts: dict[str, int] = Field(default_factory=dict)
+    duration_seconds: float | None = None
+    tempo_bpm: float | None = None
+    estimated_measure_count: int | None = None
+    quality_flags: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class PipelineSummaryResult(BaseModel):
     mode: str
     status: str | None = None
     stages: list[PipelineStageSummary] = Field(default_factory=list)
     artifacts: list[PipelineArtifactSummary] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    quality: PipelineQualitySummary | None = None
     pipeline_log_available: bool = False
 
 
