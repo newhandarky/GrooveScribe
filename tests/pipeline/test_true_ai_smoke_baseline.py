@@ -41,6 +41,7 @@ def test_true_ai_baseline_writes_blocked_report_when_runtime_is_degraded(tmp_pat
     assert result.status == "blocked"
     assert result.return_code == 0
     assert report["status"] == "blocked"
+    assert report["baseline_ref"] == "baseline:baseline-test"
     assert "ADTOF runtime has not produced" in report["blocked_reason"]
     assert report["preflight"]["true_ai_ready"] is False
     assert report["preflight"]["adtof_status_code"] == "verify_input_missing"
@@ -72,12 +73,21 @@ def test_true_ai_baseline_writes_completed_artifact_inspection(tmp_path: Path) -
     assert result.status == "completed"
     assert result.return_code == 0
     assert report["status"] == "completed"
+    assert report["baseline_ref"] == "baseline:baseline-test"
     assert report["artifacts"]["raw_midi"]["path"] == "midi/raw_drum.mid"
     assert report["artifacts"]["musicxml"]["available"] is True
     assert report["exports"]["pdf"] == {"status": "unavailable", "optional": True, "file_size_bytes": None}
+    assert report["validation"]["musicxml"]["available"] is True
+    assert report["validation"]["musicxml"]["parseable"] is True
+    assert "musicxml_version_missing" in report["validation"]["musicxml"]["warnings"]
+    assert report["validation"]["pdf"]["error_code"] == "pdf_unavailable"
     assert report["inspection"]["raw_midi"]["event_count"] == 2
     assert report["inspection"]["raw_midi"]["note_histogram"] == {"36": 1, "38": 1}
     assert report["inspection"]["drum_events"]["processed_drum_counts"] == {"kick": 1, "snare": 1}
+    assert report["quality"]["raw_event_count"] == 2
+    assert report["quality"]["processed_event_count"] == 2
+    assert "hihat_missing_likely" in report["quality"]["quality_flags"]
+    assert "pdf_optional_unavailable" in report["quality"]["warnings"]
     assert report["pipeline"]["warnings"] == ["hihat_missing_likely"]
 
 

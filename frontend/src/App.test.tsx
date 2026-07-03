@@ -120,6 +120,21 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
         quality_flags: ['sparse_transcription'],
         warnings: ['sparse_transcription'],
       },
+      validation: {
+        musicxml: {
+          available: true,
+          parseable: true,
+          error_code: null,
+          warnings: [],
+        },
+        pdf: {
+          available: false,
+          optional: true,
+          openable: null,
+          error_code: 'pdf_unavailable',
+          warnings: ['pdf_optional_unavailable'],
+        },
+      },
       pipeline_log_available: true,
     },
     ...overrides,
@@ -209,6 +224,12 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('Processed events');
     expect(html).toContain('closed_hat: 2');
     expect(html).toContain('sparse_transcription');
+    expect(html).toContain('MusicXML preview');
+    expect(html).toContain('MusicXML validation');
+    expect(html).toContain('parseable');
+    expect(html).toContain('PDF validation');
+    expect(html).toContain('optional unavailable');
+    expect(html).toContain('pdf_optional_unavailable');
     expect(html).toContain('Midi Post Processing');
     expect(html).toContain('mock_ai_enabled');
     expect(html).toContain('5 events');
@@ -255,6 +276,21 @@ describe('local app smoke rendering', () => {
               quality_flags: ['hihat_missing_likely', 'mostly_tom_output'],
               warnings: ['hihat_missing_likely', 'mostly_tom_output'],
             },
+            validation: {
+              musicxml: {
+                available: true,
+                parseable: false,
+                error_code: 'musicxml_measure_missing',
+                warnings: ['musicxml_measure_missing'],
+              },
+              pdf: {
+                available: true,
+                optional: true,
+                openable: true,
+                error_code: null,
+                warnings: [],
+              },
+            },
             pipeline_log_available: true,
           },
         })}
@@ -268,6 +304,18 @@ describe('local app smoke rendering', () => {
     expect(html).not.toContain('/Users/');
     expect(html).not.toContain('/tmp/');
     expect(html).not.toContain('Traceback');
+    expect(html).not.toContain('stdout');
+    expect(html).not.toContain('stderr');
+  });
+
+  it('renders missing validation as not reported for backward-compatible results', () => {
+    const html = renderToStaticMarkup(<ResultCard result={resultFixture({ pipeline: null })} />);
+
+    expect(html).toContain('MusicXML preview');
+    expect(html).toContain('MusicXML validation');
+    expect(html).toContain('PDF validation');
+    expect(html).toContain('not reported');
+    expect(html).not.toContain('pipeline.validation');
   });
 
   it('renders interrupted job status as terminal state feedback', () => {

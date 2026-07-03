@@ -11,7 +11,13 @@ from ai_pipeline.midi import MidiPostProcessor
 from ai_pipeline.midi.quality import quality_flag_subset
 from ai_pipeline.midi.simple_midi import write_drum_midi
 from ai_pipeline.midi.types import ProcessedDrumEvent
-from ai_pipeline.notation import MusicXmlGenerator, MuseScorePdfExporter, NotationConfig, NotationError
+from ai_pipeline.notation import (
+    MusicXmlGenerator,
+    MuseScorePdfExporter,
+    NotationConfig,
+    NotationError,
+    validate_score_artifacts,
+)
 from ai_pipeline.preprocessing import FfmpegAudioNormalizer
 from ai_pipeline.source_separation import DemucsSourceSeparator, SourceSeparationError
 from ai_pipeline.transcription import AdtofDrumTranscriber, DrumTranscriptionError
@@ -239,6 +245,7 @@ class LocalPipelineRunner:
             output_dir / "notation",
         )
         stage_artifacts = {"musicxml": musicxml.musicxml_path}
+        pdf_path: Path | None = None
         report = {
             "event_count": musicxml.event_count,
             "measure_count": musicxml.measure_count,
@@ -253,6 +260,7 @@ class LocalPipelineRunner:
                     output_dir / "exports",
                 )
                 stage_artifacts["pdf"] = pdf.pdf_path
+                pdf_path = pdf.pdf_path
                 report["pdf"] = {
                     "status": "completed_with_warning" if pdf.warnings else "completed",
                     "renderer": pdf.renderer,
@@ -263,6 +271,7 @@ class LocalPipelineRunner:
                 if self.config.require_pdf:
                     raise
 
+        report["validation"] = validate_score_artifacts(musicxml.musicxml_path, pdf_path)
         return stage_artifacts, report
 
     def _write_log(
@@ -283,6 +292,7 @@ class LocalPipelineRunner:
             "artifacts": {name: str(path) for name, path in artifacts.items()},
             "stages": [asdict(stage_log) for stage_log in stage_logs],
             "quality": _build_quality_summary(stage_logs),
+            "validation": _build_validation_summary(stage_logs),
         }
         log_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -318,6 +328,14 @@ def _build_quality_summary(stage_logs: list[StageLog]) -> dict | None:
         "quality_flags": midi_report.get("quality_flags") or quality_flag_subset(warnings),
         "warnings": sorted(set(warnings)),
     }
+
+
+def _build_validation_summary(stage_logs: list[StageLog]) -> dict | None:
+    notation_report = _stage_report(stage_logs, "notation_generation")
+    if notation_report is None:
+        return None
+    validation = notation_report.get("validation")
+    return validation if isinstance(validation, dict) else None
 
 
 def _stage_report(stage_logs: list[StageLog], name: str) -> dict | None:

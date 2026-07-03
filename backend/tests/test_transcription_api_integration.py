@@ -128,7 +128,7 @@ def _write_fake_pipeline_output(output_dir: Path) -> None:
     }
     for name, path in artifact_paths.items():
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(f"{name}\n".encode("utf-8"))
+        path.write_bytes(b"%PDF-1.4\n%%EOF\n" if name == "pdf" else f"{name}\n".encode("utf-8"))
     log_payload = {
         "schema_version": "1.0",
         "status": "completed",
@@ -140,6 +140,10 @@ def _write_fake_pipeline_output(output_dir: Path) -> None:
             "processed_drum_counts": {"kick": 1, "tom": 6},
             "quality_flags": ["hihat_missing_likely", "mostly_tom_output"],
             "warnings": ["hihat_missing_likely", "mostly_tom_output"],
+        },
+        "validation": {
+            "musicxml": {"available": True, "parseable": True, "error_code": None, "warnings": []},
+            "pdf": {"available": True, "optional": True, "openable": True, "error_code": None, "warnings": []},
         },
         "stages": [
             {"name": "source_separation", "status": "completed", "report": {"separator": "mock"}},
@@ -322,6 +326,8 @@ def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path)
     assert result_body["pipeline"]["quality"]["raw_event_count"] == 7
     assert result_body["pipeline"]["quality"]["processed_drum_counts"] == {"kick": 1, "tom": 6}
     assert "mostly_tom_output" in result_body["pipeline"]["quality"]["quality_flags"]
+    assert result_body["pipeline"]["validation"]["musicxml"]["parseable"] is True
+    assert result_body["pipeline"]["validation"]["pdf"]["openable"] is True
     assert "/tmp/" not in str(result_body["pipeline"])
     assert midi_response.status_code == 200
     assert musicxml_response.status_code == 200

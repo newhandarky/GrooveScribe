@@ -143,7 +143,7 @@ def test_result_service_builds_redacted_pipeline_summary(tmp_path) -> None:
               "status": "completed",
               "runtime_seconds": 1.25,
               "report": {
-                "warnings": ["too_few_events", "/Users/private/path"]
+                "warnings": ["too_few_events", "command_failed", "/Users/private/path"]
               }
             }
           ],
@@ -159,6 +159,21 @@ def test_result_service_builds_redacted_pipeline_summary(tmp_path) -> None:
             "estimated_measure_count": 6,
             "quality_flags": ["hihat_missing_likely", "mostly_tom_output", "/tmp/private"],
             "warnings": ["hihat_missing_likely", "stderr leaked"]
+          },
+          "validation": {
+            "musicxml": {
+              "available": true,
+              "parseable": true,
+              "error_code": null,
+              "warnings": ["command_template leaked"]
+            },
+            "pdf": {
+              "available": false,
+              "optional": true,
+              "openable": null,
+              "error_code": "pdf_unavailable",
+              "warnings": ["pdf_optional_unavailable", "/Users/private/path", "Traceback leaked"]
+            }
           }
         }
         """,
@@ -183,7 +198,7 @@ def test_result_service_builds_redacted_pipeline_summary(tmp_path) -> None:
                 "name": "midi_post_processing",
                 "status": "completed",
                 "runtime_seconds": 1.25,
-                "warnings": ["too_few_events"],
+                "warnings": ["too_few_events", "command_failed"],
             }
         ]
         assert summary["artifacts"][0]["type"] == "midi"
@@ -198,9 +213,27 @@ def test_result_service_builds_redacted_pipeline_summary(tmp_path) -> None:
             "quality_flags": ["hihat_missing_likely", "mostly_tom_output"],
             "warnings": ["hihat_missing_likely"],
         }
+        assert summary["validation"] == {
+            "musicxml": {
+                "available": True,
+                "parseable": True,
+                "error_code": None,
+                "warnings": [],
+            },
+            "pdf": {
+                "available": False,
+                "optional": True,
+                "openable": None,
+                "error_code": "pdf_unavailable",
+                "warnings": ["pdf_optional_unavailable"],
+            },
+        }
         assert "/Users/" not in str(summary)
         assert "/tmp/" not in str(summary)
         assert "stderr" not in str(summary)
+        assert "command_template" not in str(summary)
+        assert "Traceback" not in str(summary)
+        assert "command_failed" in str(summary)
 
 
 def test_result_service_quality_fallback_keeps_warning_and_flag_contract_separate(tmp_path) -> None:

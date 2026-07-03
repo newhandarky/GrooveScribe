@@ -253,6 +253,7 @@ class LocalMockPipelineRunner:
             },
             "stage_reports": stage_reports,
             "quality": self._quality_summary(artifact_refs),
+            "validation": self._validation_summary(artifact_refs),
         }
         return self._put_json(job_id, ArtifactType.PIPELINE_LOG, payload).storage_key
 
@@ -278,6 +279,27 @@ class LocalMockPipelineRunner:
             "estimated_measure_count": 1,
             "quality_flags": ["sparse_transcription"],
             "warnings": ["sparse_transcription"],
+        }
+
+    def _validation_summary(self, artifact_refs: dict[ArtifactType, ArtifactRef]) -> dict[str, object] | None:
+        if ArtifactType.MUSICXML not in artifact_refs:
+            return None
+        pdf_available = ArtifactType.PDF in artifact_refs
+        return {
+            "schema_version": "1.0",
+            "musicxml": {
+                "available": True,
+                "parseable": True,
+                "error_code": None,
+                "warnings": [],
+            },
+            "pdf": {
+                "available": pdf_available,
+                "optional": True,
+                "openable": True if pdf_available else None,
+                "error_code": None if pdf_available else "pdf_unavailable",
+                "warnings": [] if pdf_available else ["pdf_optional_unavailable"],
+            },
         }
 
     def _put_text(self, job_id: str, artifact_type: ArtifactType, content: str) -> ArtifactRef:

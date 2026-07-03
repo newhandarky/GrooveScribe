@@ -100,6 +100,21 @@ export interface TranscriptionResultResponse {
       quality_flags: string[];
       warnings: string[];
     } | null;
+    validation?: {
+      musicxml: {
+        available: boolean;
+        parseable: boolean | null;
+        error_code: string | null;
+        warnings: string[];
+      };
+      pdf: {
+        available: boolean;
+        optional: boolean | null;
+        openable: boolean | null;
+        error_code: string | null;
+        warnings: string[];
+      };
+    } | null;
     pipeline_log_available: boolean;
   } | null;
 }

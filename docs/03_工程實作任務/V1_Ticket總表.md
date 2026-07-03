@@ -29,10 +29,12 @@ Future optional：
 - runtime diagnostics：`GET /api/v1/runtime/preflight` 與 ADTOF diagnostics 可回傳 structured status / next steps。
 - true-AI baseline record：`tests/manual_eval/2026-07-03_true_ai_baseline_eval.csv` 已記錄 synthetic fixture baseline。
 - result API pipeline summary：`GET /api/v1/transcriptions/{job_id}` 的 optional `pipeline` 欄位可顯示 stage summary、warnings、exports 與 quality summary。
-- cleanup dry-run：local storage cleanup 可 dry-run 檢查。
-- manual eval template：`tests/manual_eval/manual_eval_template.csv` 已包含 baseline report、event counts、drum counts、quality flags 與 blocked reason。
+- artifact validation：pipeline log / result API 可提供 optional `pipeline.validation`，涵蓋 MusicXML parseable 與 PDF optional/openable status。
+- result review UX：結果頁可顯示 MusicXML preview fallback、artifact validation、quality flags、downloads 與 PDF optional status。
+- cleanup dry-run：local storage cleanup 可 dry-run 檢查，report 含 storage root name、job dir count、orphan dirs 與 DB status；execute mode 維持拒絕。
+- manual eval gate：`tests/manual_eval/manual_eval_template.csv` 已包含 baseline report、event counts、drum counts、quality flags 與 blocked reason，並可用 `scripts/generate_manual_eval_row.py` 從 baseline report 產生 row。
 
-下一階段主線是 quality diagnostics / result review / manual eval gate：強化 artifact inspection、穩定 warning policy、讓結果頁能判讀 mock / true AI 輸出品質，並以 manual eval 決定 V1 是否可進 release。
+下一階段主線是 V1 release hardening：重跑 mock browser smoke、true-AI opt-in baseline、redaction regression、startup recovery 與 manual eval gate，確認不提交 storage / DB / dist / tmp artifacts。
 
 ## Ticket 總表
 

@@ -18,13 +18,14 @@
 - [x] Result 顯示 DrumTrack metadata、warnings、exports。
 - [x] MIDI、MusicXML 可下載。
 - [x] PDF available / failed / unavailable 狀態清楚；PDF 不阻塞 MIDI / MusicXML。
+- [ ] Mock smoke 可重跑：`backend/.venv/bin/python -m pytest backend/tests/test_transcription_api_integration.py -k default_local_queue` 與 `npm --prefix frontend run test -- App.test.tsx`。
 
 ## True AI Opt-in Gate
 
 - [ ] `GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE` 已設定且包含 `{input}`、`{output}`。
 - [ ] `GROOVESCRIBE_ADTOF_VERIFY_INPUT` 指向 Demucs 產出的 drums stem。
 - [ ] `scripts/check_ai_runtime.py` 回 `runtime_checks.local_pipeline.true_ai_ready=true`。
-- [ ] `scripts/run_true_ai_smoke_baseline.py` 產出 `baseline.json`；若 blocked，需包含 blocked reason。
+- [ ] `scripts/run_true_ai_smoke_baseline.py` 產出 baseline report v2；若 blocked，需包含 `status=blocked`、blocked reason、ADTOF `status_code`、`baseline:<run-id>` ref。
 - [ ] `RUN_TRUE_AI_SMOKE=1 backend/.venv/bin/python -m pytest backend/tests/test_pipeline_service_true_ai_smoke.py` 可完成或記錄 blocked reason。
 - [ ] `RUN_TRUE_AI_SMOKE=1 .venv-ai/bin/python -m pytest tests/pipeline -k true_ai_smoke` 可完成或記錄 blocked reason。
 
@@ -36,17 +37,18 @@
 - [x] `scripts/inspect_pipeline_artifacts.py` 可合併 raw / processed MIDI inspection。
 - [x] 記錄 raw note histogram、processed drum counts、event count。
 - [x] pipeline log 與 result API 可暴露 `pipeline.quality`，包含 raw / processed event count、drum counts、duration / tempo / measure estimate 與 quality flags。
-- [ ] MusicXML 可 parse / 開啟。
-- [ ] PDF 若產出，可開啟；若沒有，狀態是 optional failure。
+- [x] pipeline log 與 result API 可暴露 optional `pipeline.validation`，包含 MusicXML parseable 與 PDF optional/openable status。
+- [x] MusicXML 可 parse / 開啟檢查；validation 失敗以 warning code 呈現，不暴露本機路徑。
+- [x] PDF 若產出，可做 `%PDF` header 檢查；若沒有，狀態是 optional failure。
 - [x] pipeline log 含 stage reports 且已 redacted。
-- [x] frontend result review 顯示 mock / true AI、stage summary、warnings、quality flags、event counts、drum counts 與 export 狀態。
+- [x] frontend result review 顯示 mock / true AI、stage summary、warnings、quality flags、event counts、drum counts、MusicXML preview/fallback、validation 與 export 狀態。
 
 ## Local Reliability
 
 - [ ] app restart 後遺留 `processing` job 會標成 `interrupted`。
 - [ ] `queued/completed/failed/canceled` 不被 startup recovery 誤改。
 - [ ] interrupted / failed job 在 UI 有下一步建議。
-- [ ] `scripts/cleanup_storage.py` dry-run 不刪檔，且不越過 local storage root。
+- [x] `scripts/cleanup_storage.py` dry-run 不刪檔，且 report 含 storage root name、job dir count、orphan dirs、DB missing/unreadable/readable 狀態；`--execute` 繼續拒絕。
 - [ ] README / runtime guide 說明 DB、artifacts、cleanup 與 reset 的本機資料位置。
 
 ## Manual Evaluation
@@ -54,8 +56,14 @@
 - [ ] 至少一輪 mock-ai browser smoke 有記錄。
 - [x] 至少一輪 true-AI opt-in smoke 有 artifact inspection 記錄，或有明確 blocked reason。
 - [x] `tests/manual_eval` CSV 記錄 date、fixture、runtime mode、baseline report ref、pipeline/runtime version、event counts、drum counts、quality flags、artifact ref、reviewer。
+- [x] `scripts/generate_manual_eval_row.py` 可從 completed / blocked `baseline.json` 產生 schema-compatible CSV row，且不輸出本機絕對路徑。
 - [ ] 若使用 repo 外授權音檔，記錄授權與不可提交原因。
 - [ ] 評分不要求出版級；V1 目標是可檢查、可下載、可人工修正的鼓譜草稿。
+
+## Artifact / DB Hygiene
+
+- [ ] `git status --short` 不包含 `storage/`、SQLite/DB、`frontend/dist`、tmp artifacts。
+- [ ] public API、frontend rendered HTML、baseline report、manual eval row 不含 `/Users/`、`/tmp/`、`/private/tmp/`、`/var/folders/`、`Traceback`、`stdout`、`stderr`、raw command 或 command template。
 
 ## Non-goals For V1
 
