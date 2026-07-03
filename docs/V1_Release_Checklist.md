@@ -28,6 +28,8 @@
 - [ ] `RUN_TRUE_AI_SMOKE=1 backend/.venv/bin/python -m pytest backend/tests/test_pipeline_service_true_ai_smoke.py` 可完成或記錄 blocked reason。
 - [ ] `RUN_TRUE_AI_SMOKE=1 .venv-ai/bin/python -m pytest tests/pipeline -k true_ai_smoke` 可完成或記錄 blocked reason。
 
+2026-07-03 baseline note：synthetic fixture true-AI baseline completed，MIDI / MusicXML available，PDF unavailable but optional；manual eval 記錄於 `tests/manual_eval/2026-07-03_true_ai_baseline_eval.csv`。品質仍偏低，主要 warning 為 `hihat_missing_likely` 與 `mostly_tom_output`。
+
 ## Artifact Quality Inspection
 
 - [ ] `scripts/inspect_midi.py` 可讀 raw MIDI 與 processed MIDI。
