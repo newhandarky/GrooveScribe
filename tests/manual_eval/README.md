@@ -8,7 +8,8 @@
 2. 將結果填入 `manual_eval_template.csv`。
 3. 若使用第三方音源，記錄來源、授權與是否可提交到 repo。
 4. 針對 raw MIDI 與 processed MIDI 跑 `scripts/inspect_midi.py`，記錄 note histogram、processed drum counts、event count。
-5. 每次模型、threshold、後處理策略改動後，保留一份新的評估結果檔。
+5. 若使用 `scripts/run_true_ai_smoke_baseline.py`，可直接從 `baseline.json` 讀取 runtime、artifact、inspection 與 blocked reason。
+6. 每次模型、threshold、後處理策略改動後，保留一份新的評估結果檔。
 
 ## 分數定義
 
@@ -28,3 +29,16 @@
 - `processed_drum_counts`：postprocess 後的 drum 分布。
 - `warnings`：pipeline / postprocess warning。
 - `blocked_reason`：true AI 尚無法完成時必填。
+
+## Blocked Baseline
+
+若 true AI runtime 仍是 `degraded`，不要填入假分數。請新增一列並填：
+
+- `evaluation_date`
+- `audio_fixture`
+- `pipeline_version`
+- `runtime_version`
+- `blocked_reason`
+- `notes`：貼上 baseline report 路徑或 ADTOF `status_code`
+
+評分欄位留空，等 runtime ready 後再補一份 completed baseline。

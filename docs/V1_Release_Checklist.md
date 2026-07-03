@@ -24,6 +24,7 @@
 - [ ] `GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE` 已設定且包含 `{input}`、`{output}`。
 - [ ] `GROOVESCRIBE_ADTOF_VERIFY_INPUT` 指向 Demucs 產出的 drums stem。
 - [ ] `scripts/check_ai_runtime.py` 回 `runtime_checks.local_pipeline.true_ai_ready=true`。
+- [ ] `scripts/run_true_ai_smoke_baseline.py` 產出 `baseline.json`；若 blocked，需包含 blocked reason。
 - [ ] `RUN_TRUE_AI_SMOKE=1 backend/.venv/bin/python -m pytest backend/tests/test_pipeline_service_true_ai_smoke.py` 可完成或記錄 blocked reason。
 - [ ] `RUN_TRUE_AI_SMOKE=1 .venv-ai/bin/python -m pytest tests/pipeline -k true_ai_smoke` 可完成或記錄 blocked reason。
 
