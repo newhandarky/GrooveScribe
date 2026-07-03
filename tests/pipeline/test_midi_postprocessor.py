@@ -51,6 +51,8 @@ def test_postprocessor_quantizes_dedupes_and_writes_artifacts(tmp_path) -> None:
     assert payload["events"][0]["midi_note"] == 36
     assert payload["raw_note_histogram"] == {"35": 1, "36": 1, "38": 1, "42": 1}
     assert payload["processed_drum_counts"] == {"closed_hat": 1, "kick": 1, "snare": 1}
+    assert "repeated_close_events_deduped" in payload["warnings"]
+    assert "sparse_transcription" in payload["warnings"]
     assert "too_few_events" in payload["warnings"]
 
 
@@ -69,6 +71,24 @@ def test_postprocessor_warns_for_sparse_and_unbalanced_output(tmp_path) -> None:
     assert result.report.processed_drum_counts == {"tom": 4}
     assert "mostly_tom_output" in result.report.warnings
     assert "hihat_missing_likely" in result.report.warnings
+    assert "no_snare_detected" in result.report.warnings
+
+
+def test_postprocessor_warns_for_repeated_close_events(tmp_path) -> None:
+    raw_midi = tmp_path / "raw_repeated.mid"
+    events = (
+        ProcessedDrumEvent(tick=0, note=42, drum="closed_hat", velocity=80),
+        ProcessedDrumEvent(tick=10, note=42, drum="closed_hat", velocity=100),
+        ProcessedDrumEvent(tick=480, note=36, drum="kick", velocity=100),
+        ProcessedDrumEvent(tick=960, note=38, drum="snare", velocity=90),
+        ProcessedDrumEvent(tick=1440, note=42, drum="closed_hat", velocity=90),
+    )
+    write_drum_midi(raw_midi, events, ticks_per_beat=480, tempo_bpm=120.0)
+
+    result = MidiPostProcessor().process(raw_midi, tmp_path / "out")
+
+    assert result.report.output_event_count == 4
+    assert "repeated_close_events_deduped" in result.report.warnings
 
 
 def test_parse_processed_midi_round_trip(tmp_path) -> None:

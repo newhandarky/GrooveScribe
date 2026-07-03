@@ -43,6 +43,10 @@ def test_local_runner_completes_with_mock_ai(tmp_path) -> None:
         "midi_post_processing",
         "notation_generation",
     ]
+    assert log_payload["quality"]["raw_event_count"] == 5
+    assert log_payload["quality"]["processed_event_count"] == 5
+    assert log_payload["quality"]["processed_drum_counts"] == {"closed_hat": 2, "kick": 2, "snare": 1}
+    assert "sparse_transcription" in log_payload["quality"]["quality_flags"]
 
 
 def test_local_runner_records_failed_stage(tmp_path) -> None:

@@ -12,12 +12,12 @@
 
 ## Mock Flow Gate
 
-- [ ] Local backend 使用 SQLite + local queue + local filesystem storage。
-- [ ] Local frontend 可開啟 localhost app。
-- [ ] 上傳 WAV/MP3 後 job 可到 `completed`。
-- [ ] Result 顯示 DrumTrack metadata、warnings、exports。
-- [ ] MIDI、MusicXML 可下載。
-- [ ] PDF available / failed / unavailable 狀態清楚；PDF 不阻塞 MIDI / MusicXML。
+- [x] Local backend 使用 SQLite + local queue + local filesystem storage。
+- [x] Local frontend 可開啟 localhost app。
+- [x] 上傳 WAV/MP3 後 job 可到 `completed`。
+- [x] Result 顯示 DrumTrack metadata、warnings、exports。
+- [x] MIDI、MusicXML 可下載。
+- [x] PDF available / failed / unavailable 狀態清楚；PDF 不阻塞 MIDI / MusicXML。
 
 ## True AI Opt-in Gate
 
@@ -32,12 +32,14 @@
 
 ## Artifact Quality Inspection
 
-- [ ] `scripts/inspect_midi.py` 可讀 raw MIDI 與 processed MIDI。
-- [ ] 記錄 raw note histogram、processed drum counts、event count。
+- [x] `scripts/inspect_midi.py` 可讀 raw MIDI 與 processed MIDI。
+- [x] `scripts/inspect_pipeline_artifacts.py` 可合併 raw / processed MIDI inspection。
+- [x] 記錄 raw note histogram、processed drum counts、event count。
+- [x] pipeline log 與 result API 可暴露 `pipeline.quality`，包含 raw / processed event count、drum counts、duration / tempo / measure estimate 與 quality flags。
 - [ ] MusicXML 可 parse / 開啟。
 - [ ] PDF 若產出，可開啟；若沒有，狀態是 optional failure。
-- [ ] pipeline log 含 stage reports 且已 redacted。
-- [ ] frontend result review 顯示 mock / true AI、stage summary、warnings、export 狀態。
+- [x] pipeline log 含 stage reports 且已 redacted。
+- [x] frontend result review 顯示 mock / true AI、stage summary、warnings、quality flags、event counts、drum counts 與 export 狀態。
 
 ## Local Reliability
 
@@ -50,8 +52,8 @@
 ## Manual Evaluation
 
 - [ ] 至少一輪 mock-ai browser smoke 有記錄。
-- [ ] 至少一輪 true-AI opt-in smoke 有 artifact inspection 記錄，或有明確 blocked reason。
-- [ ] `tests/manual_eval` CSV 記錄 pipeline version、runtime version、artifact ref、reviewer。
+- [x] 至少一輪 true-AI opt-in smoke 有 artifact inspection 記錄，或有明確 blocked reason。
+- [x] `tests/manual_eval` CSV 記錄 date、fixture、runtime mode、baseline report ref、pipeline/runtime version、event counts、drum counts、quality flags、artifact ref、reviewer。
 - [ ] 若使用 repo 外授權音檔，記錄授權與不可提交原因。
 - [ ] 評分不要求出版級；V1 目標是可檢查、可下載、可人工修正的鼓譜草稿。
 

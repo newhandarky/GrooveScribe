@@ -515,6 +515,7 @@ function PipelineReview({
   if (!pipeline) return null;
   const stages = pipeline.stages ?? [];
   const warnings = pipeline.warnings ?? [];
+  const quality = pipeline.quality;
 
   return (
     <div className="pipelineReview">
@@ -522,6 +523,7 @@ function PipelineReview({
         <strong>Pipeline summary</strong>
         <span>{pipeline.pipeline_log_available ? 'log available' : 'log unavailable'}</span>
       </div>
+      {quality ? <QualityReview quality={quality} /> : null}
       {stages.length ? (
         <div className="stageList">
           {stages.map((stage) => (
@@ -547,6 +549,39 @@ function PipelineReview({
       {warnings.length ? (
         <div className="inlineWarnings">
           {warnings.map((warning) => (
+            <span key={warning}>{warning}</span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function QualityReview({ quality }: { quality: NonNullable<NonNullable<TranscriptionResultResponse['pipeline']>['quality']> }) {
+  const drumCounts = Object.entries(quality.processed_drum_counts ?? {});
+  const flags = quality.quality_flags ?? [];
+  const warnings = quality.warnings ?? [];
+
+  return (
+    <div className="qualityReview">
+      <div className="qualityMetrics">
+        <Metric label="Raw events" value={formatNumber(quality.raw_event_count)} />
+        <Metric label="Processed events" value={formatNumber(quality.processed_event_count)} />
+        <Metric label="Tempo" value={quality.tempo_bpm ? `${Math.round(quality.tempo_bpm)} BPM` : '-'} />
+        <Metric label="Measures" value={formatNumber(quality.estimated_measure_count)} />
+      </div>
+      {drumCounts.length ? (
+        <div className="drumCountList">
+          {drumCounts.map(([drum, count]) => (
+            <span key={drum}>
+              {drum}: {count}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {flags.length || warnings.length ? (
+        <div className="inlineWarnings qualityFlags">
+          {[...new Set([...flags, ...warnings])].map((warning) => (
             <span key={warning}>{warning}</span>
           ))}
         </div>
@@ -605,4 +640,8 @@ function formatBytes(value: number | null | undefined): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatNumber(value: number | null | undefined): string {
+  return value === null || value === undefined ? '-' : String(value);
 }

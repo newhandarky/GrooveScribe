@@ -11,6 +11,14 @@ from app.services.pipeline_log_read_model import PipelineLogReadService
 from app.storage.base import StorageAdapter
 from app.storage.errors import ArtifactInvalidError, ArtifactNotFoundError, StorageReadFailedError
 
+_QUALITY_FLAG_CODES = {
+    "too_few_events",
+    "sparse_transcription",
+    "hihat_missing_likely",
+    "mostly_tom_output",
+    "no_snare_detected",
+}
+
 
 class ResultService:
     def __init__(
@@ -100,6 +108,7 @@ class ResultService:
                 for export in sorted(job.export_files, key=lambda item: item.type.value)
             ],
             "warnings": sorted(set(warnings)),
+            "quality": _pipeline_quality_summary(pipeline_log, job),
             "pipeline_log_available": pipeline_log is not None,
         }
 
@@ -115,4 +124,115 @@ def _infer_pipeline_mode(job: TranscriptionJob, stages: list[dict]) -> str:
 
 def _is_public_safe_text(value: str) -> bool:
     lowered = value.lower()
-    return not any(token in lowered for token in ("traceback", "/users/", "/tmp/", "/private/tmp/", "/var/folders/"))
+    return not any(
+        token in lowered
+        for token in (
+            "traceback",
+            "/users/",
+            "/tmp/",
+            "/private/tmp/",
+            "/var/folders/",
+            "stderr",
+            "stdout",
+            "command",
+        )
+    )
+
+
+def _pipeline_quality_summary(pipeline_log, job: TranscriptionJob) -> dict | None:
+    if pipeline_log is not None and pipeline_log.quality:
+        return _sanitize_quality_summary(pipeline_log.quality)
+
+    if pipeline_log is not None:
+        for stage in pipeline_log.stage_reports:
+            if stage.name == "midi_post_processing":
+                summary = _quality_from_midi_report(stage.report)
+                if summary is not None:
+                    return summary
+
+    if job.drum_track is None:
+        return None
+    flags = [warning for warning in job.drum_track.warnings if _is_public_safe_text(warning)]
+    return {
+        "raw_event_count": None,
+        "processed_event_count": job.drum_track.event_count,
+        "raw_note_histogram": {},
+        "processed_drum_counts": {},
+        "duration_seconds": job.audio_file.duration_seconds,
+        "tempo_bpm": job.drum_track.estimated_bpm,
+        "estimated_measure_count": None,
+        "quality_flags": _quality_flag_subset(flags),
+        "warnings": sorted(set(flags)),
+    }
+
+
+def _quality_from_midi_report(report: dict) -> dict | None:
+    if not report:
+        return None
+    warnings = [item for item in _string_list(report.get("warnings")) if _is_public_safe_text(item)]
+    return {
+        "raw_event_count": _int_or_none(report.get("input_event_count")),
+        "processed_event_count": _int_or_none(report.get("output_event_count")),
+        "raw_note_histogram": _int_dict(report.get("raw_note_histogram")),
+        "processed_drum_counts": _int_dict(report.get("processed_drum_counts")),
+        "duration_seconds": None,
+        "tempo_bpm": _float_or_none(report.get("estimated_bpm")),
+        "estimated_measure_count": None,
+        "quality_flags": _quality_flag_subset(_string_list(report.get("quality_flags")) or warnings),
+        "warnings": sorted(set(warnings)),
+    }
+
+
+def _sanitize_quality_summary(raw: dict) -> dict:
+    warnings = [item for item in _string_list(raw.get("warnings")) if _is_public_safe_text(item)]
+    flags = [item for item in _string_list(raw.get("quality_flags")) if _is_public_safe_text(item)]
+    return {
+        "raw_event_count": _int_or_none(raw.get("raw_event_count")),
+        "processed_event_count": _int_or_none(raw.get("processed_event_count")),
+        "raw_note_histogram": _int_dict(raw.get("raw_note_histogram")),
+        "processed_drum_counts": _int_dict(raw.get("processed_drum_counts")),
+        "duration_seconds": _float_or_none(raw.get("duration_seconds")),
+        "tempo_bpm": _float_or_none(raw.get("tempo_bpm")),
+        "estimated_measure_count": _int_or_none(raw.get("estimated_measure_count")),
+        "quality_flags": _quality_flag_subset(flags),
+        "warnings": sorted(set(warnings)),
+    }
+
+
+def _quality_flag_subset(warnings: list[str]) -> list[str]:
+    return sorted({warning for warning in warnings if warning in _QUALITY_FLAG_CODES})
+
+
+def _int_dict(value: object) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, int] = {}
+    for key, item in value.items():
+        parsed = _int_or_none(item)
+        if parsed is not None:
+            result[str(key)] = parsed
+    return dict(sorted(result.items()))
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if _is_public_safe_text(str(item))]
+
+
+def _int_or_none(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_or_none(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

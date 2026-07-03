@@ -7,6 +7,11 @@ def test_parse_phase1_local_runner_pipeline_log() -> None:
         "schema_version": "1.0",
         "status": "completed",
         "artifacts": {"drum_events": "/tmp/job/midi/drum_events.json"},
+        "quality": {
+            "raw_event_count": 7,
+            "processed_event_count": 7,
+            "quality_flags": ["hihat_missing_likely"],
+        },
         "stages": [
             {
                 "name": "notation_generation",
@@ -27,6 +32,8 @@ def test_parse_phase1_local_runner_pipeline_log() -> None:
 
     assert result.status == "completed"
     assert result.artifact_keys["drum_events"] == "/tmp/job/midi/drum_events.json"
+    assert result.quality["raw_event_count"] == 7
+    assert result.quality["quality_flags"] == ["hihat_missing_likely"]
     assert result.stage_reports[0].name == "notation_generation"
     assert result.stage_reports[0].warnings == ["renderer_nonzero_exit"]
 

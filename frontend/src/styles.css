@@ -526,6 +526,42 @@ input {
   padding: 12px;
 }
 
+.qualityReview {
+  background: #f7f9fa;
+  border: 1px solid #d6e0e5;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.qualityMetrics {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.qualityMetrics .metric {
+  background: #ffffff;
+  padding: 10px;
+}
+
+.drumCountList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.drumCountList span {
+  background: #edf6f3;
+  border: 1px solid #c0d8cf;
+  border-radius: 999px;
+  color: #235245;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 8px;
+}
+
 .reviewHeader,
 .stageRow {
   align-items: baseline;
@@ -564,6 +600,10 @@ input {
   font-size: 12px;
   font-weight: 700;
   padding: 5px 8px;
+}
+
+.qualityFlags span {
+  border-radius: 6px;
 }
 
 .downloadGrid {
@@ -609,6 +649,7 @@ input {
   .layoutGrid,
   .runtimeSummary,
   .checkGrid,
+  .qualityMetrics,
   .downloadGrid {
     grid-template-columns: 1fr;
   }

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ai_pipeline.midi.errors import NoUsableDrumEventsError, ProcessedMidiInvalidError
 from ai_pipeline.midi.mapping import map_to_general_midi_drum
+from ai_pipeline.midi.quality import quality_flags
 from ai_pipeline.midi.simple_midi import DEFAULT_TEMPO_BPM, parse_midi, write_drum_midi
 from ai_pipeline.midi.types import (
     MidiPostProcessConfig,
@@ -26,7 +27,7 @@ class MidiPostProcessor:
 
         mapped_events, mapping_warnings = self._map_and_filter_events(midi_data.notes)
         quantized_events = self._quantize_events(mapped_events, midi_data.ticks_per_beat)
-        deduped_events = self._dedupe_events(quantized_events)
+        deduped_events, dedupe_warnings = self._dedupe_events(quantized_events)
         if not deduped_events:
             raise NoUsableDrumEventsError("no MIDI note events survived mapping, filtering, and dedupe")
 
@@ -59,7 +60,7 @@ class MidiPostProcessor:
             quantize_grid=self.config.quantize_grid,
             estimated_bpm=estimated_bpm,
             time_signature=midi_data.time_signature,
-            warnings=tuple(sorted(mapping_warnings | quality_warnings)),
+            warnings=tuple(sorted(mapping_warnings | dedupe_warnings | quality_warnings)),
             raw_note_histogram=dict(sorted(raw_note_histogram.items())),
             processed_drum_counts=dict(sorted(processed_drum_counts.items())),
         )
@@ -119,17 +120,19 @@ class MidiPostProcessor:
             )
         return sorted(quantized, key=lambda item: (item.tick, item.note, -item.velocity))
 
-    def _dedupe_events(self, events: list[ProcessedDrumEvent]) -> list[ProcessedDrumEvent]:
+    def _dedupe_events(self, events: list[ProcessedDrumEvent]) -> tuple[list[ProcessedDrumEvent], set[str]]:
         deduped: list[ProcessedDrumEvent] = []
+        warnings: set[str] = set()
         for event in sorted(events, key=lambda item: (item.note, item.tick, -item.velocity)):
             if deduped and deduped[-1].note == event.note:
                 previous = deduped[-1]
                 if event.tick - previous.tick <= self.config.dedupe_window_ticks:
+                    warnings.add("repeated_close_events_deduped")
                     if event.velocity > previous.velocity:
                         deduped[-1] = event
                     continue
             deduped.append(event)
-        return sorted(deduped, key=lambda item: (item.tick, item.note))
+        return sorted(deduped, key=lambda item: (item.tick, item.note)), warnings
 
     def _validate_processed_midi(self, processed_midi_path: Path) -> None:
         try:
@@ -148,19 +151,14 @@ class MidiPostProcessor:
         processed_drum_counts: Counter[str],
     ) -> set[str]:
         warnings: set[str] = set()
-        if output_event_count < 4:
-            warnings.add("too_few_events")
+        warnings.update(
+            quality_flags(
+                event_count=output_event_count,
+                drum_counts=processed_drum_counts,
+            )
+        )
         if input_event_count and dropped_event_count / input_event_count >= 0.5:
             warnings.add("high_drop_ratio")
-        hihat_count = sum(
-            processed_drum_counts.get(drum, 0)
-            for drum in ("closed_hat", "pedal_hat", "open_hat")
-        )
-        if output_event_count >= 4 and hihat_count == 0:
-            warnings.add("hihat_missing_likely")
-        tom_count = processed_drum_counts.get("tom", 0)
-        if output_event_count >= 3 and tom_count / output_event_count >= 0.75:
-            warnings.add("mostly_tom_output")
         return warnings
 
     def _build_events_payload(

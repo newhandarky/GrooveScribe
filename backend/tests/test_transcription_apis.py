@@ -148,6 +148,18 @@ def test_result_service_builds_redacted_pipeline_summary(tmp_path) -> None:
             }
           ],
           "artifacts": {"processed_midi": "jobs/job-1/midi/processed_drum.mid"}
+          ,
+          "quality": {
+            "raw_event_count": 7,
+            "processed_event_count": 7,
+            "raw_note_histogram": {"35": 1, "47": 6},
+            "processed_drum_counts": {"kick": 1, "tom": 6},
+            "duration_seconds": 12.5,
+            "tempo_bpm": 118.2,
+            "estimated_measure_count": 6,
+            "quality_flags": ["hihat_missing_likely", "mostly_tom_output", "/tmp/private"],
+            "warnings": ["hihat_missing_likely", "stderr leaked"]
+          }
         }
         """,
         build_job_artifact_key("job-1", ArtifactType.PIPELINE_LOG),
@@ -175,7 +187,62 @@ def test_result_service_builds_redacted_pipeline_summary(tmp_path) -> None:
             }
         ]
         assert summary["artifacts"][0]["type"] == "midi"
+        assert summary["quality"] == {
+            "raw_event_count": 7,
+            "processed_event_count": 7,
+            "raw_note_histogram": {"35": 1, "47": 6},
+            "processed_drum_counts": {"kick": 1, "tom": 6},
+            "duration_seconds": 12.5,
+            "tempo_bpm": 118.2,
+            "estimated_measure_count": 6,
+            "quality_flags": ["hihat_missing_likely", "mostly_tom_output"],
+            "warnings": ["hihat_missing_likely"],
+        }
         assert "/Users/" not in str(summary)
+        assert "/tmp/" not in str(summary)
+        assert "stderr" not in str(summary)
+
+
+def test_result_service_quality_fallback_keeps_warning_and_flag_contract_separate(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    storage.put_bytes(
+        b"""
+        {
+          "status": "completed",
+          "stages": [
+            {
+              "name": "midi_post_processing",
+              "status": "completed",
+              "runtime_seconds": 1.25,
+              "report": {
+                "input_event_count": 12,
+                "output_event_count": 6,
+                "raw_note_histogram": {"35": 2, "47": 10},
+                "processed_drum_counts": {"kick": 2, "tom": 4},
+                "estimated_bpm": 120,
+                "warnings": ["too_few_events", "high_drop_ratio", "mock_ai_enabled"]
+              }
+            }
+          ],
+          "artifacts": {"processed_midi": "jobs/job-1/midi/processed_drum.mid"}
+        }
+        """,
+        build_job_artifact_key("job-1", ArtifactType.PIPELINE_LOG),
+        "application/json",
+    )
+    with _session() as session:
+        job = _create_job(
+            session,
+            status=JobStatus.COMPLETED,
+            stage=PipelineStage.COMPLETED,
+            export_status=ExportFileStatus.AVAILABLE,
+        )
+        service = ResultService(settings=Settings(), storage=storage)
+
+        summary = service.pipeline_summary(job)
+
+        assert summary["quality"]["quality_flags"] == ["too_few_events"]
+        assert summary["quality"]["warnings"] == ["high_drop_ratio", "mock_ai_enabled", "too_few_events"]
 
 
 def test_result_service_rejects_non_completed_job() -> None:

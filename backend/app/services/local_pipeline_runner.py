@@ -252,6 +252,7 @@ class LocalMockPipelineRunner:
                 artifact_type.value: ref.storage_key for artifact_type, ref in sorted(artifact_refs.items())
             },
             "stage_reports": stage_reports,
+            "quality": self._quality_summary(artifact_refs),
         }
         return self._put_json(job_id, ArtifactType.PIPELINE_LOG, payload).storage_key
 
@@ -261,6 +262,22 @@ class LocalMockPipelineRunner:
             "status": status,
             "progress": progress,
             "created_at": datetime.now(UTC).isoformat(),
+        }
+
+    def _quality_summary(self, artifact_refs: dict[ArtifactType, ArtifactRef]) -> dict[str, object] | None:
+        if ArtifactType.PROCESSED_MIDI not in artifact_refs:
+            return None
+        return {
+            "schema_version": "1.0",
+            "raw_event_count": 4,
+            "processed_event_count": 4,
+            "raw_note_histogram": {"36": 1, "38": 2, "42": 1},
+            "processed_drum_counts": {"closed_hat": 1, "kick": 1, "snare": 2},
+            "duration_seconds": 1.5,
+            "tempo_bpm": 120.0,
+            "estimated_measure_count": 1,
+            "quality_flags": ["sparse_transcription"],
+            "warnings": ["sparse_transcription"],
         }
 
     def _put_text(self, job_id: str, artifact_type: ArtifactType, content: str) -> ArtifactRef:

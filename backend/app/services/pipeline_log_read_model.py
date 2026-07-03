@@ -27,6 +27,7 @@ class PipelineLogReadModel:
     status: str | None
     artifact_keys: dict[str, str]
     stage_reports: list[StageReportReadModel]
+    quality: dict[str, Any] = field(default_factory=dict)
 
 
 class PipelineLogReadService:
@@ -54,6 +55,7 @@ def parse_pipeline_log_payload(payload: dict[str, Any]) -> PipelineLogReadModel:
         status=payload.get("status"),
         artifact_keys=_string_dict(payload.get("artifacts")),
         stage_reports=stage_reports,
+        quality=_dict(payload.get("quality")),
     )
 
 

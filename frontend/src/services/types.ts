@@ -89,6 +89,17 @@ export interface TranscriptionResultResponse {
       status: string | null;
     }>;
     warnings: string[];
+    quality?: {
+      raw_event_count: number | null;
+      processed_event_count: number | null;
+      raw_note_histogram: Record<string, number>;
+      processed_drum_counts: Record<string, number>;
+      duration_seconds: number | null;
+      tempo_bpm: number | null;
+      estimated_measure_count: number | null;
+      quality_flags: string[];
+      warnings: string[];
+    } | null;
     pipeline_log_available: boolean;
   } | null;
 }

@@ -13,7 +13,8 @@
 - `generate_test_fixtures.py`：產生 Phase 1 pipeline smoke test 用的合成音檔與 manifest。
 - `check_ai_runtime.py`：輸出本機 ffmpeg、Demucs、ADTOF command/template、MuseScore、Python package 可用性，並列出真 AI local pipeline 缺口。
 - `prepare_adtof_verify_input.py`：用 full mix fixture 執行 normalize + Demucs，產生 ADTOF verification 所需的 `drums.wav`；支援 `--dry-run`。
-- `inspect_midi.py`：讀 raw / processed MIDI，輸出 note histogram、mapped drum counts、event count 與 tempo/time signature。
+- `inspect_midi.py`：讀 raw / processed MIDI，輸出 note histogram、mapped drum counts、event count、duration / measure estimate 與 quality flags。
+- `inspect_pipeline_artifacts.py`：合併 raw / processed MIDI inspection，輸出 manual eval 與 result API 可重用的 quality summary。
 - `run_true_ai_smoke_baseline.py`：opt-in 執行 true-AI preflight / pipeline smoke，並輸出 `baseline.json`；runtime degraded 時保存 blocked reason。
 - `cleanup_storage.py`：檢查 repo-local `storage/local` 狀態；目前只支援 dry-run，不刪檔。
 - `read_pipeline_snapshot.py`：internal/debug CLI，用 `job_id` 從 backend DB 與 `jobs/{job_id}/logs/pipeline.json` 讀取 pipeline snapshot；不改正式前端 API。
@@ -77,6 +78,14 @@ PYTHONPATH=. "$PYTHON" scripts/run_true_ai_smoke_baseline.py \
 ```
 
 `baseline.json` 可能是 `completed`、`failed` 或 `blocked`。`blocked` 代表 true-AI runtime 尚未 ready，應保留 blocked reason，不要填入假 manual eval 分數。
+
+也可以針對既有 artifact 產出 inspection JSON：
+
+```bash
+PYTHONPATH=. "$PYTHON" scripts/inspect_pipeline_artifacts.py \
+  --raw-midi /tmp/groovescribe-true-ai-baseline/<run>/midi/raw_drum.mid \
+  --processed-midi /tmp/groovescribe-true-ai-baseline/<run>/midi/processed_drum.mid
+```
 
 詳細修復流程見 `docs/本機AI Runtime診斷與True AI啟用指南.md`。
 
