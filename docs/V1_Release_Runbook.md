@@ -25,6 +25,28 @@ npx playwright install chromium
 
 report 會包含 command status、artifact hygiene、redaction、manual eval、browser smoke、cleanup dry-run 與 true-AI opt-in 狀態。預設 true-AI 是 `skipped_opt_in`。
 
+產生 repo 外 release evidence：
+
+```bash
+.venv-ai/bin/python scripts/generate_v1_release_evidence.py \
+  --output-dir /tmp/groovescribe-v1-release-evidence
+```
+
+輸出：
+
+- `/tmp/groovescribe-v1-release-evidence/evidence.json`
+- `/tmp/groovescribe-v1-release-evidence/evidence.md`
+
+evidence 會彙整 release gate、runtime readiness、manual eval、browser smoke、cleanup/reset dry-run、artifact hygiene 與 true-AI opt-in 狀態。若已先保存 gate report，也可重用：
+
+```bash
+.venv-ai/bin/python scripts/generate_v1_release_evidence.py \
+  --gate-report /tmp/groovescribe-v1-release-gate/report.json \
+  --output-dir /tmp/groovescribe-v1-release-evidence
+```
+
+`evidence.status=passed` 才可視為 deterministic V1 sign-off 通過。true-AI 未啟用時應顯示 `skipped_opt_in`，不是一般 release blocker。
+
 ## Local job workflow gate
 
 V1 localhost UI 應可在本機完成：
@@ -80,3 +102,16 @@ git diff --check
 ```
 
 `--execute` 目前必須拒絕；不得在 V1 release gate 自動刪除 storage 或 DB。
+
+release evidence 中的 `cleanup_reset.cleanup.execute_supported=false` 與 `cleanup_reset.reset.execute_supported=false` 是 sign-off 必要條件。
+
+## Sign-off hygiene
+
+每次跑完 build、browser smoke 或 evidence 後確認：
+
+```bash
+git status --short --branch
+git diff --check
+```
+
+若本機產生 `frontend/dist`、`test-results`、`playwright-report`、`blob-report`，只能清理這些 generated outputs；不得刪除使用者本機 `storage/` 或 SQLite/DB。

@@ -4,11 +4,11 @@
 
 ## Runtime Readiness
 
-- [ ] `GET /api/v1/runtime/preflight` 回傳 `ready`、`degraded`、`not_ready` 或 `error`，不 crash。
-- [ ] mock-ai ready 時，upload flow 可用。
-- [ ] true AI 若尚未 ready，ADTOF diagnostics 有 structured `status_code`、summary、next steps。
-- [ ] response 不暴露 `/Users/`、`/tmp/`、traceback、raw command secret。
-- [ ] `.env.true-ai.example` 與 runtime guide 可讓開發者逐步修到 `true_ai_ready=true` 或取得明確 blocked reason。
+- [ ] `GET /api/v1/runtime/preflight` 回傳 `ready`、`degraded`、`not_ready` 或 `error`，不 crash。Evidence：`cd backend && .venv/bin/python -m pytest tests/test_runtime_preflight_api.py`。
+- [ ] mock-ai ready 時，upload flow 可用。Evidence：`npm run test:e2e` 與 `.venv-ai/bin/python scripts/generate_v1_release_evidence.py`。
+- [ ] true AI 若尚未 ready，ADTOF diagnostics 有 structured `status_code`、summary、next steps。Evidence：`.venv-ai/bin/python scripts/run_v1_release_gate.py`；true-AI 為 opt-in。
+- [ ] response 不暴露 `/Users/`、`/tmp/`、traceback、raw command secret。Evidence：release gate / evidence report 的 `redaction.status=passed`。
+- [ ] `.env.true-ai.example` 與 runtime guide 可讓開發者逐步修到 `true_ai_ready=true` 或取得明確 blocked reason。Evidence：runtime guide + true-AI opt-in baseline report。
 
 ## Mock Flow Gate
 
@@ -21,6 +21,7 @@
 - [ ] Mock browser smoke 可重跑：`npm run test:e2e` 覆蓋 desktop / mobile localhost UI、upload -> completed -> result page、history、failed/interrupted retry、MIDI / MusicXML download、MusicXML preview/fallback 與 PDF optional unavailable / failed 狀態。
 - [ ] Deterministic API / component smoke 可重跑：`cd backend && .venv/bin/python -m pytest tests/test_transcription_api_integration.py tests/test_runtime_preflight_api.py tests/test_transcription_apis.py`、`npm --prefix frontend run test`。
 - [ ] Release gate orchestrator 可重跑：`.venv-ai/bin/python scripts/run_v1_release_gate.py`，report 不暴露本機路徑或 raw diagnostics。
+- [ ] Release evidence 可重跑：`.venv-ai/bin/python scripts/generate_v1_release_evidence.py --output-dir /tmp/groovescribe-v1-release-evidence`，JSON / Markdown 均寫在 repo 外。
 
 ## True AI Opt-in Gate
 
@@ -54,25 +55,25 @@
 - [x] interrupted / failed job 在 UI 有下一步建議與 retry action；completed job 可 rerun。
 - [x] `GET /api/v1/local-data/summary` 只回傳 dry-run public-safe 統計；不提供刪檔 API。
 - [x] `scripts/cleanup_storage.py` dry-run 不刪檔，且 report 含 storage root name、job dir count、orphan dirs、DB missing/unreadable/readable 狀態；`--execute` 繼續拒絕。
-- [ ] README / runtime guide 說明 DB、artifacts、cleanup 與 reset 的本機資料位置。
-- [ ] `scripts/plan_local_reset.py` 只輸出 dry-run reset plan；`--execute` 維持拒絕。
+- [ ] README / runtime guide 說明 DB、artifacts、cleanup 與 reset 的本機資料位置。Evidence：`docs/V1_Release_Runbook.md` 與 `scripts/README.md`。
+- [ ] `scripts/plan_local_reset.py` 只輸出 dry-run reset plan；`--execute` 維持拒絕。Evidence：`.venv-ai/bin/python scripts/generate_v1_release_evidence.py` 的 `cleanup_reset.reset.execute_supported=false`。
 
 ## Manual Evaluation
 
-- [ ] 至少一輪 mock-ai browser smoke 有記錄；預設使用 Playwright mocked API，不啟動 true-AI，也不依賴 PDF renderer。
+- [ ] 至少一輪 mock-ai browser smoke 有記錄；預設使用 Playwright mocked API，不啟動 true-AI，也不依賴 PDF renderer。Evidence：release evidence Markdown。
 - [x] 至少一輪 true-AI opt-in smoke 有 artifact inspection 記錄，或有明確 blocked reason。
 - [x] `tests/manual_eval` CSV 記錄 date、fixture、runtime mode、baseline report ref、pipeline/runtime version、event counts、drum counts、quality flags、artifact ref、reviewer。
 - [x] `scripts/generate_manual_eval_row.py` 可從 completed / blocked `baseline.json` 產生 schema-compatible CSV row，且不輸出本機絕對路徑。
-- [ ] `scripts/check_manual_eval_gate.py` 可驗證 manual eval CSV schema、blocked/completed row contract 與 redaction。
+- [ ] `scripts/check_manual_eval_gate.py` 可驗證 manual eval CSV schema、blocked/completed row contract 與 redaction。Evidence：`.venv-ai/bin/python -m pytest tests/pipeline/test_release_gate_scripts.py` 與 release evidence `manual_eval.status=passed`。
 - [ ] 若使用 repo 外授權音檔，記錄授權與不可提交原因。
 - [ ] 評分不要求出版級；V1 目標是可檢查、可下載、可人工修正的鼓譜草稿。
 
 ## Artifact / DB Hygiene
 
-- [ ] `git status --short` 不包含 `storage/`、SQLite/DB、`frontend/dist`、tmp artifacts。
-- [ ] `playwright-report/`、`test-results/`、`blob-report/` 只作為本機測試輸出，不提交。
+- [ ] `git status --short` 不包含 `storage/`、SQLite/DB、`frontend/dist`、tmp artifacts。Evidence：release gate / evidence `artifact_hygiene.status=passed`。
+- [ ] `playwright-report/`、`test-results/`、`blob-report/` 只作為本機測試輸出，不提交。Evidence：release gate / evidence `generated_artifacts_present=[]`。
 - [ ] public API、frontend rendered HTML、baseline report、manual eval row 不含 `/Users/`、`/tmp/`、`/private/tmp/`、`/var/folders/`、`Traceback`、`stdout`、`stderr`、raw command 或 command template。
-- [ ] release gate report 不含 `/Users/`、`/tmp/`、`/private/tmp/`、`/var/folders/`、`Traceback`、`stdout`、`stderr`、raw command 或 command template。
+- [ ] release gate report 與 release evidence 不含 `/Users/`、`/tmp/`、`/private/tmp/`、`/var/folders/`、`Traceback`、`stdout`、`stderr`、raw command 或 command template。
 
 ## Non-goals For V1
 
