@@ -190,10 +190,16 @@ def _seed_job(
         queued_at=datetime(2026, 6, 25, tzinfo=UTC),
         started_at=datetime(2026, 6, 25, 0, 1, tzinfo=UTC) if status != JobStatus.QUEUED else None,
         completed_at=datetime(2026, 6, 25, 0, 2, tzinfo=UTC) if status == JobStatus.COMPLETED else None,
-        failed_at=datetime(2026, 6, 25, 0, 3, tzinfo=UTC) if status == JobStatus.FAILED else None,
-        error_code="PIPELINE_FAILED" if status == JobStatus.FAILED else None,
-        error_message="音訊分析流程失敗，請稍後再試或重新上傳音檔。" if status == JobStatus.FAILED else None,
-        error_stage=PipelineStage.DRUM_TRANSCRIPTION.value if status == JobStatus.FAILED else None,
+        failed_at=datetime(2026, 6, 25, 0, 3, tzinfo=UTC)
+        if status in {JobStatus.FAILED, JobStatus.INTERRUPTED}
+        else None,
+        error_code="PIPELINE_FAILED" if status in {JobStatus.FAILED, JobStatus.INTERRUPTED} else None,
+        error_message="音訊分析流程失敗，請稍後再試或重新上傳音檔。"
+        if status in {JobStatus.FAILED, JobStatus.INTERRUPTED}
+        else None,
+        error_stage=PipelineStage.DRUM_TRANSCRIPTION.value
+        if status in {JobStatus.FAILED, JobStatus.INTERRUPTED}
+        else None,
     )
     session.add(job)
     if status == JobStatus.COMPLETED:
@@ -290,6 +296,10 @@ def test_status_api_returns_all_core_states(tmp_path: Path) -> None:
         body = response.json()
         assert body["status"] == status
         if status == "failed":
+            assert body["error"]["code"] == "PIPELINE_FAILED"
+            assert body["error"]["retriable"] is True
+        if status == "interrupted":
+            assert body["message"] == "分析失敗，請查看錯誤訊息。"
             assert body["error"]["code"] == "PIPELINE_FAILED"
             assert body["error"]["retriable"] is True
 

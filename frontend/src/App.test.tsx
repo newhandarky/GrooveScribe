@@ -8,6 +8,18 @@ import type {
   TranscriptionResultResponse,
 } from './services/types';
 
+const unsafeTokens = [
+  '/Users/',
+  '/tmp/',
+  '/private/tmp/',
+  '/var/folders/',
+  'traceback',
+  'stdout',
+  'stderr',
+  'raw command',
+  'command_template',
+];
+
 function runtimeFixture(overrides: Partial<RuntimePreflightResponse> = {}): RuntimePreflightResponse {
   return {
     status: 'degraded',
@@ -161,7 +173,7 @@ describe('local app smoke rendering', () => {
     expect(html).toContain(status === 'ready' ? 'True AI' : 'Mock pipeline');
     expect(html).toContain('ADTOF diagnosis');
     expect(html).toContain('verify_input_missing');
-    expect(html).not.toContain('/Users/dev/private');
+    expectPublicSafe(html);
     expect(html).not.toContain('check_ai_runtime.py');
   });
 
@@ -174,8 +186,7 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('true AI runtime 尚未 ready');
     expect(html).toContain('先執行 normalize 與 Demucs separation');
     expect(html).toContain('GROOVESCRIBE_ADTOF_VERIFY_INPUT');
-    expect(html).not.toContain('/tmp/');
-    expect(html).not.toContain('Traceback');
+    expectPublicSafe(html);
   });
 
   it('keeps upload available for degraded mock-ready runtime', () => {
@@ -238,6 +249,7 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('PDF');
     expect(html).toContain('failed');
     expect(html).not.toContain('href="#"');
+    expectPublicSafe(html);
   });
 
   it('renders true AI pipeline summary without local paths or traceback', () => {
@@ -301,11 +313,7 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('Drum Transcription');
     expect(html).toContain('hihat_missing_likely');
     expect(html).toContain('tom: 6');
-    expect(html).not.toContain('/Users/');
-    expect(html).not.toContain('/tmp/');
-    expect(html).not.toContain('Traceback');
-    expect(html).not.toContain('stdout');
-    expect(html).not.toContain('stderr');
+    expectPublicSafe(html);
   });
 
   it('renders missing validation as not reported for backward-compatible results', () => {
@@ -316,6 +324,95 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('PDF validation');
     expect(html).toContain('not reported');
     expect(html).not.toContain('pipeline.validation');
+    expectPublicSafe(html);
+  });
+
+  it('renders legacy pipeline summary without quality or validation blocks', () => {
+    const html = renderToStaticMarkup(
+      <ResultCard
+        result={resultFixture({
+          pipeline: {
+            mode: 'unknown',
+            status: 'completed',
+            stages: [],
+            artifacts: [],
+            warnings: [],
+            pipeline_log_available: false,
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain('Pipeline summary');
+    expect(html).toContain('log unavailable');
+    expect(html).toContain('MusicXML validation');
+    expect(html).toContain('not reported');
+    expect(html).not.toContain('Raw events');
+    expectPublicSafe(html);
+  });
+
+  it('renders PDF available and pending states without blocking MIDI or MusicXML', () => {
+    const pdfAvailable = renderToStaticMarkup(
+      <ResultCard
+        result={resultFixture({
+          exports: [
+            ...resultFixture().exports.filter((item) => item.type !== 'pdf'),
+            {
+              type: 'pdf',
+              status: 'available',
+              content_type: 'application/pdf',
+              file_size_bytes: 512,
+              checksum: 'pdf-checksum',
+              download_url: '/api/v1/transcriptions/job-1/download/pdf',
+            },
+          ],
+          pipeline: {
+            ...resultFixture().pipeline!,
+            validation: {
+              musicxml: {
+                available: true,
+                parseable: true,
+                error_code: null,
+                warnings: [],
+              },
+              pdf: {
+                available: true,
+                optional: true,
+                openable: true,
+                error_code: null,
+                warnings: [],
+              },
+            },
+          },
+        })}
+      />,
+    );
+    expect(pdfAvailable).toContain('/api/v1/transcriptions/job-1/download/pdf');
+    expect(pdfAvailable).toContain('PDF');
+    expectPublicSafe(pdfAvailable);
+
+    const pdfPending = renderToStaticMarkup(
+      <ResultCard
+        result={resultFixture({
+          exports: [
+            ...resultFixture().exports.filter((item) => item.type !== 'pdf'),
+            {
+              type: 'pdf',
+              status: 'pending',
+              content_type: 'application/pdf',
+              file_size_bytes: null,
+              checksum: null,
+              download_url: null,
+            },
+          ],
+        })}
+      />,
+    );
+    expect(pdfPending).toContain('/api/v1/transcriptions/job-1/download/midi');
+    expect(pdfPending).toContain('/api/v1/transcriptions/job-1/download/musicxml');
+    expect(pdfPending).toContain('pending');
+    expect(pdfPending).toContain('optional unavailable');
+    expectPublicSafe(pdfPending);
   });
 
   it('renders interrupted job status as terminal state feedback', () => {
@@ -340,5 +437,13 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('分析流程中斷');
     expect(html).toContain('本機服務曾在分析中停止');
     expect(html).toContain('Progress 45%');
+    expectPublicSafe(html);
   });
 });
+
+function expectPublicSafe(html: string) {
+  const normalized = html.toLowerCase();
+  for (const unsafe of unsafeTokens) {
+    expect(normalized).not.toContain(unsafe.toLowerCase());
+  }
+}

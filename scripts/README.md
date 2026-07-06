@@ -17,7 +17,10 @@
 - `inspect_pipeline_artifacts.py`：合併 raw / processed MIDI inspection，輸出 manual eval 與 result API 可重用的 quality summary。
 - `run_true_ai_smoke_baseline.py`：opt-in 執行 true-AI preflight / pipeline smoke，並輸出 `baseline.json`；runtime degraded 時保存 blocked reason。
 - `generate_manual_eval_row.py`：從 `baseline.json` 產生一列符合 `tests/manual_eval/manual_eval_template.csv` 的 CSV row；artifact ref 只輸出 redacted label。
+- `check_manual_eval_gate.py`：驗證 manual eval CSV schema、blocked/completed row contract 與 redaction。
 - `cleanup_storage.py`：檢查 repo-local `storage/local` 狀態；目前只支援 dry-run，不刪檔。
+- `plan_local_reset.py`：列出 local reset 會影響的 storage / DB 目標；dry-run only，不刪檔。
+- `run_v1_release_gate.py`：聚合 deterministic V1 release gate，輸出 redacted JSON report。
 - `read_pipeline_snapshot.py`：internal/debug CLI，用 `job_id` 從 backend DB 與 `jobs/{job_id}/logs/pipeline.json` 讀取 pipeline snapshot；不改正式前端 API。
 
 ## Runtime gate
@@ -136,3 +139,28 @@ npm run test:e2e
 ```
 
 此 smoke 使用 Playwright 啟動 localhost frontend，並以 mocked `/api/v1/*` contract 驗證 upload -> completed -> result page、MIDI/MusicXML download 可見、MusicXML preview/fallback 可見、PDF optional unavailable / failed 狀態可見。true-AI 與 PDF renderer 仍不得成為一般 CI 必跑條件，也不得提交 `frontend/dist`、`storage/`、DB 或 Playwright report artifacts。
+
+## V1 release gate
+
+重跑完整 deterministic release gate：
+
+```bash
+.venv-ai/bin/python scripts/run_v1_release_gate.py
+```
+
+若要保存 report，請寫到 repo 外：
+
+```bash
+.venv-ai/bin/python scripts/run_v1_release_gate.py \
+  --output /tmp/groovescribe-v1-release-gate/report.json
+```
+
+manual eval 與 reset / cleanup 可單獨檢查：
+
+```bash
+.venv-ai/bin/python scripts/check_manual_eval_gate.py
+.venv-ai/bin/python scripts/cleanup_storage.py
+.venv-ai/bin/python scripts/plan_local_reset.py
+```
+
+`run_v1_release_gate.py` 預設不跑 true-AI；只有明確加 `--include-true-ai` 才會執行 opt-in tests。PDF renderer 不是一般 gate blocker。
