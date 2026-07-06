@@ -4,6 +4,22 @@
 
 若要跑一次使用者流程，先看 `docs/V1_Local_Quickstart.md`；本文件聚焦 release sign-off 與 evidence。
 
+## Release candidate 順序
+
+RC sign-off 建議順序：
+
+```bash
+npm run check:local
+npm run test:e2e
+.venv-ai/bin/python scripts/run_v1_release_gate.py
+.venv-ai/bin/python scripts/generate_v1_release_evidence.py \
+  --output-dir /tmp/groovescribe-v1-release-evidence
+git status --short --branch
+git diff --check
+```
+
+`npm run dev:local` 是手動 localhost 驗證用的長駐程序，不放進 deterministic release gate。release gate 會執行 setup doctor，但會跳過 8000 / 5173 port availability，避免 reviewer 已開著本機服務時誤傷 sign-off。
+
 ## 預設 release gate
 
 首次跑 browser smoke 前安裝 Chromium cache：
@@ -25,7 +41,7 @@ npx playwright install chromium
   --output /tmp/groovescribe-v1-release-gate/report.json
 ```
 
-report 會包含 command status、artifact hygiene、redaction、manual eval、browser smoke、cleanup dry-run 與 true-AI opt-in 狀態。預設 true-AI 是 `skipped_opt_in`。
+report 會包含 command status、local setup doctor、artifact hygiene、redaction、manual eval、browser smoke、cleanup dry-run 與 true-AI opt-in 狀態。預設 true-AI 是 `skipped_opt_in`。
 
 產生 repo 外 release evidence：
 
@@ -39,7 +55,7 @@ report 會包含 command status、artifact hygiene、redaction、manual eval、b
 - `/tmp/groovescribe-v1-release-evidence/evidence.json`
 - `/tmp/groovescribe-v1-release-evidence/evidence.md`
 
-evidence 會彙整 release gate、runtime readiness、manual eval、browser smoke、cleanup/reset dry-run、artifact hygiene 與 true-AI opt-in 狀態。若已先保存 gate report，也可重用：
+evidence 會彙整 release gate、local setup、runtime readiness、manual eval、browser smoke、cleanup/reset dry-run、artifact hygiene 與 true-AI opt-in 狀態。若已先保存 gate report，也可重用：
 
 ```bash
 .venv-ai/bin/python scripts/generate_v1_release_evidence.py \
@@ -79,6 +95,8 @@ npm run test:e2e
 - MusicXML preview 或 fallback 可見。
 - PDF failed / unavailable 顯示 optional。
 - History 可回到 completed job，failed/interrupted 可 retry。
+
+若 backend 尚未啟動，frontend Runtime 區會提示先執行 `npm run dev:local` 或 `npm run check:local`。
 
 ## Opt-in true-AI
 

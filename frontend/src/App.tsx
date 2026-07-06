@@ -294,7 +294,12 @@ export function RuntimePanel({
         </button>
       </div>
 
-      {error ? <div className="alert error">{error}</div> : null}
+      {error ? (
+        <div className="alert error">
+          {error}
+          <p>若 backend 尚未啟動，請在 repo root 執行 npm run dev:local，或先執行 npm run check:local 檢查本機啟動條件。</p>
+        </div>
+      ) : null}
       {runtime?.error ? <div className="alert error">{runtime.error.message}</div> : null}
       <RuntimeStatusNote runtime={runtime} />
 

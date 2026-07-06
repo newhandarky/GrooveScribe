@@ -225,6 +225,22 @@ describe('local app smoke rendering', () => {
     expectPublicSafe(html);
   });
 
+  it('shows local launch guidance when runtime preflight cannot reach backend', () => {
+    const html = renderToStaticMarkup(
+      <RuntimePanel
+        runtime={null}
+        loading={false}
+        error="Failed to fetch"
+        onRefresh={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('Failed to fetch');
+    expect(html).toContain('npm run dev:local');
+    expect(html).toContain('npm run check:local');
+    expectPublicSafe(html);
+  });
+
   it('keeps upload available for degraded mock-ready runtime', () => {
     const html = renderToStaticMarkup(
       <UploadPanel

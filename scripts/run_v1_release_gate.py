@@ -87,7 +87,7 @@ def run_gate(
     pre_hygiene = check_artifact_hygiene()
     if pre_hygiene["status"] != "passed":
         pre_hygiene["initial_generated_cleanup"] = initial_cleanup
-        return _report("failed", started_at, commands, pre_hygiene, {}, {}, {}, {}, _true_ai_summary(False, []))
+        return _report("failed", started_at, commands, pre_hygiene, {}, {}, {}, {}, {}, _true_ai_summary(False, []))
     pre_hygiene["initial_generated_cleanup"] = initial_cleanup
 
     steps = _deterministic_steps(skip_browser=skip_browser, skip_build=skip_build)
@@ -103,6 +103,7 @@ def run_gate(
                 commands,
                 check_artifact_hygiene(),
                 redaction_summary(commands),
+                _local_setup_summary(commands),
                 _manual_eval_summary(commands),
                 _browser_summary(skip_browser, commands),
                 _cleanup_summary(commands),
@@ -134,6 +135,7 @@ def run_gate(
         commands,
         artifact_hygiene,
         redaction,
+        _local_setup_summary(commands),
         _manual_eval_summary(commands),
         _browser_summary(skip_browser, commands),
         _cleanup_summary(commands),
@@ -209,8 +211,10 @@ def _deterministic_steps(*, skip_browser: bool, skip_build: bool) -> list[GateCo
                 "tests/pipeline/test_notation_generation.py",
                 "tests/pipeline/test_midi_inspection.py",
                 "tests/pipeline/test_release_gate_scripts.py",
+                "tests/pipeline/test_local_launch_scripts.py",
             ],
         ),
+        GateCommand("local_setup", [sys.executable, "scripts/check_v1_local_setup.py", "--skip-port-check"]),
         GateCommand("frontend_test", ["npm", "--prefix", "frontend", "run", "test"]),
         GateCommand("frontend_lint", ["npm", "--prefix", "frontend", "run", "lint"]),
         GateCommand("manual_eval_gate", [sys.executable, "scripts/check_manual_eval_gate.py"]),
@@ -292,6 +296,10 @@ def _manual_eval_summary(commands: list[dict]) -> dict:
     return _command_status("manual_eval_gate", commands)
 
 
+def _local_setup_summary(commands: list[dict]) -> dict:
+    return _command_status("local_setup", commands)
+
+
 def _browser_summary(skip_browser: bool, commands: list[dict]) -> dict:
     if skip_browser:
         return {"status": "skipped_developer_shortcut"}
@@ -326,6 +334,7 @@ def _report(
     commands: list[dict],
     artifact_hygiene: dict,
     redaction: dict,
+    local_setup: dict,
     manual_eval: dict,
     browser_smoke: dict,
     cleanup: dict,
@@ -338,6 +347,7 @@ def _report(
         "commands": commands,
         "artifact_hygiene": artifact_hygiene,
         "redaction": redaction,
+        "local_setup": local_setup,
         "manual_eval": manual_eval,
         "browser_smoke": browser_smoke,
         "cleanup": cleanup,

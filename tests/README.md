@@ -98,6 +98,12 @@ npm --prefix frontend run test -- App.test.tsx frontend/src/services/api.test.ts
 
 ## V1 Release Gate
 
+檢查 localhost 啟動前置條件：
+
+```bash
+npm run check:local
+```
+
 預設 release gate 聚合 backend targeted tests、pipeline fast tests、frontend test/lint/build、browser smoke、manual eval CSV validation 與 cleanup dry-run：
 
 ```bash
@@ -112,9 +118,11 @@ npm --prefix frontend run test -- App.test.tsx frontend/src/services/api.test.ts
 ```
 
 此 evidence 會輸出 repo 外 `evidence.json` 與 `evidence.md`，彙整 release gate、runtime readiness、manual eval、browser smoke、cleanup/reset dry-run、artifact hygiene 與 true-AI opt-in 狀態。測試覆蓋：
+release gate 也會執行 `scripts/check_v1_local_setup.py --skip-port-check`；`scripts/run_v1_local_dev.py` 是手動長駐 launcher，不進 deterministic gate。手動 `npm run check:local` 預設仍會檢查 8000 / 5173 port availability。
 
 ```bash
 .venv-ai/bin/python -m pytest tests/pipeline/test_release_gate_scripts.py
+.venv-ai/bin/python -m pytest tests/pipeline/test_local_launch_scripts.py
 ```
 
 manual eval CSV 可單獨驗證：
