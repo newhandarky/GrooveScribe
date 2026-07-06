@@ -38,6 +38,43 @@ export interface JobStatusResponse {
   failed_at?: string | null;
 }
 
+export interface TranscriptionJobSummary {
+  job_id: string;
+  title: string | null;
+  file_name: string;
+  status: string;
+  stage: string;
+  progress: number;
+  created_at: string;
+  completed_at: string | null;
+  failed_at: string | null;
+  exports: Record<string, string>;
+  error: {
+    code: string | null;
+    message: string | null;
+    stage: string | null;
+    retriable: boolean;
+  } | null;
+}
+
+export interface TranscriptionJobListResponse {
+  jobs: TranscriptionJobSummary[];
+  limit: number;
+}
+
+export interface LocalDataSummaryResponse {
+  schema_version: string;
+  status: string;
+  dry_run: boolean;
+  execute_supported: boolean;
+  storage_root_name: string;
+  job_dir_count: number;
+  database_status: string;
+  database_job_count: number | null;
+  orphan_job_dir_count: number;
+  warnings: string[];
+}
+
 export interface TranscriptionResultResponse {
   job_id: string;
   status: string;

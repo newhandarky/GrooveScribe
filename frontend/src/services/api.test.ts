@@ -3,9 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   ApiError,
   downloadUrl,
+  getLocalDataSummary,
   getRuntimePreflight,
   getTranscriptionResult,
   getTranscriptionStatus,
+  listTranscriptions,
+  retryTranscription,
   uploadTranscription,
 } from './api';
 
@@ -86,6 +89,81 @@ describe('api client', () => {
 
     expect(calls).toEqual([{ url: '/api/v1/transcriptions', method: 'POST', bodyIsFormData: true }]);
     expect(response.job_id).toBe('job-1');
+  });
+
+  it('loads recent transcriptions with a bounded limit', async () => {
+    const calls: string[] = [];
+    const fetcher = async (url: string | URL | Request) => {
+      calls.push(String(url));
+      return jsonResponse({
+        jobs: [
+          {
+            job_id: 'job-1',
+            title: 'Demo',
+            file_name: 'demo.wav',
+            status: 'completed',
+            stage: 'completed',
+            progress: 100,
+            created_at: '2026-07-02T00:00:00Z',
+            completed_at: '2026-07-02T00:01:00Z',
+            failed_at: null,
+            exports: { midi: 'available' },
+            error: null,
+          },
+        ],
+        limit: 5,
+      });
+    };
+
+    const response = await listTranscriptions(5, fetcher as typeof fetch);
+
+    expect(calls).toEqual(['/api/v1/transcriptions?limit=5']);
+    expect(response.jobs[0].job_id).toBe('job-1');
+    expect(response.jobs[0].exports.midi).toBe('available');
+  });
+
+  it('retries a transcription with encoded id', async () => {
+    const calls: Array<{ url: string; method?: string }> = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), method: init?.method });
+      return jsonResponse({
+        job_id: 'retry-job',
+        status: 'queued',
+        status_url: '/api/v1/transcriptions/retry-job/status',
+        result_url: '/api/v1/transcriptions/retry-job',
+        created_at: '2026-07-02T00:00:00Z',
+      });
+    };
+
+    const response = await retryTranscription('job 1', fetcher as typeof fetch);
+
+    expect(calls).toEqual([{ url: '/api/v1/transcriptions/job%201/retry', method: 'POST' }]);
+    expect(response.job_id).toBe('retry-job');
+  });
+
+  it('loads local data summary from a public-safe endpoint', async () => {
+    const calls: string[] = [];
+    const fetcher = async (url: string | URL | Request) => {
+      calls.push(String(url));
+      return jsonResponse({
+        schema_version: '1.0',
+        status: 'dry_run',
+        dry_run: true,
+        execute_supported: false,
+        storage_root_name: 'storage',
+        job_dir_count: 2,
+        database_status: 'readable',
+        database_job_count: 1,
+        orphan_job_dir_count: 1,
+        warnings: [],
+      });
+    };
+
+    const response = await getLocalDataSummary(fetcher as typeof fetch);
+
+    expect(calls).toEqual(['/api/v1/local-data/summary']);
+    expect(response.execute_supported).toBe(false);
+    expect(response.storage_root_name).toBe('storage');
   });
 
   it('loads completed result exports', async () => {

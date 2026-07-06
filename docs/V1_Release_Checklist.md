@@ -18,7 +18,7 @@
 - [x] Result 顯示 DrumTrack metadata、warnings、exports。
 - [x] MIDI、MusicXML 可下載。
 - [x] PDF available / failed / unavailable 狀態清楚；PDF 不阻塞 MIDI / MusicXML。
-- [ ] Mock browser smoke 可重跑：`npm run test:e2e` 覆蓋 desktop / mobile localhost UI、upload -> completed -> result page、MIDI / MusicXML download、MusicXML preview/fallback 與 PDF optional unavailable / failed 狀態。
+- [ ] Mock browser smoke 可重跑：`npm run test:e2e` 覆蓋 desktop / mobile localhost UI、upload -> completed -> result page、history、failed/interrupted retry、MIDI / MusicXML download、MusicXML preview/fallback 與 PDF optional unavailable / failed 狀態。
 - [ ] Deterministic API / component smoke 可重跑：`cd backend && .venv/bin/python -m pytest tests/test_transcription_api_integration.py tests/test_runtime_preflight_api.py tests/test_transcription_apis.py`、`npm --prefix frontend run test`。
 - [ ] Release gate orchestrator 可重跑：`.venv-ai/bin/python scripts/run_v1_release_gate.py`，report 不暴露本機路徑或 raw diagnostics。
 
@@ -49,7 +49,10 @@
 
 - [ ] app restart 後遺留 `processing` job 會標成 `interrupted`。
 - [ ] `queued/completed/failed/canceled` 不被 startup recovery 誤改。
-- [ ] interrupted / failed job 在 UI 有下一步建議。
+- [x] `GET /api/v1/transcriptions` 可列出近期 job summary，不暴露 storage key、本機路徑或 raw pipeline log。
+- [x] `POST /api/v1/transcriptions/{job_id}/retry` 可讓 `failed` / `interrupted` / `completed` 建立新 queued job；`queued` / `processing` 回 409。
+- [x] interrupted / failed job 在 UI 有下一步建議與 retry action；completed job 可 rerun。
+- [x] `GET /api/v1/local-data/summary` 只回傳 dry-run public-safe 統計；不提供刪檔 API。
 - [x] `scripts/cleanup_storage.py` dry-run 不刪檔，且 report 含 storage root name、job dir count、orphan dirs、DB missing/unreadable/readable 狀態；`--execute` 繼續拒絕。
 - [ ] README / runtime guide 說明 DB、artifacts、cleanup 與 reset 的本機資料位置。
 - [ ] `scripts/plan_local_reset.py` 只輸出 dry-run reset plan；`--execute` 維持拒絕。

@@ -25,6 +25,28 @@ npx playwright install chromium
 
 report 會包含 command status、artifact hygiene、redaction、manual eval、browser smoke、cleanup dry-run 與 true-AI opt-in 狀態。預設 true-AI 是 `skipped_opt_in`。
 
+## Local job workflow gate
+
+V1 localhost UI 應可在本機完成：
+
+- 上傳音檔並進入 queued / processing / completed。
+- 在「近期任務」看到最近 job summary，並可回到 active result。
+- 對 `failed` / `interrupted` job 使用 retry，對 `completed` job 使用 rerun；retry 會建立新 job，不覆寫舊 job、不刪舊 artifacts。
+- 在 Runtime / Local data 區看到 public-safe dry-run 摘要；UI 不提供刪除 storage 或 DB 的動作。
+
+Focused backend gate：
+
+```bash
+cd backend && .venv/bin/python -m pytest tests/test_job_history_and_retry_api.py tests/test_local_job_recovery.py
+```
+
+Focused frontend/browser gate：
+
+```bash
+npm --prefix frontend run test -- App.test.tsx
+npm run test:e2e
+```
+
 ## Opt-in true-AI
 
 只有 runtime 已準備好時才跑：

@@ -1,6 +1,8 @@
 import type {
   JobStatusResponse,
+  LocalDataSummaryResponse,
   RuntimePreflightResponse,
+  TranscriptionJobListResponse,
   TranscriptionResultResponse,
   UploadAcceptedResponse,
 } from './types';
@@ -37,6 +39,17 @@ export async function getRuntimePreflight(fetcher: typeof fetch = fetch): Promis
   return requestJson<RuntimePreflightResponse>('/runtime/preflight', { fetcher });
 }
 
+export async function getLocalDataSummary(fetcher: typeof fetch = fetch): Promise<LocalDataSummaryResponse> {
+  return requestJson<LocalDataSummaryResponse>('/local-data/summary', { fetcher });
+}
+
+export async function listTranscriptions(
+  limit = 20,
+  fetcher: typeof fetch = fetch,
+): Promise<TranscriptionJobListResponse> {
+  return requestJson<TranscriptionJobListResponse>(`/transcriptions?limit=${encodeURIComponent(limit)}`, { fetcher });
+}
+
 export async function uploadTranscription(
   input: { file: File; title?: string },
   fetcher: typeof fetch = fetch,
@@ -67,6 +80,16 @@ export async function getTranscriptionResult(
   fetcher: typeof fetch = fetch,
 ): Promise<TranscriptionResultResponse> {
   return requestJson<TranscriptionResultResponse>(`/transcriptions/${encodeURIComponent(jobId)}`, { fetcher });
+}
+
+export async function retryTranscription(
+  jobId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<UploadAcceptedResponse> {
+  return requestJson<UploadAcceptedResponse>(`/transcriptions/${encodeURIComponent(jobId)}/retry`, {
+    fetcher,
+    init: { method: 'POST' },
+  });
 }
 
 export function downloadUrl(url: string | null): string {

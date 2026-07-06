@@ -34,6 +34,25 @@ class JobStatusResponse(BaseModel):
     failed_at: datetime | None = None
 
 
+class TranscriptionJobSummary(BaseModel):
+    job_id: str
+    title: str | None = None
+    file_name: str
+    status: str
+    stage: str
+    progress: int
+    created_at: datetime
+    completed_at: datetime | None = None
+    failed_at: datetime | None = None
+    exports: dict[str, str] = Field(default_factory=dict)
+    error: JobErrorResponse | None = None
+
+
+class TranscriptionJobListResponse(BaseModel):
+    jobs: list[TranscriptionJobSummary]
+    limit: int
+
+
 class AudioResult(BaseModel):
     id: str
     file_name: str

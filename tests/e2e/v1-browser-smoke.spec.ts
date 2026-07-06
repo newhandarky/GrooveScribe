@@ -31,6 +31,11 @@ test('mock browser smoke reaches result review without leaking local diagnostics
   await expect(page.getByText('MusicXML validation')).toBeVisible();
   await expect(page.getByText('PDF validation')).toBeVisible();
   await expect(page.getByText('optional unavailable').first()).toBeVisible();
+  await expect(page.getByText('近期任務')).toBeVisible();
+  await expect(page.locator('.historyRow').filter({ hasText: 'Browser Smoke' }).first()).toBeVisible();
+  await expect(page.locator('.historyRow').filter({ hasText: 'MIDI available' }).first()).toBeVisible();
+  await expect(page.getByText('本機資料狀態')).toBeVisible();
+  await expect(page.getByText('dry-run 可視狀態')).toBeVisible();
 
   const midiDownload = page.getByRole('link', { name: /MIDI/i });
   const musicXmlDownload = page.getByRole('link', { name: /MUSICXML/i });
@@ -49,6 +54,8 @@ test('mock browser smoke reaches result review without leaking local diagnostics
   expect(apiMetrics.uploadRequests).toBe(1);
   expect(apiMetrics.statusRequests).toBeGreaterThanOrEqual(2);
   expect(apiMetrics.resultRequests).toBe(1);
+  expect(apiMetrics.listRequests).toBeGreaterThanOrEqual(1);
+  expect(apiMetrics.localDataRequests).toBeGreaterThanOrEqual(1);
 });
 
 for (const terminalStatus of ['failed', 'interrupted'] as const) {
@@ -75,6 +82,14 @@ for (const terminalStatus of ['failed', 'interrupted'] as const) {
     await expect(page.getByRole('link', { name: /MUSICXML/i })).toHaveCount(0);
     await expect(page.getByText('Pipeline summary')).toHaveCount(0);
     await expectPublicSafe(page);
+
+    const retryButton = statusCard.getByRole('button', { name: '重試' });
+    await expect(retryButton).toBeVisible();
+    await retryButton.click();
+    await expect(page.getByText('任務已重新排入本機分析佇列。')).toBeVisible();
+    await expect(page.locator('.statusCard .statusPill', { hasText: 'queued' })).toBeVisible();
+    expect(apiMetrics.retryRequests).toBe(1);
+
     expect(apiMetrics.uploadRequests).toBe(1);
     expect(apiMetrics.statusRequests).toBeGreaterThanOrEqual(2);
     expect(apiMetrics.resultRequests).toBe(0);
@@ -85,6 +100,9 @@ interface MockApiMetrics {
   uploadRequests: number;
   statusRequests: number;
   resultRequests: number;
+  listRequests: number;
+  localDataRequests: number;
+  retryRequests: number;
 }
 
 async function installMockApi(page: Page): Promise<MockApiMetrics> {
@@ -92,6 +110,9 @@ async function installMockApi(page: Page): Promise<MockApiMetrics> {
     uploadRequests: 0,
     statusRequests: 0,
     resultRequests: 0,
+    listRequests: 0,
+    localDataRequests: 0,
+    retryRequests: 0,
   };
 
   await page.route('**/api/v1/**', async (route) => {
@@ -100,26 +121,19 @@ async function installMockApi(page: Page): Promise<MockApiMetrics> {
     const pathname = url.pathname;
 
     if (request.method() === 'GET' && pathname === '/api/v1/runtime/preflight') {
+      return json(route, runtimePayload());
+    }
+
+    if (request.method() === 'GET' && pathname === '/api/v1/local-data/summary') {
+      metrics.localDataRequests += 1;
+      return json(route, localDataPayload());
+    }
+
+    if (request.method() === 'GET' && pathname === '/api/v1/transcriptions') {
+      metrics.listRequests += 1;
       return json(route, {
-        status: 'degraded',
-        mock_ai_ready: true,
-        true_ai_ready: false,
-        missing_requirements: ['ADTOF runtime is not verified'],
-        checks: {
-          ai_python: { available: true },
-          ffmpeg: { ready: true },
-          demucs: { ready: true },
-          adtof: {
-            ready: false,
-            status_code: 'verify_input_missing',
-            summary: '尚未提供 ADTOF verification input drums stem。',
-            next_steps: ['設定 verification input 後再執行 true-AI opt-in smoke。'],
-          },
-          musescore_pdf: { ready: false },
-        },
-        smoke_commands: {},
-        checked_at: checkedAt,
-        error: null,
+        jobs: metrics.uploadRequests > 0 ? [historyPayload('completed')] : [],
+        limit: 20,
       });
     }
 
@@ -186,6 +200,9 @@ async function installTerminalMockApi(
     uploadRequests: 0,
     statusRequests: 0,
     resultRequests: 0,
+    listRequests: 0,
+    localDataRequests: 0,
+    retryRequests: 0,
   };
 
   await page.route('**/api/v1/**', async (route) => {
@@ -197,6 +214,19 @@ async function installTerminalMockApi(
       return json(route, runtimePayload());
     }
 
+    if (request.method() === 'GET' && pathname === '/api/v1/local-data/summary') {
+      metrics.localDataRequests += 1;
+      return json(route, localDataPayload());
+    }
+
+    if (request.method() === 'GET' && pathname === '/api/v1/transcriptions') {
+      metrics.listRequests += 1;
+      return json(route, {
+        jobs: metrics.uploadRequests > 0 ? [historyPayload(terminalStatus)] : [],
+        limit: 20,
+      });
+    }
+
     if (request.method() === 'POST' && pathname === '/api/v1/transcriptions') {
       metrics.uploadRequests += 1;
       return json(route, {
@@ -205,6 +235,33 @@ async function installTerminalMockApi(
         status_url: `/api/v1/transcriptions/${JOB_ID}/status`,
         result_url: `/api/v1/transcriptions/${JOB_ID}`,
         created_at: createdAt,
+      });
+    }
+
+    if (request.method() === 'POST' && pathname === `/api/v1/transcriptions/${JOB_ID}/retry`) {
+      metrics.retryRequests += 1;
+      return json(route, {
+        job_id: `${JOB_ID}-retry`,
+        status: 'queued',
+        status_url: `/api/v1/transcriptions/${JOB_ID}-retry/status`,
+        result_url: `/api/v1/transcriptions/${JOB_ID}-retry`,
+        created_at: createdAt,
+      });
+    }
+
+    if (request.method() === 'GET' && pathname === `/api/v1/transcriptions/${JOB_ID}-retry/status`) {
+      return json(route, {
+        job_id: `${JOB_ID}-retry`,
+        status: 'queued',
+        stage: 'queued',
+        progress: 0,
+        message: '任務已重新排入本機分析佇列。',
+        error: null,
+        created_at: createdAt,
+        queued_at: createdAt,
+        started_at: null,
+        completed_at: null,
+        failed_at: null,
       });
     }
 
@@ -276,6 +333,52 @@ function runtimePayload() {
     smoke_commands: {},
     checked_at: checkedAt,
     error: null,
+  };
+}
+
+function localDataPayload() {
+  return {
+    schema_version: '1.0',
+    status: 'dry_run',
+    dry_run: true,
+    execute_supported: false,
+    storage_root_name: 'storage',
+    job_dir_count: 1,
+    database_status: 'readable',
+    database_job_count: 1,
+    orphan_job_dir_count: 0,
+    warnings: [],
+  };
+}
+
+function historyPayload(status: 'completed' | 'failed' | 'interrupted') {
+  return {
+    job_id: JOB_ID,
+    title: status === 'completed' ? 'Browser Smoke' : `Browser Smoke ${status}`,
+    file_name: 'synthetic_clean_drum_pattern.wav',
+    status,
+    stage: status === 'completed' ? 'completed' : 'failed',
+    progress: status === 'completed' ? 100 : 45,
+    created_at: createdAt,
+    completed_at: status === 'completed' ? completedAt : null,
+    failed_at: status === 'completed' ? null : failedAt,
+    exports:
+      status === 'completed'
+        ? {
+            midi: 'available',
+            musicxml: 'available',
+            pdf: 'failed',
+          }
+        : {},
+    error:
+      status === 'completed'
+        ? null
+        : {
+            code: 'PIPELINE_FAILED',
+            message: '音訊分析流程失敗，請稍後再試或重新上傳音檔。',
+            stage: 'drum_transcription',
+            retriable: true,
+          },
   };
 }
 
