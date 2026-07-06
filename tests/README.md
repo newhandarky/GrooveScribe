@@ -102,6 +102,19 @@ npm --prefix frontend run test -- App.test.tsx frontend/src/services/api.test.ts
 .venv-ai/bin/python scripts/run_v1_release_gate.py
 ```
 
+產生 V1 release evidence：
+
+```bash
+.venv-ai/bin/python scripts/generate_v1_release_evidence.py \
+  --output-dir /tmp/groovescribe-v1-release-evidence
+```
+
+此 evidence 會輸出 repo 外 `evidence.json` 與 `evidence.md`，彙整 release gate、runtime readiness、manual eval、browser smoke、cleanup/reset dry-run、artifact hygiene 與 true-AI opt-in 狀態。測試覆蓋：
+
+```bash
+.venv-ai/bin/python -m pytest tests/pipeline/test_release_gate_scripts.py
+```
+
 manual eval CSV 可單獨驗證：
 
 ```bash

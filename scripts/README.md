@@ -21,6 +21,7 @@
 - `cleanup_storage.py`：檢查 repo-local `storage/local` 狀態；目前只支援 dry-run，不刪檔。
 - `plan_local_reset.py`：列出 local reset 會影響的 storage / DB 目標；dry-run only，不刪檔。
 - `run_v1_release_gate.py`：聚合 deterministic V1 release gate，輸出 redacted JSON report。
+- `generate_v1_release_evidence.py`：產生 repo 外 V1 release evidence JSON / Markdown，彙整 release gate、runtime、manual eval、browser smoke、cleanup/reset、artifact hygiene 與 true-AI opt-in 狀態。
 - `read_pipeline_snapshot.py`：internal/debug CLI，用 `job_id` 從 backend DB 與 `jobs/{job_id}/logs/pipeline.json` 讀取 pipeline snapshot；不改正式前端 API。
 
 ## Runtime gate
@@ -164,3 +165,32 @@ manual eval 與 reset / cleanup 可單獨檢查：
 ```
 
 `run_v1_release_gate.py` 預設不跑 true-AI；只有明確加 `--include-true-ai` 才會執行 opt-in tests。PDF renderer 不是一般 gate blocker。
+
+## V1 release evidence
+
+產生 final sign-off evidence，預設寫到 repo 外：
+
+```bash
+.venv-ai/bin/python scripts/generate_v1_release_evidence.py \
+  --output-dir /tmp/groovescribe-v1-release-evidence
+```
+
+輸出 `evidence.json` 與 `evidence.md`。內容只包含 public-safe 摘要，不輸出本機絕對路徑、traceback、stdout/stderr、raw command 或 command template。
+
+若已先保存 release gate report：
+
+```bash
+.venv-ai/bin/python scripts/generate_v1_release_evidence.py \
+  --gate-report /tmp/groovescribe-v1-release-gate/report.json \
+  --output-dir /tmp/groovescribe-v1-release-evidence
+```
+
+true-AI 仍是 opt-in：
+
+```bash
+.venv-ai/bin/python scripts/generate_v1_release_evidence.py \
+  --include-true-ai \
+  --output-dir /tmp/groovescribe-v1-release-evidence
+```
+
+`--include-true-ai` 只適合 runtime 已 ready 時使用；一般 deterministic sign-off 不要求 true-AI 或 PDF renderer。
