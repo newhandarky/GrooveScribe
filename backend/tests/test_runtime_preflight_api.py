@@ -8,6 +8,18 @@ from app.api.routes.runtime import get_runtime_diagnostics_service
 from app.schemas.runtime import RuntimePreflightError, RuntimePreflightResponse
 from app.main import create_app
 
+UNSAFE_TOKENS = (
+    "/Users/",
+    "/tmp/",
+    "/private/tmp/",
+    "/var/folders/",
+    "Traceback",
+    "stdout",
+    "stderr",
+    "raw command",
+    "command_template",
+)
+
 
 class FakeRuntimeDiagnosticsService:
     def __init__(self, response: RuntimePreflightResponse) -> None:
@@ -68,5 +80,5 @@ def test_runtime_preflight_api_error_response_does_not_expose_sensitive_details(
 
     assert response.status_code == 200
     assert response.json()["status"] == "error"
-    assert "Traceback" not in encoded
-    assert "/Users/" not in encoded
+    for unsafe in UNSAFE_TOKENS:
+        assert unsafe.lower() not in encoded.lower()

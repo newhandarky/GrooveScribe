@@ -1,3 +1,5 @@
+import json
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -6,12 +8,25 @@ from app.core.errors import ApiErrorException, ErrorCode
 from app.db.base import Base
 from app.models import AudioFile, DrumTrack, ExportFile, TranscriptionJob
 from app.models.enums import ExportFileStatus, ExportFileType, JobStatus, PipelineStage
+from app.schemas.transcriptions import PipelineSummaryResult, TranscriptionResultResponse
 from app.services.download_service import DownloadService
 from app.services.job_query_service import JobQueryService
 from app.services.result_service import ResultService
 from app.storage.keys import build_job_artifact_key
 from app.storage.local import LocalStorageAdapter
 from app.storage.types import ArtifactType
+
+UNSAFE_TOKENS = (
+    "/Users/",
+    "/tmp/",
+    "/private/tmp/",
+    "/var/folders/",
+    "Traceback",
+    "stdout",
+    "stderr",
+    "raw command",
+    "command_template",
+)
 
 
 def _session():
@@ -236,6 +251,67 @@ def test_result_service_builds_redacted_pipeline_summary(tmp_path) -> None:
         assert "command_failed" in str(summary)
 
 
+def test_result_service_keeps_legacy_pipeline_log_without_validation_graceful(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    storage.put_bytes(
+        b"""
+        {
+          "status": "completed",
+          "stages": [
+            {
+              "name": "notation_generation",
+              "status": "completed",
+              "runtime_seconds": 0.5,
+              "report": {"warnings": ["legacy_warning"]}
+            }
+          ],
+          "artifacts": {"musicxml": "jobs/job-1/notation/score.musicxml"}
+        }
+        """,
+        build_job_artifact_key("job-1", ArtifactType.PIPELINE_LOG),
+        "application/json",
+    )
+    with _session() as session:
+        job = _create_job(
+            session,
+            status=JobStatus.COMPLETED,
+            stage=PipelineStage.COMPLETED,
+            export_status=ExportFileStatus.AVAILABLE,
+        )
+        service = ResultService(settings=Settings(), storage=storage)
+
+        summary = service.pipeline_summary(job)
+        model = PipelineSummaryResult(**summary)
+
+        assert model.validation is None
+        assert model.pipeline_log_available is True
+        assert model.quality is not None
+        assert model.quality.processed_event_count == 4
+
+
+def test_transcription_result_response_allows_legacy_null_pipeline() -> None:
+    response = TranscriptionResultResponse(
+        job_id="job-1",
+        status="completed",
+        stage="completed",
+        title="Demo",
+        created_at="2026-07-03T00:00:00Z",
+        completed_at="2026-07-03T00:01:00Z",
+        audio={
+            "id": "audio-1",
+            "file_name": "demo.wav",
+            "content_type": "audio/wav",
+            "file_size_bytes": 10,
+        },
+        drum_track=None,
+        preview={"musicxml_url": None},
+        exports=[],
+        pipeline=None,
+    )
+
+    assert response.pipeline is None
+
+
 def test_result_service_quality_fallback_keeps_warning_and_flag_contract_separate(tmp_path) -> None:
     storage = LocalStorageAdapter(tmp_path)
     storage.put_bytes(
@@ -276,6 +352,27 @@ def test_result_service_quality_fallback_keeps_warning_and_flag_contract_separat
 
         assert summary["quality"]["quality_flags"] == ["too_few_events"]
         assert summary["quality"]["warnings"] == ["high_drop_ratio", "mock_ai_enabled", "too_few_events"]
+
+
+def test_public_transcription_openapi_does_not_expose_storage_or_raw_diagnostics() -> None:
+    from app.main import create_app
+
+    openapi = create_app().openapi()
+    public_schema = {
+        name: openapi["components"]["schemas"][name]
+        for name in (
+            "TranscriptionResultResponse",
+            "PipelineSummaryResult",
+            "PipelineValidationSummary",
+            "PipelineArtifactValidation",
+        )
+    }
+    schema_text = json.dumps(public_schema)
+
+    assert "PipelineValidationSummary" in schema_text
+    assert "storage_key" not in schema_text
+    for unsafe in UNSAFE_TOKENS:
+        assert unsafe.lower() not in schema_text.lower()
 
 
 def test_result_service_rejects_non_completed_job() -> None:

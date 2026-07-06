@@ -33,8 +33,10 @@ Future optional：
 - result review UX：結果頁可顯示 MusicXML preview fallback、artifact validation、quality flags、downloads 與 PDF optional status。
 - cleanup dry-run：local storage cleanup 可 dry-run 檢查，report 含 storage root name、job dir count、orphan dirs 與 DB status；execute mode 維持拒絕。
 - manual eval gate：`tests/manual_eval/manual_eval_template.csv` 已包含 baseline report、event counts、drum counts、quality flags 與 blocked reason，並可用 `scripts/generate_manual_eval_row.py` 從 baseline report 產生 row。
+- browser smoke gate：Playwright mocked API gate 可用 `npm run test:e2e` 覆蓋 desktop/mobile upload -> result review 與 failed/interrupted terminal UI。
 
 下一階段主線是 V1 release hardening：重跑 mock browser smoke、true-AI opt-in baseline、redaction regression、startup recovery 與 manual eval gate，確認不提交 storage / DB / dist / tmp artifacts。
+本階段新增 release gate orchestrator 後，主線命令會收斂為 `.venv-ai/bin/python scripts/run_v1_release_gate.py`。
 
 ## Ticket 總表
 

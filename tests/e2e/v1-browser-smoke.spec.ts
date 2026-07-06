@@ -5,6 +5,7 @@ const JOB_ID = 'job-browser-smoke';
 const checkedAt = '2026-07-03T00:00:00Z';
 const createdAt = '2026-07-03T00:00:05Z';
 const completedAt = '2026-07-03T00:00:07Z';
+const failedAt = '2026-07-03T00:00:08Z';
 
 test('mock browser smoke reaches result review without leaking local diagnostics', async ({ page }) => {
   const apiMetrics = await installMockApi(page);
@@ -43,25 +44,42 @@ test('mock browser smoke reaches result review without leaking local diagnostics
 
   await expect(page.locator('.exportRow').filter({ hasText: 'PDF' }).filter({ hasText: 'failed' }).first()).toBeVisible();
 
-  const bodyText = await page.locator('body').innerText();
-  for (const unsafePath of ['/Users/', '/tmp/', '/private/tmp/', '/var/folders/']) {
-    expect(bodyText).not.toContain(unsafePath);
-  }
-  const normalizedBodyText = bodyText.toLowerCase();
-  for (const unsafeDiagnostic of [
-    'traceback',
-    'stdout',
-    'stderr',
-    'raw command',
-    'command_template',
-  ]) {
-    expect(normalizedBodyText).not.toContain(unsafeDiagnostic);
-  }
+  await expectPublicSafe(page);
 
   expect(apiMetrics.uploadRequests).toBe(1);
   expect(apiMetrics.statusRequests).toBeGreaterThanOrEqual(2);
   expect(apiMetrics.resultRequests).toBe(1);
 });
+
+for (const terminalStatus of ['failed', 'interrupted'] as const) {
+  test(`mock browser smoke renders ${terminalStatus} job without leaking diagnostics or downloads`, async ({ page }) => {
+    const apiMetrics = await installTerminalMockApi(page, terminalStatus);
+
+    await page.goto('/');
+    await page.getByLabel('Title').fill(`Browser Smoke ${terminalStatus}`);
+    await page
+      .locator('input[type="file"]')
+      .setInputFiles(path.resolve('tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav'));
+    await page.getByRole('button', { name: '開始本機分析' }).click();
+
+    const statusCard = page.locator('.statusCard');
+    await expect(statusCard.locator('.statusPill', { hasText: terminalStatus })).toBeVisible();
+    await expect(statusCard.getByText('音訊分析流程失敗，請稍後再試或重新上傳音檔。')).toBeVisible();
+    if (terminalStatus === 'interrupted') {
+      await expect(statusCard.getByText('本機服務曾在分析中停止')).toBeVisible();
+    } else {
+      await expect(statusCard.getByText('分析失敗時請先查看錯誤 stage')).toBeVisible();
+    }
+
+    await expect(page.getByRole('link', { name: /MIDI/i })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: /MUSICXML/i })).toHaveCount(0);
+    await expect(page.getByText('Pipeline summary')).toHaveCount(0);
+    await expectPublicSafe(page);
+    expect(apiMetrics.uploadRequests).toBe(1);
+    expect(apiMetrics.statusRequests).toBeGreaterThanOrEqual(2);
+    expect(apiMetrics.resultRequests).toBe(0);
+  });
+}
 
 interface MockApiMetrics {
   uploadRequests: number;
@@ -158,6 +176,107 @@ async function installMockApi(page: Page): Promise<MockApiMetrics> {
   });
 
   return metrics;
+}
+
+async function installTerminalMockApi(
+  page: Page,
+  terminalStatus: 'failed' | 'interrupted',
+): Promise<MockApiMetrics> {
+  const metrics: MockApiMetrics = {
+    uploadRequests: 0,
+    statusRequests: 0,
+    resultRequests: 0,
+  };
+
+  await page.route('**/api/v1/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const pathname = url.pathname;
+
+    if (request.method() === 'GET' && pathname === '/api/v1/runtime/preflight') {
+      return json(route, runtimePayload());
+    }
+
+    if (request.method() === 'POST' && pathname === '/api/v1/transcriptions') {
+      metrics.uploadRequests += 1;
+      return json(route, {
+        job_id: JOB_ID,
+        status: 'queued',
+        status_url: `/api/v1/transcriptions/${JOB_ID}/status`,
+        result_url: `/api/v1/transcriptions/${JOB_ID}`,
+        created_at: createdAt,
+      });
+    }
+
+    if (request.method() === 'GET' && pathname === `/api/v1/transcriptions/${JOB_ID}/status`) {
+      metrics.statusRequests += 1;
+      if (metrics.statusRequests === 1) {
+        return json(route, {
+          job_id: JOB_ID,
+          status: 'processing',
+          stage: 'drum_transcription',
+          progress: 45,
+          message: '正在轉寫鼓 MIDI。',
+          error: null,
+          created_at: createdAt,
+          queued_at: createdAt,
+          started_at: createdAt,
+          completed_at: null,
+          failed_at: null,
+        });
+      }
+      return json(route, {
+        job_id: JOB_ID,
+        status: terminalStatus,
+        stage: 'failed',
+        progress: 45,
+        message: terminalStatus === 'interrupted' ? '分析中斷，請重新執行任務。' : '分析失敗，請查看錯誤訊息。',
+        error: {
+          code: 'PIPELINE_FAILED',
+          message: '音訊分析流程失敗，請稍後再試或重新上傳音檔。',
+          stage: 'drum_transcription',
+          retriable: true,
+        },
+        created_at: createdAt,
+        queued_at: createdAt,
+        started_at: createdAt,
+        completed_at: null,
+        failed_at: failedAt,
+      });
+    }
+
+    if (request.method() === 'GET' && pathname === `/api/v1/transcriptions/${JOB_ID}`) {
+      metrics.resultRequests += 1;
+    }
+
+    return json(route, { error: { code: 'NOT_MOCKED', message: `Unmocked e2e request: ${pathname}` } }, 404);
+  });
+
+  return metrics;
+}
+
+function runtimePayload() {
+  return {
+    status: 'degraded',
+    mock_ai_ready: true,
+    true_ai_ready: false,
+    missing_requirements: ['ADTOF runtime is not verified'],
+    checks: {
+      ai_python: { available: true },
+      ffmpeg: { ready: true },
+      demucs: { ready: true },
+      adtof: {
+        ready: false,
+        status_code: 'verify_input_missing',
+        summary: '尚未提供 ADTOF verification input drums stem。',
+        next_steps: ['設定 verification input 後再執行 true-AI opt-in smoke。'],
+      },
+      musescore_pdf: { ready: false },
+    },
+    smoke_commands: {},
+    checked_at: checkedAt,
+    error: null,
+  };
 }
 
 function resultPayload() {
@@ -268,4 +387,21 @@ async function json(route: Route, body: unknown, status = 200) {
     contentType: 'application/json',
     body: JSON.stringify(body),
   });
+}
+
+async function expectPublicSafe(page: Page) {
+  const bodyText = await page.locator('body').innerText();
+  for (const unsafePath of ['/Users/', '/tmp/', '/private/tmp/', '/var/folders/']) {
+    expect(bodyText).not.toContain(unsafePath);
+  }
+  const normalizedBodyText = bodyText.toLowerCase();
+  for (const unsafeDiagnostic of [
+    'traceback',
+    'stdout',
+    'stderr',
+    'raw command',
+    'command_template',
+  ]) {
+    expect(normalizedBodyText).not.toContain(unsafeDiagnostic);
+  }
 }

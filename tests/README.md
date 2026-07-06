@@ -70,3 +70,19 @@ npm run test:e2e
 ```
 
 此 gate 覆蓋 desktop / mobile viewport、upload -> completed -> result page、MIDI / MusicXML download 可見、MusicXML preview/fallback 可見、PDF optional unavailable / failed 狀態，以及 rendered page 不暴露本機路徑、traceback、stdout/stderr、raw command 或 `command_template`。
+
+## V1 Release Gate
+
+預設 release gate 聚合 backend targeted tests、pipeline fast tests、frontend test/lint/build、browser smoke、manual eval CSV validation 與 cleanup dry-run：
+
+```bash
+.venv-ai/bin/python scripts/run_v1_release_gate.py
+```
+
+manual eval CSV 可單獨驗證：
+
+```bash
+.venv-ai/bin/python scripts/check_manual_eval_gate.py
+```
+
+true-AI 仍是 opt-in；不要放進一般 CI 必跑，也不要提交 `frontend/dist`、`storage/`、SQLite/DB、tmp 或 Playwright report artifacts。

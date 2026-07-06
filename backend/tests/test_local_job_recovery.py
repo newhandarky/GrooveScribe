@@ -52,6 +52,8 @@ def test_local_job_recovery_marks_only_processing_jobs_interrupted(tmp_path: Pat
         )
         _seed_job(session, job_id="job-queued", status=JobStatus.QUEUED, stage=PipelineStage.QUEUED)
         _seed_job(session, job_id="job-completed", status=JobStatus.COMPLETED, stage=PipelineStage.COMPLETED)
+        _seed_job(session, job_id="job-failed", status=JobStatus.FAILED, stage=PipelineStage.FAILED)
+        _seed_job(session, job_id="job-canceled", status=JobStatus.CANCELED, stage=PipelineStage.FAILED)
         session.commit()
 
     recovered = LocalJobRecoveryService(session_factory=session_factory).recover_interrupted_jobs()
@@ -71,6 +73,8 @@ def test_local_job_recovery_marks_only_processing_jobs_interrupted(tmp_path: Pat
         assert interrupted.failed_at is not None
         assert jobs["job-queued"].status == JobStatus.QUEUED
         assert jobs["job-completed"].status == JobStatus.COMPLETED
+        assert jobs["job-failed"].status == JobStatus.FAILED
+        assert jobs["job-canceled"].status == JobStatus.CANCELED
 
 
 def test_lifespan_startup_runs_local_job_recovery(tmp_path: Path, monkeypatch) -> None:
