@@ -94,7 +94,86 @@ Request fields：
 - `500 STORAGE_WRITE_FAILED`
 - `503 RUNTIME_NOT_READY`
 
-## 4. 查詢任務狀態 API
+## 4. 近期任務 API
+
+### `GET /api/v1/transcriptions`
+
+用途：回傳最近 transcription jobs summary，供 localhost UI 顯示近期任務、回到結果頁與重跑失敗/完成任務。
+
+Query：
+
+| 欄位 | 類型 | 預設 | 說明 |
+|---|---|---|---|
+| limit | integer | 20 | 1-100 |
+
+成功 response：`200 OK`
+
+```json
+{
+  "jobs": [
+    {
+      "job_id": "job_01HZABC123",
+      "title": "demo-song",
+      "file_name": "demo.wav",
+      "status": "completed",
+      "stage": "completed",
+      "progress": 100,
+      "created_at": "2026-06-24T10:00:00Z",
+      "completed_at": "2026-06-24T10:03:20Z",
+      "failed_at": null,
+      "exports": {
+        "midi": "available",
+        "musicxml": "available",
+        "pdf": "failed"
+      },
+      "error": null
+    }
+  ],
+  "limit": 20
+}
+```
+
+此 endpoint 不回傳 storage key、本機 filesystem path、pipeline raw log、stdout/stderr、traceback、raw command 或 command template。
+
+## 5. Retry / Rerun API
+
+### `POST /api/v1/transcriptions/{job_id}/retry`
+
+用途：從既有 job 建立新的 queued job，複用原始 audio artifact 並重新 enqueue。舊 job 不會被覆寫、不會刪 artifact。
+
+允許狀態：
+
+- `failed`
+- `interrupted`
+- `completed`
+
+禁止狀態：
+
+- `uploaded`
+- `queued`
+- `processing`
+- `canceled`
+
+成功 response：`202 Accepted`，shape 與 upload API 相同：
+
+```json
+{
+  "job_id": "job_01HZRETRY",
+  "status": "queued",
+  "status_url": "/api/v1/transcriptions/job_01HZRETRY/status",
+  "result_url": "/api/v1/transcriptions/job_01HZRETRY",
+  "created_at": "2026-06-24T10:05:00Z"
+}
+```
+
+可能錯誤：
+
+- `404 JOB_NOT_FOUND`
+- `404 ARTIFACT_NOT_FOUND`：原始 audio artifact 已不存在，API 不建立新 job。
+- `409 INVALID_JOB_STATE_TRANSITION`：active job 不允許 retry，避免重複執行。
+- `503 QUEUE_ENQUEUE_FAILED`
+
+## 6. 查詢任務狀態 API
 
 ### `GET /api/v1/transcriptions/{job_id}/status`
 
@@ -140,7 +219,7 @@ Failed response 範例：
 }
 ```
 
-## 5. 取得分析結果 API
+## 7. 取得分析結果 API
 
 ### `GET /api/v1/transcriptions/{job_id}`
 
@@ -238,7 +317,32 @@ Failed response 範例：
 }
 ```
 
-## 6. 下載 API
+## 8. 本機資料摘要 API
+
+### `GET /api/v1/local-data/summary`
+
+用途：回傳 public-safe local data dry-run 摘要，供 UI 顯示 storage / DB / orphan dirs 狀態。這不是刪檔或 reset API。
+
+成功 response：`200 OK`
+
+```json
+{
+  "schema_version": "1.0",
+  "status": "dry_run",
+  "dry_run": true,
+  "execute_supported": false,
+  "storage_root_name": "storage",
+  "job_dir_count": 2,
+  "database_status": "readable",
+  "database_job_count": 1,
+  "orphan_job_dir_count": 1,
+  "warnings": []
+}
+```
+
+`storage_root_name` 只能是目錄名稱，不得包含絕對路徑。V1 不提供 UI 刪除 storage 或 DB；reset / cleanup 仍由 dry-run script 文件化。
+
+## 9. 下載 API
 
 ### `GET /api/v1/transcriptions/{job_id}/download/midi`
 

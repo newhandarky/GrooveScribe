@@ -1,10 +1,12 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { JobStatusCard, ResultCard, RuntimePanel, UploadPanel } from './App';
+import { JobHistoryPanel, JobStatusCard, LocalDataPanel, ResultCard, RuntimePanel, UploadPanel } from './App';
 import type {
   JobStatusResponse,
+  LocalDataSummaryResponse,
   RuntimePreflightResponse,
+  TranscriptionJobSummary,
   TranscriptionResultResponse,
 } from './services/types';
 
@@ -149,6 +151,39 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
       },
       pipeline_log_available: true,
     },
+    ...overrides,
+  };
+}
+
+function jobSummaryFixture(overrides: Partial<TranscriptionJobSummary> = {}): TranscriptionJobSummary {
+  return {
+    job_id: 'job-1',
+    title: 'Demo Groove',
+    file_name: 'demo.wav',
+    status: 'completed',
+    stage: 'completed',
+    progress: 100,
+    created_at: '2026-07-02T00:00:00Z',
+    completed_at: '2026-07-02T00:01:00Z',
+    failed_at: null,
+    exports: { midi: 'available', musicxml: 'available', pdf: 'failed' },
+    error: null,
+    ...overrides,
+  };
+}
+
+function localDataFixture(overrides: Partial<LocalDataSummaryResponse> = {}): LocalDataSummaryResponse {
+  return {
+    schema_version: '1.0',
+    status: 'dry_run',
+    dry_run: true,
+    execute_supported: false,
+    storage_root_name: 'storage',
+    job_dir_count: 2,
+    database_status: 'readable',
+    database_job_count: 1,
+    orphan_job_dir_count: 1,
+    warnings: [],
     ...overrides,
   };
 }
@@ -437,6 +472,99 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('分析流程中斷');
     expect(html).toContain('本機服務曾在分析中停止');
     expect(html).toContain('Progress 45%');
+    expectPublicSafe(html);
+  });
+
+  it('renders retry action for failed and interrupted jobs', () => {
+    const failedHtml = renderToStaticMarkup(
+      <JobStatusCard
+        status={{
+          job_id: 'job-failed',
+          status: 'failed',
+          stage: 'failed',
+          progress: 45,
+          message: '分析失敗，請查看錯誤訊息。',
+          error: {
+            code: 'PIPELINE_FAILED',
+            message: '音訊分析流程失敗，請稍後再試或重新上傳音檔。',
+            stage: 'drum_transcription',
+            retriable: true,
+          },
+          created_at: '2026-07-02T00:00:00Z',
+        }}
+        onRetry={() => undefined}
+      />,
+    );
+
+    expect(failedHtml).toContain('重試');
+    expect(failedHtml).toContain('分析失敗時請先查看錯誤 stage');
+    expectPublicSafe(failedHtml);
+  });
+
+  it('renders local data summary as dry-run visibility only', () => {
+    const html = renderToStaticMarkup(
+      <LocalDataPanel summary={localDataFixture()} error={null} onRefresh={() => undefined} />,
+    );
+
+    expect(html).toContain('本機資料狀態');
+    expect(html).toContain('Storage root');
+    expect(html).toContain('storage');
+    expect(html).toContain('Job dirs');
+    expect(html).toContain('Orphans');
+    expect(html).toContain('dry-run');
+    expect(html).toContain('不會從 UI 刪除資料');
+    expectPublicSafe(html);
+  });
+
+  it('renders job history with view retry and rerun controls', () => {
+    const html = renderToStaticMarkup(
+      <JobHistoryPanel
+        jobs={[
+          jobSummaryFixture(),
+          jobSummaryFixture({
+            job_id: 'job-failed',
+            title: 'Failed Groove',
+            status: 'failed',
+            stage: 'failed',
+            progress: 45,
+            completed_at: null,
+            failed_at: '2026-07-02T00:02:00Z',
+            exports: {},
+            error: {
+              code: 'PIPELINE_FAILED',
+              message: '音訊分析流程失敗，請稍後再試或重新上傳音檔。',
+              stage: 'drum_transcription',
+              retriable: true,
+            },
+          }),
+          jobSummaryFixture({
+            job_id: 'job-processing',
+            title: 'Active Groove',
+            status: 'processing',
+            stage: 'drum_transcription',
+            progress: 50,
+            completed_at: null,
+            exports: {},
+          }),
+        ]}
+        loading={false}
+        error={null}
+        activeJobId="job-1"
+        retryingJobId={null}
+        onRefresh={() => undefined}
+        onSelectJob={() => undefined}
+        onRetry={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('近期任務');
+    expect(html).toContain('Demo Groove');
+    expect(html).toContain('MIDI available');
+    expect(html).toContain('重新執行');
+    expect(html).toContain('Failed Groove');
+    expect(html).toContain('重試');
+    expect(html).toContain('Active Groove');
+    expect(html).not.toContain('raw command');
     expectPublicSafe(html);
   });
 });

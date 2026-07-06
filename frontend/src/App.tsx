@@ -3,14 +3,19 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ApiError,
   downloadUrl,
+  getLocalDataSummary,
   getRuntimePreflight,
   getTranscriptionResult,
   getTranscriptionStatus,
+  listTranscriptions,
+  retryTranscription,
   uploadTranscription,
 } from './services/api';
 import type {
   JobStatusResponse,
+  LocalDataSummaryResponse,
   RuntimePreflightResponse,
+  TranscriptionJobSummary,
   TranscriptionResultResponse,
 } from './services/types';
 import {
@@ -37,6 +42,12 @@ export function App() {
   const [jobStatus, setJobStatus] = useState<JobStatusResponse | null>(null);
   const [result, setResult] = useState<TranscriptionResultResponse | null>(null);
   const [jobError, setJobError] = useState<string | null>(null);
+  const [jobHistory, setJobHistory] = useState<TranscriptionJobSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [localData, setLocalData] = useState<LocalDataSummaryResponse | null>(null);
+  const [localDataError, setLocalDataError] = useState<string | null>(null);
+  const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const pollTimer = useRef<number | null>(null);
 
   const refreshRuntime = async () => {
@@ -52,8 +63,33 @@ export function App() {
     }
   };
 
+  const refreshJobHistory = async () => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const response = await listTranscriptions(20);
+      setJobHistory(response.jobs);
+    } catch (error) {
+      setHistoryError(messageFromError(error));
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const refreshLocalData = async () => {
+    setLocalDataError(null);
+    try {
+      setLocalData(await getLocalDataSummary());
+    } catch (error) {
+      setLocalData(null);
+      setLocalDataError(messageFromError(error));
+    }
+  };
+
   useEffect(() => {
     void refreshRuntime();
+    void refreshJobHistory();
+    void refreshLocalData();
   }, []);
 
   useEffect(() => {
@@ -82,6 +118,7 @@ export function App() {
       setJobStatus(status);
       if (status.status === 'completed') {
         setResult(await getTranscriptionResult(jobId));
+        void refreshJobHistory();
         return;
       }
       setResult(null);
@@ -89,6 +126,8 @@ export function App() {
         pollTimer.current = window.setTimeout(() => {
           void refreshJob(jobId);
         }, POLL_INTERVAL_MS);
+      } else {
+        void refreshJobHistory();
       }
     } catch (error) {
       setJobError(messageFromError(error));
@@ -118,10 +157,38 @@ export function App() {
       });
       setSelectedFile(null);
       setTitle('');
+      void refreshJobHistory();
     } catch (error) {
       setJobError(messageFromError(error));
     } finally {
       setUploading(false);
+    }
+  };
+
+  const retryJob = async (jobId: string) => {
+    if (pollTimer.current) {
+      window.clearTimeout(pollTimer.current);
+    }
+    setRetryingJobId(jobId);
+    setJobError(null);
+    setResult(null);
+    try {
+      const retry = await retryTranscription(jobId);
+      setActiveJobId(retry.job_id);
+      setJobStatus({
+        job_id: retry.job_id,
+        status: retry.status,
+        stage: 'queued',
+        progress: 0,
+        message: '任務已重新排入本機分析佇列。',
+        error: null,
+        created_at: retry.created_at,
+      });
+      void refreshJobHistory();
+    } catch (error) {
+      setJobError(messageFromError(error));
+    } finally {
+      setRetryingJobId(null);
     }
   };
 
@@ -159,6 +226,11 @@ export function App() {
             error={runtimeError}
             onRefresh={() => void refreshRuntime()}
           />
+          <LocalDataPanel
+            summary={localData}
+            error={localDataError}
+            onRefresh={() => void refreshLocalData()}
+          />
           <UploadPanel
             canUpload={canUpload}
             uploading={uploading}
@@ -169,6 +241,16 @@ export function App() {
             onTitleChange={setTitle}
             onSubmit={submitUpload}
           />
+          <JobHistoryPanel
+            jobs={jobHistory}
+            loading={historyLoading}
+            error={historyError}
+            activeJobId={activeJobId}
+            retryingJobId={retryingJobId}
+            onRefresh={() => void refreshJobHistory()}
+            onSelectJob={setActiveJobId}
+            onRetry={(jobId) => void retryJob(jobId)}
+          />
         </div>
 
         <JobPanel
@@ -177,7 +259,9 @@ export function App() {
           result={result}
           error={jobError}
           onRefresh={() => activeJobId && void refreshJob(activeJobId)}
+          onRetry={(jobId) => void retryJob(jobId)}
           onReset={resetJob}
+          retryingJobId={retryingJobId}
         />
       </section>
     </main>
@@ -257,6 +341,46 @@ function RuntimeStatusNote({ runtime }: { runtime: RuntimePreflightResponse | nu
   };
 
   return <div className={`runtimeNote ${runtimeStatusTone(runtime.status)}`}>{descriptions[runtime.status]}</div>;
+}
+
+export function LocalDataPanel({
+  summary,
+  error,
+  onRefresh,
+}: {
+  summary: LocalDataSummaryResponse | null;
+  error: string | null;
+  onRefresh: () => void;
+}) {
+  return (
+    <section className="panel">
+      <div className="panelHeader">
+        <div>
+          <p className="eyebrow">Local data</p>
+          <h2>本機資料狀態</h2>
+        </div>
+        <button className="secondaryButton" type="button" onClick={onRefresh}>
+          更新
+        </button>
+      </div>
+      {error ? <div className="alert error">{error}</div> : null}
+      {summary ? (
+        <div className="localDataGrid">
+          <Metric label="Storage root" value={summary.storage_root_name} />
+          <Metric label="Job dirs" value={String(summary.job_dir_count)} />
+          <Metric label="DB" value={summary.database_status} />
+          <Metric label="Orphans" value={String(summary.orphan_job_dir_count)} />
+        </div>
+      ) : (
+        <p className="formNote">尚未取得本機資料摘要。</p>
+      )}
+      <p className="formNote">
+        {summary?.execute_supported === false
+          ? '目前只提供 dry-run 可視狀態；reset / cleanup 不會從 UI 刪除資料。'
+          : '本機資料摘要僅顯示 public-safe 統計。'}
+      </p>
+    </section>
+  );
 }
 
 function AdtofDiagnostic({ value }: { value: unknown }) {
@@ -353,20 +477,105 @@ export function UploadPanel({
   );
 }
 
+export function JobHistoryPanel({
+  jobs,
+  loading,
+  error,
+  activeJobId,
+  retryingJobId,
+  onRefresh,
+  onSelectJob,
+  onRetry,
+}: {
+  jobs: TranscriptionJobSummary[];
+  loading: boolean;
+  error: string | null;
+  activeJobId: string | null;
+  retryingJobId: string | null;
+  onRefresh: () => void;
+  onSelectJob: (jobId: string) => void;
+  onRetry: (jobId: string) => void;
+}) {
+  return (
+    <section className="panel">
+      <div className="panelHeader">
+        <div>
+          <p className="eyebrow">History</p>
+          <h2>近期任務</h2>
+        </div>
+        <button className="secondaryButton" type="button" onClick={onRefresh} disabled={loading}>
+          {loading ? '載入中' : '更新'}
+        </button>
+      </div>
+      {error ? <div className="alert error">{error}</div> : null}
+      {!loading && !jobs.length ? <p className="formNote">尚無近期任務。</p> : null}
+      {jobs.length ? (
+        <div className="historyList">
+          {jobs.map((job) => (
+            <div className={job.job_id === activeJobId ? 'historyRow active' : 'historyRow'} key={job.job_id}>
+              <div className="historyMain">
+                <div>
+                  <strong>{job.title || job.file_name}</strong>
+                  <span>{job.file_name}</span>
+                </div>
+                <span className={`statusPill ${job.status}`}>{job.status}</span>
+              </div>
+              <div className="historyMeta">
+                <span>{stageLabel(job.stage)}</span>
+                <span>{job.progress}%</span>
+                <span>{formatDateTime(job.completed_at ?? job.failed_at ?? job.created_at)}</span>
+              </div>
+              {Object.keys(job.exports).length ? (
+                <div className="historyExports">
+                  {Object.entries(job.exports).map(([type, status]) => (
+                    <span key={`${job.job_id}-${type}`}>
+                      {type.toUpperCase()} {status}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              {job.error?.message ? <p className="historyError">{job.error.message}</p> : null}
+              <div className="historyActions">
+                <button className="secondaryButton" type="button" onClick={() => onSelectJob(job.job_id)}>
+                  查看
+                </button>
+                {canRetryJobStatus(job.status) ? (
+                  <button
+                    className="secondaryButton"
+                    type="button"
+                    onClick={() => onRetry(job.job_id)}
+                    disabled={retryingJobId === job.job_id}
+                  >
+                    {job.status === 'completed' ? '重新執行' : retryingJobId === job.job_id ? '重試中' : '重試'}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function JobPanel({
   activeJobId,
   status,
   result,
   error,
   onRefresh,
+  onRetry,
   onReset,
+  retryingJobId,
 }: {
   activeJobId: string | null;
   status: JobStatusResponse | null;
   result: TranscriptionResultResponse | null;
   error: string | null;
   onRefresh: () => void;
+  onRetry: (jobId: string) => void;
   onReset: () => void;
+  retryingJobId: string | null;
 }) {
   return (
     <section className="panel jobPanel">
@@ -394,13 +603,27 @@ function JobPanel({
         </div>
       ) : null}
 
-      {status ? <JobStatusCard status={status} /> : null}
-      {result ? <ResultCard result={result} /> : null}
+      {status ? (
+        <JobStatusCard
+          status={status}
+          onRetry={canRetryJobStatus(status.status) ? onRetry : undefined}
+          retrying={retryingJobId === status.job_id}
+        />
+      ) : null}
+      {result ? <ResultCard result={result} onRerun={onRetry} rerunning={retryingJobId === result.job_id} /> : null}
     </section>
   );
 }
 
-export function JobStatusCard({ status }: { status: JobStatusResponse }) {
+export function JobStatusCard({
+  status,
+  onRetry,
+  retrying = false,
+}: {
+  status: JobStatusResponse;
+  onRetry?: (jobId: string) => void;
+  retrying?: boolean;
+}) {
   const guidance =
     status.status === 'interrupted'
       ? '本機服務曾在分析中停止。請重新上傳音檔或保留 artifacts 後再執行新的轉寫。'
@@ -419,6 +642,13 @@ export function JobStatusCard({ status }: { status: JobStatusResponse }) {
       </div>
       <p>{status.message}</p>
       {guidance ? <p className="guidanceText">{guidance}</p> : null}
+      {onRetry ? (
+        <div className="buttonRow">
+          <button className="secondaryButton" type="button" onClick={() => onRetry(status.job_id)} disabled={retrying}>
+            {status.status === 'completed' ? '重新執行' : retrying ? '重試中' : '重試'}
+          </button>
+        </div>
+      ) : null}
       <dl className="detailList">
         <div>
           <dt>Job ID</dt>
@@ -439,7 +669,15 @@ export function JobStatusCard({ status }: { status: JobStatusResponse }) {
   );
 }
 
-export function ResultCard({ result }: { result: TranscriptionResultResponse }) {
+export function ResultCard({
+  result,
+  onRerun,
+  rerunning = false,
+}: {
+  result: TranscriptionResultResponse;
+  onRerun?: (jobId: string) => void;
+  rerunning?: boolean;
+}) {
   const availableExports = result.exports.filter((item) => item.status === 'available');
   const unavailableExports = result.exports.filter((item) => item.status !== 'available');
   const pipelineMode = result.pipeline?.mode ?? 'unknown';
@@ -458,6 +696,11 @@ export function ResultCard({ result }: { result: TranscriptionResultResponse }) 
           <span className={`pipelineBadge ${pipelineMode === 'true_ai' ? 'trueAi' : pipelineMode}`}>
             {pipelineMode === 'true_ai' ? 'TRUE AI' : pipelineMode.toUpperCase()}
           </span>
+          {onRerun ? (
+            <button className="secondaryButton compactButton" type="button" onClick={() => onRerun(result.job_id)} disabled={rerunning}>
+              {rerunning ? '重新排隊中' : '重新執行'}
+            </button>
+          ) : null}
           {result.drum_track ? (
             <div className="scoreStats">
               <span>{result.drum_track.event_count} events</span>
@@ -750,6 +993,10 @@ function stringFromUnknown(value: unknown): string | null {
 
 function stringListFromUnknown(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function canRetryJobStatus(status: string): boolean {
+  return status === 'failed' || status === 'interrupted' || status === 'completed';
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

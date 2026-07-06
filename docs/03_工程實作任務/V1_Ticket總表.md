@@ -31,9 +31,10 @@ Future optional：
 - result API pipeline summary：`GET /api/v1/transcriptions/{job_id}` 的 optional `pipeline` 欄位可顯示 stage summary、warnings、exports 與 quality summary。
 - artifact validation：pipeline log / result API 可提供 optional `pipeline.validation`，涵蓋 MusicXML parseable 與 PDF optional/openable status。
 - result review UX：結果頁可顯示 MusicXML preview fallback、artifact validation、quality flags、downloads 與 PDF optional status。
+- local job workflow：`GET /api/v1/transcriptions` 可列近期任務，UI 可回到結果；`POST /api/v1/transcriptions/{job_id}/retry` 可對 failed/interrupted/completed 建立新 job；local data summary 只提供 dry-run visibility。
 - cleanup dry-run：local storage cleanup 可 dry-run 檢查，report 含 storage root name、job dir count、orphan dirs 與 DB status；execute mode 維持拒絕。
 - manual eval gate：`tests/manual_eval/manual_eval_template.csv` 已包含 baseline report、event counts、drum counts、quality flags 與 blocked reason，並可用 `scripts/generate_manual_eval_row.py` 從 baseline report 產生 row。
-- browser smoke gate：Playwright mocked API gate 可用 `npm run test:e2e` 覆蓋 desktop/mobile upload -> result review 與 failed/interrupted terminal UI。
+- browser smoke gate：Playwright mocked API gate 可用 `npm run test:e2e` 覆蓋 desktop/mobile upload -> result review、history、local data summary 與 failed/interrupted retry UI。
 
 下一階段主線是 V1 release hardening：重跑 mock browser smoke、true-AI opt-in baseline、redaction regression、startup recovery 與 manual eval gate，確認不提交 storage / DB / dist / tmp artifacts。
 本階段新增 release gate orchestrator 後，主線命令會收斂為 `.venv-ai/bin/python scripts/run_v1_release_gate.py`。

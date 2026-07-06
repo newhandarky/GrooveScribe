@@ -71,6 +71,29 @@ npm run test:e2e
 
 此 gate 覆蓋 desktop / mobile viewport、upload -> completed -> result page、MIDI / MusicXML download 可見、MusicXML preview/fallback 可見、PDF optional unavailable / failed 狀態，以及 rendered page 不暴露本機路徑、traceback、stdout/stderr、raw command 或 `command_template`。
 
+browser smoke 也覆蓋 local-first workflow：近期任務顯示、local data dry-run summary、failed/interrupted retry 建立新 job。這些路徑使用 mocked API，不寫入 repo-local storage / SQLite。
+
+## Local Job History / Retry Tests
+
+Backend focused gate：
+
+```bash
+cd backend && .venv/bin/python -m pytest tests/test_job_history_and_retry_api.py
+```
+
+Frontend focused gate：
+
+```bash
+npm --prefix frontend run test -- App.test.tsx frontend/src/services/api.test.ts
+```
+
+驗收重點：
+
+- `GET /api/v1/transcriptions` 只回傳 summary，不含 storage key、本機路徑或 raw pipeline log。
+- `POST /api/v1/transcriptions/{job_id}/retry` 僅允許 failed / interrupted / completed；active job 回 409。
+- retry 建立新 queued job，不改舊 job 狀態，不刪 artifact。
+- `GET /api/v1/local-data/summary` 是 dry-run visibility only，不提供刪檔 API。
+
 ## V1 Release Gate
 
 預設 release gate 聚合 backend targeted tests、pipeline fast tests、frontend test/lint/build、browser smoke、manual eval CSV validation 與 cleanup dry-run：

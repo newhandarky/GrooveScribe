@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
@@ -19,10 +19,13 @@ from app.schemas.transcriptions import (
     JobErrorResponse,
     JobStatusResponse,
     PreviewResult,
+    TranscriptionJobListResponse,
+    TranscriptionJobSummary,
     TranscriptionResultResponse,
     UploadAcceptedResponse,
 )
 from app.services.download_service import DownloadService
+from app.services.job_history_service import JobHistoryService, RetryJobResult
 from app.services.job_query_service import JobQueryService
 from app.services.job_queue import JobQueue, get_job_queue
 from app.services.result_service import ResultService
@@ -53,10 +56,31 @@ def get_result_service(
     return ResultService(settings=settings, storage=storage, job_query_service=job_query_service)
 
 
+def get_job_history_service(
+    storage: Annotated[StorageAdapter, Depends(get_storage_adapter)],
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+) -> JobHistoryService:
+    return JobHistoryService(storage=storage, queue=queue)
+
+
 def get_download_service(
     storage: Annotated[StorageAdapter, Depends(get_storage_adapter)],
 ) -> DownloadService:
     return DownloadService(storage=storage)
+
+
+@router.get("", response_model=TranscriptionJobListResponse)
+def list_transcriptions(
+    db: Annotated[Session, Depends(get_db_session)],
+    job_history_service: Annotated[JobHistoryService, Depends(get_job_history_service)],
+    job_query_service: Annotated[JobQueryService, Depends(get_job_query_service)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> TranscriptionJobListResponse:
+    jobs = job_history_service.list_recent_jobs(db, limit=limit)
+    return TranscriptionJobListResponse(
+        jobs=[_build_job_summary(job, job_query_service) for job in jobs],
+        limit=limit,
+    )
 
 
 @router.post("", response_model=UploadAcceptedResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -83,6 +107,17 @@ async def create_transcription(
         result_url=base_path,
         created_at=result.created_at,
     )
+
+
+@router.post("/{job_id}/retry", response_model=UploadAcceptedResponse, status_code=status.HTTP_202_ACCEPTED)
+def retry_transcription(
+    job_id: str,
+    db: Annotated[Session, Depends(get_db_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    job_history_service: Annotated[JobHistoryService, Depends(get_job_history_service)],
+) -> UploadAcceptedResponse:
+    result = job_history_service.retry_job(db, job_id=job_id)
+    return _build_upload_response(result, settings)
 
 
 @router.get("/{job_id}/status", response_model=JobStatusResponse)
@@ -196,4 +231,35 @@ def _build_result_response(
             for export in sorted(job.export_files, key=lambda item: item.type.value)
         ],
         pipeline=result_service.pipeline_summary(job),
+    )
+
+
+def _build_upload_response(result: RetryJobResult, settings: Settings) -> UploadAcceptedResponse:
+    base_path = f"{settings.api_v1_prefix}/transcriptions/{result.job_id}"
+    return UploadAcceptedResponse(
+        job_id=result.job_id,
+        status=result.status.value,
+        status_url=f"{base_path}/status",
+        result_url=base_path,
+        created_at=result.created_at,
+    )
+
+
+def _build_job_summary(
+    job: TranscriptionJob,
+    job_query_service: JobQueryService,
+) -> TranscriptionJobSummary:
+    error = job_query_service.error_payload(job)
+    return TranscriptionJobSummary(
+        job_id=job.id,
+        title=job.title,
+        file_name=job.audio_file.original_filename,
+        status=job.status.value,
+        stage=job.stage.value,
+        progress=job.progress,
+        created_at=job.created_at,
+        completed_at=job.completed_at,
+        failed_at=job.failed_at,
+        exports={export.type.value: export.status.value for export in sorted(job.export_files, key=lambda item: item.type.value)},
+        error=JobErrorResponse(**error) if error else None,
     )
