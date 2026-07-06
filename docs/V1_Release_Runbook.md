@@ -2,6 +2,8 @@
 
 本 runbook 是 local-first V1 release gate 的重跑流程。它不啟用 cloud / SaaS，不要求 Tauri / Electron，不把 true-AI 或 PDF renderer 放進一般 CI 必跑。
 
+若要跑一次使用者流程，先看 `docs/V1_Local_Quickstart.md`；本文件聚焦 release sign-off 與 evidence。
+
 ## 預設 release gate
 
 首次跑 browser smoke 前安裝 Chromium cache：
@@ -68,6 +70,15 @@ Focused frontend/browser gate：
 npm --prefix frontend run test -- App.test.tsx
 npm run test:e2e
 ```
+
+手動 smoke 可依 `docs/V1_Local_Quickstart.md` 啟動 backend / frontend，使用 synthetic fixture 或授權音檔確認：
+
+- Runtime 區 mock pipeline ready。
+- Upload 可建立 queued job。
+- Result 可顯示 MIDI / MusicXML download。
+- MusicXML preview 或 fallback 可見。
+- PDF failed / unavailable 顯示 optional。
+- History 可回到 completed job，failed/interrupted 可 retry。
 
 ## Opt-in true-AI
 

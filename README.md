@@ -17,9 +17,11 @@ V1 不以「先快速跑通 MVP」為目標，而是以 production-ready local-f
 
 ## 目前狀態
 
-Phase 1 runtime POC 已收尾；ffmpeg preprocessing、Demucs / ADTOF adapter 邊界、MIDI post-processing、MusicXML / PDF generation、mock local runner 與 fixture tests 已建立。先前已在獨立 `.venv-ai` 內完成 generated synthetic fixtures 與授權真實鼓聲 fixture 的真 Demucs + ADTOF 非 mock smoke，並產出 MIDI、MusicXML 與 PDF artifact；PDF smoke 目前為 `completed_with_warning`，因 MuseScore CLI 可能在產生非空 PDF 後以非零狀態結束。
+Local-first V1 主線已收斂到 SQLite + local job queue + local filesystem storage。FastAPI backend 已提供 runtime preflight、upload、job status、result、download、job history、retry/rerun 與 local data summary API；React localhost UI 已可上傳音檔、查看近期任務、追蹤 queued / processing / completed / failed / interrupted、重試或重新執行 job、預覽 MusicXML fallback、下載 MIDI / MusicXML，並清楚標示 PDF optional 狀態。
 
-目前程式碼中也已有 FastAPI API、database model、storage adapter、Celery enqueue 與 worker mock pipeline 測試覆蓋。這些是既有工程資產；後續 V1 方向會把預設主線調整為 SQLite + 本機 job manager + local storage，Redis / Celery / PostgreSQL 則保留為未來 server mode 或 cloud mode 的可選能力。前端目前仍只有 scaffold，需要依 local-first V1 重新建完整操作介面。
+Release readiness 也已建立 deterministic gate：backend targeted tests、pipeline fast tests、frontend test/lint/build、Playwright desktop/mobile browser smoke、manual eval CSV gate、cleanup/reset dry-run、artifact hygiene 與 redaction matrix。`scripts/generate_v1_release_evidence.py` 可產生 repo 外 JSON / Markdown evidence，作為 V1 sign-off 紀錄。
+
+true AI runtime 仍是 opt-in。若 Demucs / ADTOF 尚未 ready，V1 仍可使用 mock flow 完成 upload -> result -> download；true AI blocked reason 與 baseline 流程記錄於 runtime guide。
 
 ## 專案結構
 
@@ -46,6 +48,9 @@ docs/         產品、架構、規格、任務與決策文件
 
 ## 文件入口
 
+- `docs/V1_Local_Quickstart.md`
+- `docs/V1_Release_Runbook.md`
+- `docs/V1_Release_Checklist.md`
 - `docs/專案總覽.md`
 - `docs/產品完整度標準.md`
 - `docs/系統架構.md`
@@ -56,17 +61,24 @@ docs/         產品、架構、規格、任務與決策文件
 - `docs/03_工程實作任務/V1_Ticket總表.md`
 - `ai_pipeline/RUNTIME.md`
 
-## 本地執行方向
-
-V1 最終目標是一條本機啟動路徑：
+## 本地執行
 
 ```bash
-# target shape, exact command may change during V1 implementation
-groovescribe start
-open http://localhost:5173
+# terminal 1
+cd backend
+.venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+
+# terminal 2
+npm --prefix frontend run dev
 ```
 
-目前既有 `docker-compose.yml` 只提供 Postgres、Redis 與 local storage volume，屬於既有 server-style 開發輔助，不再是 V1 預設主線。後續應新增 SQLite + local job manager 的本機啟動流程，並將 Redis / Celery / PostgreSQL 標成 optional server mode。
+開啟：
+
+```text
+http://127.0.0.1:5173
+```
+
+完整流程見 `docs/V1_Local_Quickstart.md`。既有 `docker-compose.yml` 只提供 Postgres、Redis 與 local storage volume，屬於 optional server-style 開發輔助，不是 V1 預設主線。
 
 ## 目前可用指令
 
@@ -78,6 +90,9 @@ PYTHONPATH=. "$AI_PYTHON" scripts/check_ai_runtime.py
 PYTHONPATH=. "$AI_PYTHON" scripts/run_local_pipeline.py --dry-run --output-dir storage/local/jobs/dev-smoke
 PYTHONPATH=. "$AI_PYTHON" scripts/run_local_pipeline.py --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav --output-dir /tmp/groovescribe-fixture-run --mock-ai
 PYTHONPATH=. "$AI_PYTHON" scripts/run_normalize_audio.py --input /path/to/audio.wav --output-dir /tmp/groovescribe-normalized
+npm run test:e2e
+PYTHONPATH=. "$AI_PYTHON" scripts/run_v1_release_gate.py
+PYTHONPATH=. "$AI_PYTHON" scripts/generate_v1_release_evidence.py --output-dir /tmp/groovescribe-v1-release-evidence
 ```
 
-`backend-test` 需要先安裝 backend dev dependencies，包含 `fastapi`、`pytest`、`httpx`。真 AI local pipeline 使用獨立 `.venv-ai`；命令、版本、artifacts 與限制記錄於 `ai_pipeline/RUNTIME.md`。
+`backend-test` 需要先安裝 backend dev dependencies，包含 `fastapi`、`pytest`、`httpx`。真 AI local pipeline 使用獨立 `.venv-ai`；命令、版本、artifacts 與限制記錄於 `ai_pipeline/RUNTIME.md` 與 `docs/本機AI Runtime診斷與True AI啟用指南.md`。不要提交 `frontend/dist`、`storage/`、SQLite/DB、tmp、Playwright reports 或 release evidence。

@@ -334,10 +334,10 @@ function RuntimeStatusNote({ runtime }: { runtime: RuntimePreflightResponse | nu
   }
 
   const descriptions: Record<string, string> = {
-    ready: 'Mock pipeline 與 true AI runtime 都可用。V1 預設仍可使用 mock-ai smoke 驗證流程。',
-    degraded: 'Mock pipeline 可用，true AI runtime 尚未 ready；你仍可用本機 mock-ai flow 上傳與驗證 UI / artifact contract。',
-    not_ready: 'Mock pipeline 也尚未 ready；請先修復 runtime 缺口，upload 會維持停用。',
-    error: 'Runtime preflight 本身失敗；請先修復 AI Python 或 diagnostics script 執行問題。',
+    ready: 'Mock pipeline 與 true AI runtime 都可用。一般操作仍可走本機 mock flow；true AI 僅在你明確 opt-in 時執行。',
+    degraded: 'Mock pipeline 可用，true AI runtime 尚未 ready。你仍可上傳音檔、檢查結果、下載 MIDI / MusicXML；true AI smoke 需另行 opt-in。',
+    not_ready: 'Mock pipeline 尚未 ready；請先修復 runtime 缺口，upload 會維持停用。',
+    error: 'Runtime preflight 本身失敗；請先修復 AI Python 或 diagnostics 執行問題。',
   };
 
   return <div className={`runtimeNote ${runtimeStatusTone(runtime.status)}`}>{descriptions[runtime.status]}</div>;
@@ -376,7 +376,7 @@ export function LocalDataPanel({
       )}
       <p className="formNote">
         {summary?.execute_supported === false
-          ? '目前只提供 dry-run 可視狀態；reset / cleanup 不會從 UI 刪除資料。'
+          ? '目前只提供 dry-run 可視狀態；reset / cleanup 不會從 UI 刪除 storage 或 DB。'
           : '本機資料摘要僅顯示 public-safe 統計。'}
       </p>
     </section>
@@ -626,9 +626,9 @@ export function JobStatusCard({
 }) {
   const guidance =
     status.status === 'interrupted'
-      ? '本機服務曾在分析中停止。請重新上傳音檔或保留 artifacts 後再執行新的轉寫。'
+      ? '本機服務曾在分析中停止。你可以保留舊 artifacts，直接重試建立新的本機轉寫任務。'
       : status.status === 'failed'
-        ? '分析失敗時請先查看錯誤 stage；mock flow 可重試，true AI flow 請先回到 runtime diagnostics 修復環境。'
+        ? '分析失敗時可先重試；若是 true AI opt-in 失敗，請回到 Runtime diagnostics 修復環境後再跑 true AI。'
         : null;
 
   return (
@@ -718,7 +718,7 @@ export function ResultCard({
 
       {result.drum_track?.warnings.length ? (
         <div className="alert warn">
-          <strong>Warnings</strong>
+          <strong>Warnings / quality notes</strong>
           <ul>
             {result.drum_track.warnings.map((warning) => (
               <li key={warning}>{warning}</li>
@@ -741,7 +741,7 @@ export function ResultCard({
           {unavailableExports.map((item) => (
             <div className="exportRow" key={item.type}>
               <span>{item.type.toUpperCase()}</span>
-              <span>{item.status}</span>
+              <span>{item.type === 'pdf' ? `${item.status} · optional` : item.status}</span>
             </div>
           ))}
         </div>

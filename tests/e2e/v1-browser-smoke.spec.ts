@@ -75,7 +75,7 @@ for (const terminalStatus of ['failed', 'interrupted'] as const) {
     if (terminalStatus === 'interrupted') {
       await expect(statusCard.getByText('本機服務曾在分析中停止')).toBeVisible();
     } else {
-      await expect(statusCard.getByText('分析失敗時請先查看錯誤 stage')).toBeVisible();
+      await expect(statusCard.getByText('true AI opt-in 失敗')).toBeVisible();
     }
 
     await expect(page.getByRole('link', { name: /MIDI/i })).toHaveCount(0);
