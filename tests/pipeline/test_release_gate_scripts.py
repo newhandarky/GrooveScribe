@@ -80,6 +80,7 @@ def test_release_gate_report_is_redacted_and_marks_true_ai_opt_in_skipped() -> N
 
     assert report["status"] == "passed"
     assert report["schema_version"] == "1.0"
+    assert report["local_setup"]["status"] == "passed"
     assert report["manual_eval"]["status"] == "passed"
     assert report["browser_smoke"]["status"] == "passed"
     assert report["cleanup"]["status"] == "passed"
@@ -148,10 +149,12 @@ def test_release_evidence_summarizes_gate_manual_eval_and_cleanup_without_sensit
                 "output_tail": ["/Users/private"],
             },
             {"name": "browser_smoke", "returncode": 0, "cwd": ".", "output_tail": ["Traceback /tmp/private"]},
+            {"name": "local_setup", "returncode": 0, "cwd": ".", "output_tail": ["Traceback /tmp/private"]},
             {"name": "manual_eval_gate", "returncode": 0, "cwd": "."},
             {"name": "cleanup_dry_run", "returncode": 0, "cwd": "."},
         ],
         "manual_eval": {"status": "passed", "returncode": 0},
+        "local_setup": {"status": "passed", "returncode": 0},
         "browser_smoke": {"status": "passed", "returncode": 0, "diagnostic_tail": ["stderr /var/folders/private"]},
         "cleanup": {"status": "passed", "returncode": 0, "output_tail": ["raw command leaked"]},
         "redaction": {"status": "passed", "unsafe_tokens": ["/Users/", "Traceback"]},
@@ -178,6 +181,7 @@ def test_release_evidence_summarizes_gate_manual_eval_and_cleanup_without_sensit
 
     assert evidence["status"] == "passed"
     assert evidence["release_gate"]["status"] == "passed"
+    assert evidence["local_setup"]["status"] == "passed"
     assert evidence["runtime_readiness"]["status"] == "passed"
     assert evidence["manual_eval"]["completed_rows"] == 1
     assert evidence["manual_eval"]["blocked_rows"] == 1
@@ -209,6 +213,7 @@ def test_release_evidence_fails_when_required_gate_is_not_passed(tmp_path: Path)
         "checked_at": "2026-07-06T00:00:00+00:00",
         "commands": [{"name": "backend_targeted", "returncode": 1, "cwd": "backend"}],
         "manual_eval": {"status": "not_run"},
+        "local_setup": {"status": "not_run"},
         "browser_smoke": {"status": "not_run"},
         "cleanup": {"status": "not_run"},
         "redaction": {"status": "passed", "unsafe_tokens": []},
@@ -224,6 +229,7 @@ def test_release_evidence_fails_when_required_gate_is_not_passed(tmp_path: Path)
 
     assert evidence["status"] == "failed"
     assert evidence["release_gate"]["status"] == "failed"
+    assert evidence["local_setup"]["status"] == "not_run"
     assert evidence["runtime_readiness"]["status"] == "failed"
 
 
@@ -242,9 +248,11 @@ def test_release_evidence_cli_writes_redacted_files_from_gate_report(tmp_path: P
                 "returncode": 0,
                 "cwd": "/Users/private/repo/backend",
                 "output_tail": ["stdout Traceback /tmp/private"],
-            }
+            },
+            {"name": "local_setup", "returncode": 0, "cwd": "."},
         ],
         "manual_eval": {"status": "passed", "returncode": 0, "output_tail": ["command_template leaked"]},
+        "local_setup": {"status": "passed", "returncode": 0},
         "browser_smoke": {"status": "passed", "returncode": 0},
         "cleanup": {"status": "passed", "returncode": 0},
         "redaction": {"status": "passed", "unsafe_tokens": ["/Users/", "stdout"]},

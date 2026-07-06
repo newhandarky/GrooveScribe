@@ -64,12 +64,8 @@ docs/         產品、架構、規格、任務與決策文件
 ## 本地執行
 
 ```bash
-# terminal 1
-cd backend
-.venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-
-# terminal 2
-npm --prefix frontend run dev
+npm run check:local
+npm run dev:local
 ```
 
 開啟：
@@ -87,6 +83,8 @@ export BACKEND_PYTHON="$(pwd)/backend/.venv/bin/python"
 export AI_PYTHON="$(pwd)/.venv-ai/bin/python"
 "$BACKEND_PYTHON" -m compileall backend/app ai_pipeline worker/app scripts
 PYTHONPATH=. "$AI_PYTHON" scripts/check_ai_runtime.py
+npm run check:local
+npm run dev:local
 PYTHONPATH=. "$AI_PYTHON" scripts/run_local_pipeline.py --dry-run --output-dir storage/local/jobs/dev-smoke
 PYTHONPATH=. "$AI_PYTHON" scripts/run_local_pipeline.py --input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav --output-dir /tmp/groovescribe-fixture-run --mock-ai
 PYTHONPATH=. "$AI_PYTHON" scripts/run_normalize_audio.py --input /path/to/audio.wav --output-dir /tmp/groovescribe-normalized

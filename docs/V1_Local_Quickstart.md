@@ -2,7 +2,38 @@
 
 本文是使用者與 reviewer 跑一次 local-first V1 的最短流程。V1 預設使用 SQLite、local job queue、local filesystem artifacts 與 mock pipeline；true AI 是 opt-in，不是一般 release gate 必跑。
 
-## 1. 啟動 Backend
+## 1. 檢查本機啟動條件
+
+先在 repo root 執行 setup doctor：
+
+```bash
+npm run check:local
+```
+
+doctor 會檢查 Python venv、backend import、frontend dependencies、Playwright Chromium、runtime policy、預設 port 與 artifact hygiene。輸出是 public-safe JSON；若需要保存，請寫到 repo 外，例如：
+
+```bash
+.venv-ai/bin/python scripts/check_v1_local_setup.py \
+  --output /tmp/groovescribe-v1-local-setup/setup.json
+```
+
+## 2. 啟動 Local V1
+
+預設用單一 launcher 啟動 backend 與 frontend：
+
+```bash
+npm run dev:local
+```
+
+開啟：
+
+```text
+http://127.0.0.1:5173
+```
+
+Ctrl-C 會停止 backend / frontend 子程序。
+
+若需要手動分開啟動，可使用：
 
 ```bash
 cd backend
@@ -15,8 +46,6 @@ Backend 預設使用：
 - Storage root：`storage/local`
 - Job queue：local single-process queue
 - PDF renderer：optional
-
-## 2. 啟動 Frontend
 
 另開一個 terminal：
 

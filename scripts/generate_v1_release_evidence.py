@@ -97,6 +97,7 @@ def build_release_evidence(
         "checked_at": started_at,
         "git_hygiene": safe_artifact_hygiene(hygiene),
         "release_gate": summarize_release_gate(gate),
+        "local_setup": summarize_command_status(gate.get("local_setup", {"status": "not_run"})),
         "runtime_readiness": runtime,
         "manual_eval": manual_eval,
         "browser_smoke": summarize_command_status(gate.get("browser_smoke", {"status": "not_run"})),
@@ -129,6 +130,7 @@ def summarize_release_gate(gate: dict) -> dict:
         "manual_eval": summarize_command_status(gate.get("manual_eval", {"status": "not_run"})),
         "browser_smoke": summarize_command_status(gate.get("browser_smoke", {"status": "not_run"})),
         "cleanup": summarize_command_status(gate.get("cleanup", {"status": "not_run"})),
+        "local_setup": summarize_command_status(gate.get("local_setup", {"status": "not_run"})),
         "redaction": summarize_redaction_status(gate.get("redaction", {"status": "not_run"})),
     }
 
@@ -224,6 +226,7 @@ def render_markdown(evidence: dict) -> str:
         "## Gate Summary",
         "",
         f"- Release gate: `{evidence['release_gate'].get('status')}`",
+        f"- Local setup: `{evidence['local_setup'].get('status')}`",
         f"- Runtime readiness: `{evidence['runtime_readiness'].get('status')}`",
         f"- Browser smoke: `{evidence['browser_smoke'].get('status')}`",
         f"- Manual eval: `{evidence['manual_eval'].get('status')}`",
@@ -263,6 +266,7 @@ def _overall_status(evidence: dict) -> str:
     checks = [
         evidence["git_hygiene"].get("status") == "passed",
         evidence["release_gate"].get("status") == "passed",
+        evidence["local_setup"].get("status") == "passed",
         evidence["runtime_readiness"].get("status") == "passed",
         evidence["manual_eval"].get("status") == "passed",
         evidence["browser_smoke"].get("status") == "passed",

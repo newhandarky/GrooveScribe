@@ -20,6 +20,8 @@
 - `check_manual_eval_gate.py`：驗證 manual eval CSV schema、blocked/completed row contract 與 redaction。
 - `cleanup_storage.py`：檢查 repo-local `storage/local` 狀態；目前只支援 dry-run，不刪檔。
 - `plan_local_reset.py`：列出 local reset 會影響的 storage / DB 目標；dry-run only，不刪檔。
+- `check_v1_local_setup.py`：檢查 V1 localhost 啟動條件，包含 venv、backend import、frontend dependencies、Playwright Chromium、port 與 artifact hygiene；輸出 redacted JSON。
+- `run_v1_local_dev.py`：一個命令啟動 backend uvicorn 與 frontend Vite；Ctrl-C 會停止子程序，不刪 storage / DB。
 - `run_v1_release_gate.py`：聚合 deterministic V1 release gate，輸出 redacted JSON report。
 - `generate_v1_release_evidence.py`：產生 repo 外 V1 release evidence JSON / Markdown，彙整 release gate、runtime、manual eval、browser smoke、cleanup/reset、artifact hygiene 與 true-AI opt-in 狀態。
 - `read_pipeline_snapshot.py`：internal/debug CLI，用 `job_id` 從 backend DB 與 `jobs/{job_id}/logs/pipeline.json` 讀取 pipeline snapshot；不改正式前端 API。
@@ -140,6 +142,30 @@ npm run test:e2e
 ```
 
 此 smoke 使用 Playwright 啟動 localhost frontend，並以 mocked `/api/v1/*` contract 驗證 upload -> completed -> result page、MIDI/MusicXML download 可見、MusicXML preview/fallback 可見、PDF optional unavailable / failed 狀態可見。true-AI 與 PDF renderer 仍不得成為一般 CI 必跑條件，也不得提交 `frontend/dist`、`storage/`、DB 或 Playwright report artifacts。
+
+## V1 local launch
+
+檢查本機啟動條件：
+
+```bash
+npm run check:local
+```
+
+啟動 localhost backend / frontend：
+
+```bash
+npm run dev:local
+```
+
+若 port 8000 或 5173 已被占用，可直接呼叫 script 指定 port：
+
+```bash
+.venv-ai/bin/python scripts/run_v1_local_dev.py \
+  --backend-port 8010 \
+  --frontend-port 5174
+```
+
+`run_v1_local_dev.py` 是長駐開發程序，不放進 release gate；`check_v1_local_setup.py` 才會進 deterministic gate。release gate 會用 `--skip-port-check`，避免已開啟的 localhost backend / frontend 讓 sign-off 誤失敗；手動 `npm run check:local` 預設仍會檢查 8000 / 5173。
 
 ## V1 release gate
 
