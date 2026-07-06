@@ -219,6 +219,7 @@ describe('local app smoke rendering', () => {
 
     expect(html).toContain('Mock pipeline 可用');
     expect(html).toContain('true AI runtime 尚未 ready');
+    expect(html).toContain('true AI smoke 需另行 opt-in');
     expect(html).toContain('先執行 normalize 與 Demucs separation');
     expect(html).toContain('GROOVESCRIBE_ADTOF_VERIFY_INPUT');
     expectPublicSafe(html);
@@ -283,6 +284,7 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('/api/v1/transcriptions/job-1/download/musicxml');
     expect(html).toContain('PDF');
     expect(html).toContain('failed');
+    expect(html).toContain('failed · optional');
     expect(html).not.toContain('href="#"');
     expectPublicSafe(html);
   });
@@ -470,7 +472,7 @@ describe('local app smoke rendering', () => {
 
     expect(html).toContain('interrupted');
     expect(html).toContain('分析流程中斷');
-    expect(html).toContain('本機服務曾在分析中停止');
+    expect(html).toContain('保留舊 artifacts');
     expect(html).toContain('Progress 45%');
     expectPublicSafe(html);
   });
@@ -497,7 +499,7 @@ describe('local app smoke rendering', () => {
     );
 
     expect(failedHtml).toContain('重試');
-    expect(failedHtml).toContain('分析失敗時請先查看錯誤 stage');
+    expect(failedHtml).toContain('true AI opt-in 失敗');
     expectPublicSafe(failedHtml);
   });
 
@@ -512,7 +514,7 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('Job dirs');
     expect(html).toContain('Orphans');
     expect(html).toContain('dry-run');
-    expect(html).toContain('不會從 UI 刪除資料');
+    expect(html).toContain('不會從 UI 刪除 storage 或 DB');
     expectPublicSafe(html);
   });
 

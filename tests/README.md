@@ -73,6 +73,8 @@ npm run test:e2e
 
 browser smoke 也覆蓋 local-first workflow：近期任務顯示、local data dry-run summary、failed/interrupted retry 建立新 job。這些路徑使用 mocked API，不寫入 repo-local storage / SQLite。
 
+手動 localhost smoke 請依 `docs/V1_Local_Quickstart.md` 啟動 backend / frontend。手動紀錄不提交 screenshots、Playwright reports 或 generated evidence。
+
 ## Local Job History / Retry Tests
 
 Backend focused gate：
