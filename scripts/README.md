@@ -268,3 +268,22 @@ true-AI 仍是 opt-in：
 ```
 
 RC outputs 必須在 repo 外；不得提交 `rc_manifest.json`、`rc_handoff.md`、release evidence、review packet、`frontend/dist`、`storage/`、SQLite/DB、tmp 或 Playwright reports。true-AI 仍只有 `--include-true-ai` 時 opt-in，PDF renderer 仍不是一般 gate blocker。
+
+## V1 final release notes / tag prep
+
+Final release candidate 文件入口：
+
+- `docs/V1_Release_Notes.md`
+- `docs/V1_Tag_Prep_Checklist.md`
+- `docs/V1_Release_Artifact_Index.md`
+
+tag 前最後 sign-off 入口仍是 RC pilot：
+
+```bash
+.venv-ai/bin/python scripts/run_v1_rc_pilot.py \
+  --output-dir /tmp/groovescribe-v1-rc-pilot
+.venv-ai/bin/python scripts/check_v1_rc_handoff.py \
+  /tmp/groovescribe-v1-rc-pilot/rc_manifest.json
+```
+
+release notes / tag prep 是 docs-only finalization；不要在這一步改 public API、UI、pipeline behavior 或新增 dependency。true-AI 仍是 opt-in，PDF renderer 仍不是一般 tag blocker。

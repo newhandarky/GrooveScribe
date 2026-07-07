@@ -161,3 +161,24 @@ Focused tests：
 ```
 
 RC pilot 會呼叫 deterministic release gate 並輸出 repo 外 `rc_manifest.json` / `rc_handoff.md`。測試使用 mocked command runner，不會在 unit test 內真跑完整 gate。不得提交 generated RC outputs、evidence、review packet、storage、DB、tmp、`frontend/dist` 或 Playwright reports。
+
+## V1 Final Tag Prep
+
+tag 前最小驗證：
+
+```bash
+git status --short --branch
+git diff --check
+.venv-ai/bin/python scripts/run_v1_rc_pilot.py --output-dir /tmp/groovescribe-v1-rc-pilot
+.venv-ai/bin/python scripts/check_v1_rc_handoff.py /tmp/groovescribe-v1-rc-pilot/rc_manifest.json
+rg -n "/Users/|/tmp/|/private/tmp/|/var/folders/|Traceback|stdout|stderr|raw command|command_template|output_tail|diagnostic_tail" /tmp/groovescribe-v1-rc-pilot
+```
+
+若需要 broader confidence：
+
+```bash
+.venv-ai/bin/python -m pytest tests/pipeline/test_rc_pilot_handoff.py tests/pipeline/test_release_gate_scripts.py
+npm run test:e2e
+```
+
+`RUN_TRUE_AI_SMOKE=1` 仍是 opt-in，不是一般 tag blocker。PDF renderer 仍是 optional，不是一般 tag blocker。
