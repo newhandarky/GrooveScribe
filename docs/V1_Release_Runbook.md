@@ -15,6 +15,10 @@ backend/.venv/bin/python scripts/export_review_packet.py --help
 .venv-ai/bin/python scripts/run_v1_release_gate.py
 .venv-ai/bin/python scripts/generate_v1_release_evidence.py \
   --output-dir /tmp/groovescribe-v1-release-evidence
+.venv-ai/bin/python scripts/run_v1_rc_pilot.py \
+  --output-dir /tmp/groovescribe-v1-rc-pilot
+.venv-ai/bin/python scripts/check_v1_rc_handoff.py \
+  /tmp/groovescribe-v1-rc-pilot/rc_manifest.json
 git status --short --branch
 git diff --check
 ```
@@ -65,6 +69,40 @@ evidence 會彙整 release gate、local setup、runtime readiness、manual eval�
 ```
 
 `evidence.status=passed` 才可視為 deterministic V1 sign-off 通過。true-AI 未啟用時應顯示 `skipped_opt_in`，不是一般 release blocker。
+
+## RC pilot handoff
+
+最終 RC 交接可用單一 runner 產生 repo 外 handoff bundle：
+
+```bash
+.venv-ai/bin/python scripts/run_v1_rc_pilot.py \
+  --output-dir /tmp/groovescribe-v1-rc-pilot
+```
+
+輸出：
+
+- `/tmp/groovescribe-v1-rc-pilot/rc_manifest.json`
+- `/tmp/groovescribe-v1-rc-pilot/rc_handoff.md`
+- `/tmp/groovescribe-v1-rc-pilot/release_gate_report.json`
+- `/tmp/groovescribe-v1-rc-pilot/release_evidence/evidence.json`
+- `/tmp/groovescribe-v1-rc-pilot/release_evidence/evidence.md`
+
+交接包驗證：
+
+```bash
+.venv-ai/bin/python scripts/check_v1_rc_handoff.py \
+  /tmp/groovescribe-v1-rc-pilot/rc_manifest.json
+```
+
+若要把 completed job 的 review packet 一起納入交接包：
+
+```bash
+.venv-ai/bin/python scripts/run_v1_rc_pilot.py \
+  --output-dir /tmp/groovescribe-v1-rc-pilot \
+  --review-job-id <job_id>
+```
+
+`--review-job-id` 是 optional；job 不存在或尚未 completed 時，RC runner 只會記錄 `skipped_or_unavailable`，不會輸出本機路徑或 traceback。true-AI 仍只有在 `--include-true-ai` 時 opt-in。
 
 ## Local job workflow gate
 

@@ -25,6 +25,8 @@
 - `export_review_packet.py`：從 completed job 匯出 repo 外 review packet JSON / Markdown，可選 ZIP；不輸出本機絕對路徑或 raw diagnostics。
 - `run_v1_release_gate.py`：聚合 deterministic V1 release gate，輸出 redacted JSON report。
 - `generate_v1_release_evidence.py`：產生 repo 外 V1 release evidence JSON / Markdown，彙整 release gate、runtime、manual eval、browser smoke、cleanup/reset、artifact hygiene 與 true-AI opt-in 狀態。
+- `run_v1_rc_pilot.py`：產生 repo 外 RC pilot handoff bundle，彙整 release gate、evidence、git hygiene、manual eval、browser smoke 與 optional review packet。
+- `check_v1_rc_handoff.py`：驗證 RC handoff manifest / Markdown schema 與 redaction。
 - `read_pipeline_snapshot.py`：internal/debug CLI，用 `job_id` 從 backend DB 與 `jobs/{job_id}/logs/pipeline.json` 讀取 pipeline snapshot；不改正式前端 API。
 
 ## Runtime gate
@@ -240,3 +242,29 @@ true-AI 仍是 opt-in：
 ```
 
 `--include-true-ai` 只適合 runtime 已 ready 時使用；一般 deterministic sign-off 不要求 true-AI 或 PDF renderer。
+
+## V1 RC pilot handoff
+
+產生最終 RC 交接包：
+
+```bash
+.venv-ai/bin/python scripts/run_v1_rc_pilot.py \
+  --output-dir /tmp/groovescribe-v1-rc-pilot
+```
+
+驗證交接包：
+
+```bash
+.venv-ai/bin/python scripts/check_v1_rc_handoff.py \
+  /tmp/groovescribe-v1-rc-pilot/rc_manifest.json
+```
+
+若要附帶 completed job 的 review packet：
+
+```bash
+.venv-ai/bin/python scripts/run_v1_rc_pilot.py \
+  --output-dir /tmp/groovescribe-v1-rc-pilot \
+  --review-job-id <job_id>
+```
+
+RC outputs 必須在 repo 外；不得提交 `rc_manifest.json`、`rc_handoff.md`、release evidence、review packet、`frontend/dist`、`storage/`、SQLite/DB、tmp 或 Playwright reports。true-AI 仍只有 `--include-true-ai` 時 opt-in，PDF renderer 仍不是一般 gate blocker。

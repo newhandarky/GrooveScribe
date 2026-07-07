@@ -9,7 +9,7 @@ from pathlib import Path
 from scripts.check_manual_eval_gate import check_manual_eval_gate
 from scripts.generate_v1_release_evidence import build_release_evidence, render_markdown
 from scripts.plan_local_reset import plan_local_reset
-from scripts.run_v1_release_gate import GateCommand, run_gate
+from scripts.run_v1_release_gate import GateCommand, _deterministic_steps, run_gate
 
 
 def test_manual_eval_gate_passes_existing_repo_rows() -> None:
@@ -90,6 +90,12 @@ def test_release_gate_report_is_redacted_and_marks_true_ai_opt_in_skipped() -> N
     assert "Traceback" not in str(report)
     assert "stdout" not in str(report).lower()
     assert "stderr" not in str(report).lower()
+
+
+def test_release_gate_pipeline_fast_includes_rc_handoff_tests() -> None:
+    pipeline_step = next(step for step in _deterministic_steps(skip_browser=True, skip_build=True) if step.name == "pipeline_fast")
+
+    assert "tests/pipeline/test_rc_pilot_handoff.py" in pipeline_step.command
 
 
 def test_release_evidence_summarizes_gate_manual_eval_and_cleanup_without_sensitive_tokens(tmp_path: Path) -> None:
