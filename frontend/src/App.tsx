@@ -719,6 +719,7 @@ export function ResultCard({
       </div>
 
       <PipelineReview pipeline={result.pipeline} exports={result.exports} />
+      <ReviewPacketPanel result={result} />
       <MusicXmlPreview url={result.preview.musicxml_url} validation={validation} />
 
       {result.drum_track?.warnings.length ? (
@@ -751,6 +752,53 @@ export function ResultCard({
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function ReviewPacketPanel({ result }: { result: TranscriptionResultResponse }) {
+  const qualityFlags = result.pipeline?.quality?.quality_flags ?? [];
+  const warnings = [...new Set([...(result.pipeline?.warnings ?? []), ...(result.pipeline?.quality?.warnings ?? [])])];
+  const pdf = result.exports.find((item) => item.type === 'pdf');
+  const reviewItems = [
+    '對照原音檢查 kick / snare / hihat 位置。',
+    '開啟 MusicXML 確認小節、拍號與可讀性。',
+    ...(qualityFlags.length ? [`優先檢查 quality flags：${qualityFlags.join(', ')}`] : []),
+    ...(warnings.length ? [`確認 warnings：${warnings.join(', ')}`] : []),
+    ...(pdf?.status === 'available' ? [] : ['PDF 是 optional；不可用時使用 MusicXML 交接修譜。']),
+  ];
+  const jsonUrl = `/api/v1/transcriptions/${encodeURIComponent(result.job_id)}/review-packet`;
+  const zipUrl = `/api/v1/transcriptions/${encodeURIComponent(result.job_id)}/download/review-packet`;
+
+  return (
+    <div className="reviewPacketPanel">
+      <div className="reviewHeader">
+        <strong>Review packet</strong>
+        <span>correction handoff</span>
+      </div>
+      <div className="downloadGrid compactDownloads">
+        <a className="downloadButton" href={jsonUrl}>
+          JSON
+          <span>manual eval seed</span>
+        </a>
+        <a className="downloadButton" href={zipUrl}>
+          ZIP
+          <span>artifacts + notes</span>
+        </a>
+      </div>
+      <div className="exportList compact">
+        {result.exports.map((item) => (
+          <div className="exportRow" key={`packet-${item.type}`}>
+            <span>{item.type.toUpperCase()}</span>
+            <span>{item.type === 'pdf' && item.status !== 'available' ? `${item.status} · optional` : item.status}</span>
+          </div>
+        ))}
+      </div>
+      <ul className="handoffChecklist">
+        {reviewItems.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -10,7 +10,8 @@
 4. 針對 raw MIDI 與 processed MIDI 跑 `scripts/inspect_pipeline_artifacts.py`，記錄 note histogram、processed drum counts、event count 與 quality flags；單檔 MIDI 可用 `scripts/inspect_midi.py`。
 5. 若使用 `scripts/run_true_ai_smoke_baseline.py`，可直接從 `baseline.json` 讀取 runtime、artifact、inspection 與 blocked reason。
 6. 可用 `scripts/generate_manual_eval_row.py <baseline.json>` 先產生符合 `manual_eval_template.csv` 的一列，再由 reviewer 補分數。
-7. 每次模型、threshold、後處理策略改動後，保留一份新的評估結果檔。
+7. Completed localhost job 可先下載 review packet，從 `review_packet.json` 的 `manual_eval_seed` 複製核心欄位，再由 reviewer 補分數。
+8. 每次模型、threshold、後處理策略改動後，保留一份新的評估結果檔。
 
 ## 分數定義
 
@@ -64,6 +65,21 @@ PYTHONPATH=. .venv-ai/bin/python scripts/generate_manual_eval_row.py \
 ```
 
 `completed` baseline 會帶入 runtime、artifact ref、raw/processed event count、note histogram、drum counts、quality flags、warnings。`blocked` baseline 會保留 blocked reason，分數欄位維持空白。
+
+## Review Packet Seed
+
+Completed job 的 review packet 也會提供 `manual_eval_seed`，包含 runtime mode、review ref、event counts、drum counts、quality flags、warnings 與 artifact ref。這些欄位可作為 CSV 起點，但 kick/snare/hihat/timing/readability/usability 分數必須由 reviewer 人工填寫。
+
+Review packet CLI：
+
+```bash
+backend/.venv/bin/python scripts/export_review_packet.py \
+  --job-id <job_id> \
+  --output-dir /tmp/groovescribe-review-packet \
+  --zip
+```
+
+不要把 generated review packet、ZIP、MIDI、MusicXML、PDF 或本機 storage 路徑提交到 repo。
 
 ## Fixture 與外部音檔
 

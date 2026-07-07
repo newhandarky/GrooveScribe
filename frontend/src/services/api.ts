@@ -3,6 +3,7 @@ import type {
   LocalDataSummaryResponse,
   RuntimePreflightResponse,
   TranscriptionJobListResponse,
+  ReviewPacketResponse,
   TranscriptionResultResponse,
   UploadAcceptedResponse,
 } from './types';
@@ -80,6 +81,13 @@ export async function getTranscriptionResult(
   fetcher: typeof fetch = fetch,
 ): Promise<TranscriptionResultResponse> {
   return requestJson<TranscriptionResultResponse>(`/transcriptions/${encodeURIComponent(jobId)}`, { fetcher });
+}
+
+export async function getReviewPacket(
+  jobId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<ReviewPacketResponse> {
+  return requestJson<ReviewPacketResponse>(`/transcriptions/${encodeURIComponent(jobId)}/review-packet`, { fetcher });
 }
 
 export async function retryTranscription(

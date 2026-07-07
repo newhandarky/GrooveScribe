@@ -148,3 +148,16 @@ class TranscriptionResultResponse(BaseModel):
     preview: PreviewResult
     exports: list[ExportFileResult]
     pipeline: PipelineSummaryResult | None = None
+
+
+class ReviewPacketResponse(BaseModel):
+    schema_version: str
+    status: str
+    job: dict
+    audio: dict
+    exports: list[dict]
+    quality: dict | None = None
+    validation: dict | None = None
+    review_checklist: list[dict] = Field(default_factory=list)
+    manual_eval_seed: dict = Field(default_factory=dict)
+    redaction: dict

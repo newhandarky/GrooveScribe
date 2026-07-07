@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
-from starlette.responses import StreamingResponse
+from starlette.responses import Response, StreamingResponse
 
 from app.core.config import Settings, get_settings
 from app.core.errors import ApiErrorException, ErrorCode
@@ -19,6 +19,7 @@ from app.schemas.transcriptions import (
     JobErrorResponse,
     JobStatusResponse,
     PreviewResult,
+    ReviewPacketResponse,
     TranscriptionJobListResponse,
     TranscriptionJobSummary,
     TranscriptionResultResponse,
@@ -29,6 +30,7 @@ from app.services.job_history_service import JobHistoryService, RetryJobResult
 from app.services.job_query_service import JobQueryService
 from app.services.job_queue import JobQueue, get_job_queue
 from app.services.result_service import ResultService
+from app.services.review_packet_service import ReviewPacketService
 from app.services.upload_service import UploadService
 from app.storage.base import StorageAdapter
 from app.storage.dependencies import get_storage_adapter
@@ -67,6 +69,13 @@ def get_download_service(
     storage: Annotated[StorageAdapter, Depends(get_storage_adapter)],
 ) -> DownloadService:
     return DownloadService(storage=storage)
+
+
+def get_review_packet_service(
+    settings: Annotated[Settings, Depends(get_settings)],
+    storage: Annotated[StorageAdapter, Depends(get_storage_adapter)],
+) -> ReviewPacketService:
+    return ReviewPacketService(settings=settings, storage=storage)
 
 
 @router.get("", response_model=TranscriptionJobListResponse)
@@ -151,6 +160,29 @@ def get_transcription_result(
 ) -> TranscriptionResultResponse:
     job = result_service.get_completed_result(db, job_id)
     return _build_result_response(job, result_service)
+
+
+@router.get("/{job_id}/review-packet", response_model=ReviewPacketResponse)
+def get_transcription_review_packet(
+    job_id: str,
+    db: Annotated[Session, Depends(get_db_session)],
+    review_packet_service: Annotated[ReviewPacketService, Depends(get_review_packet_service)],
+) -> ReviewPacketResponse:
+    return ReviewPacketResponse(**review_packet_service.build_packet(db, job_id=job_id))
+
+
+@router.get("/{job_id}/download/review-packet")
+def download_transcription_review_packet(
+    job_id: str,
+    db: Annotated[Session, Depends(get_db_session)],
+    review_packet_service: Annotated[ReviewPacketService, Depends(get_review_packet_service)],
+) -> Response:
+    packet_zip = review_packet_service.build_zip(db, job_id=job_id)
+    return Response(
+        packet_zip.content,
+        media_type=packet_zip.content_type,
+        headers={"Content-Disposition": f'attachment; filename="{packet_zip.filename}"'},
+    )
 
 
 @router.get("/{job_id}/download/{export_type}")

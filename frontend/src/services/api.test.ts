@@ -4,6 +4,7 @@ import {
   ApiError,
   downloadUrl,
   getLocalDataSummary,
+  getReviewPacket,
   getRuntimePreflight,
   getTranscriptionResult,
   getTranscriptionStatus,
@@ -212,6 +213,32 @@ describe('api client', () => {
     expect(result.pipeline?.mode).toBe('mock');
     expect(downloadUrl(result.exports[0].download_url)).toBe('/api/v1/transcriptions/job-1/download/musicxml');
     expect(downloadUrl(null)).toBe('#');
+  });
+
+  it('loads review packet with encoded id', async () => {
+    const calls: string[] = [];
+    const fetcher = async (url: string | URL | Request) => {
+      calls.push(String(url));
+      return jsonResponse({
+        schema_version: '1.0',
+        status: 'ready',
+        job: { job_id: 'job 1' },
+        audio: { file_name: 'demo.wav' },
+        exports: [],
+        quality: null,
+        validation: null,
+        review_checklist: [],
+        manual_eval_seed: { artifact_ref: 'review:job 1' },
+        redaction: { status: 'passed', unsafe_tokens: [] },
+      });
+    };
+
+    const packet = await getReviewPacket('job 1', fetcher as typeof fetch);
+
+    expect(calls).toEqual(['/api/v1/transcriptions/job%201/review-packet']);
+    expect(packet.schema_version).toBe('1.0');
+    expect(packet.status).toBe('ready');
+    expect(packet.manual_eval_seed.artifact_ref).toBe('review:job 1');
   });
 
   it('maps unified API errors', async () => {

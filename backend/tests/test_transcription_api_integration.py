@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import subprocess
+import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -327,6 +329,8 @@ def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path)
     midi_response = client.get(f"/api/v1/transcriptions/{job_id}/download/midi")
     musicxml_response = client.get(f"/api/v1/transcriptions/{job_id}/download/musicxml")
     pdf_response = client.get(f"/api/v1/transcriptions/{job_id}/download/pdf")
+    packet_response = client.get(f"/api/v1/transcriptions/{job_id}/review-packet")
+    packet_zip_response = client.get(f"/api/v1/transcriptions/{job_id}/download/review-packet")
 
     assert status_response.status_code == 200
     assert status_response.json()["status"] == "completed"
@@ -342,6 +346,30 @@ def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path)
     assert midi_response.status_code == 200
     assert musicxml_response.status_code == 200
     assert pdf_response.status_code == 200
+    assert packet_response.status_code == 200
+    packet_body = packet_response.json()
+    assert packet_body["schema_version"] == "1.0"
+    assert packet_body["status"] == "ready"
+    assert packet_body["manual_eval_seed"]["artifact_ref"] == f"review:{job_id}"
+    assert packet_body["quality"]["raw_event_count"] == 7
+    assert packet_body["validation"]["musicxml"]["status"] == "parseable"
+    assert packet_body["redaction"]["status"] == "passed"
+    assert "/tmp/" not in str(packet_body)
+    assert "storage_key" not in str(packet_body)
+    assert packet_zip_response.status_code == 200
+    assert packet_zip_response.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(BytesIO(packet_zip_response.content)) as archive:
+        assert "review_packet.json" in archive.namelist()
+        assert "review_notes.md" in archive.namelist()
+        assert "score.musicxml" in archive.namelist()
+        assert "drums.mid" in archive.namelist()
+        assert "score.pdf" in archive.namelist()
+        zipped_packet = json.loads(archive.read("review_packet.json").decode("utf-8"))
+    assert zipped_packet["schema_version"] == packet_body["schema_version"]
+    assert zipped_packet["status"] == packet_body["status"]
+    assert zipped_packet["job"]["job_id"] == packet_body["job"]["job_id"]
+    assert zipped_packet["exports"] == packet_body["exports"]
+    assert zipped_packet["manual_eval_seed"] == packet_body["manual_eval_seed"]
     with session_factory() as session:
         job = session.scalar(select(TranscriptionJob).where(TranscriptionJob.id == job_id))
         assert job.status == JobStatus.COMPLETED
@@ -393,6 +421,20 @@ def test_result_api_uses_audio_contract(tmp_path: Path) -> None:
     assert "stage_reports" not in body
     assert body["audio"]["file_name"] == "demo.wav"
     assert body["preview"]["musicxml_url"] == "/api/v1/transcriptions/job-result/download/musicxml"
+
+
+def test_review_packet_api_rejects_non_completed_job(tmp_path: Path) -> None:
+    client, session_factory, _storage = _client(tmp_path)
+    with session_factory() as session:
+        _seed_job(session, job_id="job-processing", status=JobStatus.PROCESSING, stage=PipelineStage.SOURCE_SEPARATION)
+
+    response = client.get("/api/v1/transcriptions/job-processing/review-packet")
+    zip_response = client.get("/api/v1/transcriptions/job-processing/download/review-packet")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "JOB_NOT_COMPLETED"
+    assert zip_response.status_code == 409
+    assert zip_response.json()["error"]["code"] == "JOB_NOT_COMPLETED"
 
 
 def test_download_api_returns_musicxml_and_pdf(tmp_path: Path) -> None:
