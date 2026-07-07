@@ -124,6 +124,7 @@ release gate 也會執行 `scripts/check_v1_local_setup.py --skip-port-check`；
 .venv-ai/bin/python -m pytest tests/pipeline/test_release_gate_scripts.py
 .venv-ai/bin/python -m pytest tests/pipeline/test_local_launch_scripts.py
 .venv-ai/bin/python -m pytest tests/pipeline/test_review_packet_export.py
+.venv-ai/bin/python -m pytest tests/pipeline/test_rc_pilot_handoff.py
 ```
 
 Review packet CLI 可單獨檢查：
@@ -141,3 +142,22 @@ manual eval CSV 可單獨驗證：
 ```
 
 true-AI 仍是 opt-in；不要放進一般 CI 必跑，也不要提交 `frontend/dist`、`storage/`、SQLite/DB、tmp 或 Playwright report artifacts。
+
+## V1 RC Pilot / Handoff
+
+最終 RC 交接包可重跑：
+
+```bash
+.venv-ai/bin/python scripts/run_v1_rc_pilot.py \
+  --output-dir /tmp/groovescribe-v1-rc-pilot
+.venv-ai/bin/python scripts/check_v1_rc_handoff.py \
+  /tmp/groovescribe-v1-rc-pilot/rc_manifest.json
+```
+
+Focused tests：
+
+```bash
+.venv-ai/bin/python -m pytest tests/pipeline/test_rc_pilot_handoff.py
+```
+
+RC pilot 會呼叫 deterministic release gate 並輸出 repo 外 `rc_manifest.json` / `rc_handoff.md`。測試使用 mocked command runner，不會在 unit test 內真跑完整 gate。不得提交 generated RC outputs、evidence、review packet、storage、DB、tmp、`frontend/dist` 或 Playwright reports。

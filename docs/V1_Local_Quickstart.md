@@ -142,6 +142,17 @@ UI 不提供刪除資料功能。工程檢查請使用：
 
 不要提交 generated evidence、`frontend/dist`、`storage/`、SQLite/DB、tmp 或 Playwright reports。
 
+若要產生最終 RC 交接包：
+
+```bash
+.venv-ai/bin/python scripts/run_v1_rc_pilot.py \
+  --output-dir /tmp/groovescribe-v1-rc-pilot
+.venv-ai/bin/python scripts/check_v1_rc_handoff.py \
+  /tmp/groovescribe-v1-rc-pilot/rc_manifest.json
+```
+
+RC handoff 會輸出 repo 外 `rc_manifest.json` 與 `rc_handoff.md`，彙整 release gate、evidence、manual eval、browser smoke、artifact hygiene 與 true-AI opt-in 狀態。不要提交 RC handoff outputs。
+
 ## 8. True AI Opt-in
 
 true AI 需另外設定 Demucs / ADTOF runtime。流程見：
