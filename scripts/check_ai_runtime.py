@@ -130,20 +130,21 @@ def _command_status(name: str) -> dict:
         return {"available": False, "path": None, "version": None}
 
     version = None
-    try:
-        completed = subprocess.run(
-            [path, "-version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        if completed.stdout:
-            version = completed.stdout.splitlines()[0]
-        elif completed.stderr:
-            version = completed.stderr.splitlines()[0]
-    except (OSError, subprocess.TimeoutExpired):
-        version = None
+    if name == "ffmpeg":
+        try:
+            completed = subprocess.run(
+                [path, "-version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if completed.stdout:
+                version = completed.stdout.splitlines()[0]
+            elif completed.stderr:
+                version = completed.stderr.splitlines()[0]
+        except (OSError, subprocess.TimeoutExpired):
+            version = None
 
     return {"available": True, "path": path, "version": version}
 
