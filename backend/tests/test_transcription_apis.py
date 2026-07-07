@@ -1,4 +1,6 @@
 import json
+import zipfile
+from io import BytesIO
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -12,6 +14,7 @@ from app.schemas.transcriptions import PipelineSummaryResult, TranscriptionResul
 from app.services.download_service import DownloadService
 from app.services.job_query_service import JobQueryService
 from app.services.result_service import ResultService
+from app.services.review_packet_service import ReviewPacketService
 from app.storage.keys import build_job_artifact_key
 from app.storage.local import LocalStorageAdapter
 from app.storage.types import ArtifactType
@@ -365,6 +368,7 @@ def test_public_transcription_openapi_does_not_expose_storage_or_raw_diagnostics
             "PipelineSummaryResult",
             "PipelineValidationSummary",
             "PipelineArtifactValidation",
+            "ReviewPacketResponse",
         )
     }
     schema_text = json.dumps(public_schema)
@@ -457,3 +461,161 @@ def test_download_service_maps_missing_storage_artifact_to_export_not_found(tmp_
             assert exc.code == ErrorCode.EXPORT_NOT_FOUND
         else:
             raise AssertionError("expected EXPORT_NOT_FOUND")
+
+
+def test_review_packet_service_builds_public_safe_packet_and_zip(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    storage.put_bytes(b"midi", "jobs/job-1/midi/processed_drum.mid", "audio/midi")
+    storage.put_bytes(b"<score-partwise />", "jobs/job-1/notation/score.musicxml", "application/vnd.recordare.musicxml+xml")
+    storage.put_bytes(
+        b"""
+        {
+          "status": "completed",
+          "quality": {
+            "raw_event_count": 7,
+            "processed_event_count": 4,
+            "raw_note_histogram": {"35": 2, "38": 2},
+            "processed_drum_counts": {"kick": 2, "snare": 2},
+            "quality_flags": ["too_few_events"],
+            "warnings": ["too_few_events", "/Users/private/path"]
+          },
+          "validation": {
+            "musicxml": {"available": true, "parseable": true, "error_code": null, "warnings": []},
+            "pdf": {"available": false, "optional": true, "openable": null, "error_code": "pdf_unavailable", "warnings": ["pdf_optional_unavailable"]}
+          }
+        }
+        """,
+        build_job_artifact_key("job-1", ArtifactType.PIPELINE_LOG),
+        "application/json",
+    )
+    with _session() as session:
+        _create_job(
+            session,
+            status=JobStatus.COMPLETED,
+            stage=PipelineStage.COMPLETED,
+            export_status=ExportFileStatus.AVAILABLE,
+        )
+        session.add(
+            ExportFile(
+                id="export-2",
+                job_id="job-1",
+                type=ExportFileType.MUSICXML,
+                status=ExportFileStatus.AVAILABLE,
+                storage_key="jobs/job-1/notation/score.musicxml",
+                content_type="application/vnd.recordare.musicxml+xml",
+                file_size_bytes=18,
+            )
+        )
+        session.add(
+            ExportFile(
+                id="export-3",
+                job_id="job-1",
+                type=ExportFileType.PDF,
+                status=ExportFileStatus.FAILED,
+                storage_key="jobs/job-1/exports/score.pdf",
+                content_type="application/pdf",
+                file_size_bytes=None,
+            )
+        )
+        session.commit()
+        service = ReviewPacketService(settings=Settings(), storage=storage)
+
+        packet = service.build_packet(session, job_id="job-1")
+        packet_zip = service.build_zip(session, job_id="job-1")
+
+    assert packet["schema_version"] == "1.0"
+    assert packet["status"] == "ready"
+    assert packet["manual_eval_seed"]["baseline_report_ref"] == "review:job-1"
+    assert packet["manual_eval_seed"]["processed_event_count"] == 4
+    assert packet["validation"]["pdf"]["status"] == "optional_unavailable"
+    assert any(item["code"] == "pdf_optional" for item in packet["review_checklist"])
+    assert packet["redaction"] == {"status": "passed", "unsafe_token_count": 0}
+    assert "/Users/" not in json.dumps(packet)
+    with zipfile.ZipFile(BytesIO(packet_zip.content)) as archive:
+        assert sorted(archive.namelist()) == ["drums.mid", "review_notes.md", "review_packet.json", "score.musicxml"]
+        assert archive.read("drums.mid") == b"midi"
+        assert b"review:job-1" in archive.read("review_packet.json")
+
+
+def test_review_packet_service_drops_unsafe_dict_keys_from_public_packet_and_zip(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    storage.put_bytes(b"midi", "jobs/job-1/midi/processed_drum.mid", "audio/midi")
+    storage.put_bytes(
+        b"""
+        {
+          "status": "completed",
+          "quality": {
+            "raw_event_count": 9,
+            "processed_event_count": 6,
+            "raw_note_histogram": {
+              "35": 2,
+              "/Users/private": 1,
+              "/tmp/foo": 1,
+              "Traceback": 1,
+              "command_template": 1
+            },
+            "processed_drum_counts": {
+              "kick": 4,
+              "snare": 2,
+              "/Users/private": 7,
+              "/tmp/foo": 8,
+              "Traceback": 9,
+              "stdout": 10,
+              "command_template": 11
+            },
+            "quality_flags": [],
+            "warnings": []
+          },
+          "validation": {
+            "musicxml": {"available": true, "parseable": true, "error_code": null, "warnings": []},
+            "pdf": {"available": false, "optional": true, "openable": null, "error_code": "pdf_unavailable", "warnings": ["pdf_optional_unavailable"]}
+          }
+        }
+        """,
+        build_job_artifact_key("job-1", ArtifactType.PIPELINE_LOG),
+        "application/json",
+    )
+    with _session() as session:
+        _create_job(
+            session,
+            status=JobStatus.COMPLETED,
+            stage=PipelineStage.COMPLETED,
+            export_status=ExportFileStatus.AVAILABLE,
+        )
+        service = ReviewPacketService(settings=Settings(), storage=storage)
+
+        packet = service.build_packet(session, job_id="job-1")
+        packet_zip = service.build_zip(session, job_id="job-1")
+
+    packet_text = json.dumps(packet, ensure_ascii=False)
+    assert packet["quality"]["processed_drum_counts"] == {"kick": 4, "snare": 2}
+    assert packet["manual_eval_seed"]["processed_drum_counts"] == {"kick": 4, "snare": 2}
+    assert packet["quality"]["raw_note_histogram"] == {"35": 2}
+    assert packet["redaction"] == {"status": "passed", "unsafe_token_count": 0}
+    for token in UNSAFE_TOKENS:
+        assert token not in packet_text
+
+    with zipfile.ZipFile(BytesIO(packet_zip.content)) as archive:
+        zipped_packet = archive.read("review_packet.json").decode("utf-8")
+    for token in UNSAFE_TOKENS:
+        assert token not in zipped_packet
+    assert json.loads(zipped_packet)["manual_eval_seed"]["processed_drum_counts"] == {"kick": 4, "snare": 2}
+
+
+def test_review_packet_service_marks_missing_export_artifact_unavailable(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    with _session() as session:
+        _create_job(
+            session,
+            status=JobStatus.COMPLETED,
+            stage=PipelineStage.COMPLETED,
+            export_status=ExportFileStatus.AVAILABLE,
+        )
+        service = ReviewPacketService(settings=Settings(), storage=storage)
+
+        packet = service.build_packet(session, job_id="job-1")
+
+    midi = next(item for item in packet["exports"] if item["type"] == "midi")
+    assert midi["status"] == "unavailable"
+    assert midi["download_url"] is None
+    assert midi["included_in_zip"] is False

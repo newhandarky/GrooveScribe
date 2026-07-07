@@ -212,6 +212,7 @@ def _deterministic_steps(*, skip_browser: bool, skip_build: bool) -> list[GateCo
                 "tests/pipeline/test_midi_inspection.py",
                 "tests/pipeline/test_release_gate_scripts.py",
                 "tests/pipeline/test_local_launch_scripts.py",
+                "tests/pipeline/test_review_packet_export.py",
             ],
         ),
         GateCommand("local_setup", [sys.executable, "scripts/check_v1_local_setup.py", "--skip-port-check"]),

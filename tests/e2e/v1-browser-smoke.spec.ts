@@ -25,6 +25,17 @@ test('mock browser smoke reaches result review without leaking local diagnostics
 
   await expect(page.getByText('Browser Smoke')).toBeVisible();
   await expect(page.getByText('Pipeline summary')).toBeVisible();
+  await expect(page.getByText('Review packet')).toBeVisible();
+  await expect(page.getByRole('link', { name: /JSON/i })).toHaveAttribute(
+    'href',
+    /\/api\/v1\/transcriptions\/job-browser-smoke\/review-packet$/,
+  );
+  await expect(page.getByRole('link', { name: /ZIP/i })).toHaveAttribute(
+    'href',
+    /\/api\/v1\/transcriptions\/job-browser-smoke\/download\/review-packet$/,
+  );
+  await expect(page.getByText('manual eval seed')).toBeVisible();
+  await expect(page.getByText('PDF 是 optional')).toBeVisible();
   await expect(page.getByText('分析完成。')).toBeVisible();
   await expect(page.getByText('MusicXML preview', { exact: true })).toBeVisible();
   await expect(page.getByText('MusicXML preview unavailable')).toBeVisible();

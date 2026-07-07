@@ -22,6 +22,7 @@
 - `plan_local_reset.py`：列出 local reset 會影響的 storage / DB 目標；dry-run only，不刪檔。
 - `check_v1_local_setup.py`：檢查 V1 localhost 啟動條件，包含 venv、backend import、frontend dependencies、Playwright Chromium、port 與 artifact hygiene；輸出 redacted JSON。
 - `run_v1_local_dev.py`：一個命令啟動 backend uvicorn 與 frontend Vite；Ctrl-C 會停止子程序，不刪 storage / DB。
+- `export_review_packet.py`：從 completed job 匯出 repo 外 review packet JSON / Markdown，可選 ZIP；不輸出本機絕對路徑或 raw diagnostics。
 - `run_v1_release_gate.py`：聚合 deterministic V1 release gate，輸出 redacted JSON report。
 - `generate_v1_release_evidence.py`：產生 repo 外 V1 release evidence JSON / Markdown，彙整 release gate、runtime、manual eval、browser smoke、cleanup/reset、artifact hygiene 與 true-AI opt-in 狀態。
 - `read_pipeline_snapshot.py`：internal/debug CLI，用 `job_id` 從 backend DB 與 `jobs/{job_id}/logs/pipeline.json` 讀取 pipeline snapshot；不改正式前端 API。
@@ -166,6 +167,25 @@ npm run dev:local
 ```
 
 `run_v1_local_dev.py` 是長駐開發程序，不放進 release gate；`check_v1_local_setup.py` 才會進 deterministic gate。release gate 會用 `--skip-port-check`，避免已開啟的 localhost backend / frontend 讓 sign-off 誤失敗；手動 `npm run check:local` 預設仍會檢查 8000 / 5173。
+
+## V1 review packet export
+
+Completed job 可匯出 review packet，交給 reviewer 做人工修譜或 manual eval：
+
+```bash
+backend/.venv/bin/python scripts/export_review_packet.py \
+  --job-id <job_id> \
+  --output-dir /tmp/groovescribe-review-packet \
+  --zip
+```
+
+輸出包含：
+
+- `review_packet.json`
+- `review_notes.md`
+- `review_packet.zip`，若加 `--zip`
+
+`--output-dir` 必須在 repo 外；script 會拒絕 repo 內輸出。review packet 不包含 storage key、本機絕對路徑、traceback、stdout/stderr、raw command 或 command template。PDF unavailable 不阻塞 packet 產生。
 
 ## V1 release gate
 

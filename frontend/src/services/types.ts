@@ -155,3 +155,32 @@ export interface TranscriptionResultResponse {
     pipeline_log_available: boolean;
   } | null;
 }
+
+export interface ReviewPacketResponse {
+  schema_version: string;
+  status: string;
+  job: Record<string, unknown>;
+  audio: Record<string, unknown>;
+  exports: Array<{
+    type: string;
+    status: string;
+    optional: boolean;
+    content_type: string;
+    file_size_bytes: number | null;
+    download_url: string | null;
+    included_in_zip: boolean;
+  }>;
+  quality?: TranscriptionResultResponse['pipeline'] extends infer Pipeline
+    ? Pipeline extends { quality?: infer Quality }
+      ? Quality
+      : unknown
+    : unknown;
+  validation?: TranscriptionResultResponse['pipeline'] extends infer Pipeline
+    ? Pipeline extends { validation?: infer Validation }
+      ? Validation
+      : unknown
+    : unknown;
+  review_checklist: Array<{ code: string; label: string; detail: string }>;
+  manual_eval_seed: Record<string, unknown>;
+  redaction: { status: string; unsafe_tokens: string[] };
+}

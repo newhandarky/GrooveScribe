@@ -71,7 +71,7 @@ npm run test:e2e
 
 此 gate 覆蓋 desktop / mobile viewport、upload -> completed -> result page、MIDI / MusicXML download 可見、MusicXML preview/fallback 可見、PDF optional unavailable / failed 狀態，以及 rendered page 不暴露本機路徑、traceback、stdout/stderr、raw command 或 `command_template`。
 
-browser smoke 也覆蓋 local-first workflow：近期任務顯示、local data dry-run summary、failed/interrupted retry 建立新 job。這些路徑使用 mocked API，不寫入 repo-local storage / SQLite。
+browser smoke 也覆蓋 local-first workflow：近期任務顯示、local data dry-run summary、failed/interrupted retry 建立新 job、completed result 顯示 review packet JSON / ZIP handoff actions。這些路徑使用 mocked API，不寫入 repo-local storage / SQLite。
 
 手動 localhost smoke 請依 `docs/V1_Local_Quickstart.md` 啟動 backend / frontend。手動紀錄不提交 screenshots、Playwright reports 或 generated evidence。
 
@@ -123,7 +123,16 @@ release gate 也會執行 `scripts/check_v1_local_setup.py --skip-port-check`；
 ```bash
 .venv-ai/bin/python -m pytest tests/pipeline/test_release_gate_scripts.py
 .venv-ai/bin/python -m pytest tests/pipeline/test_local_launch_scripts.py
+.venv-ai/bin/python -m pytest tests/pipeline/test_review_packet_export.py
 ```
+
+Review packet CLI 可單獨檢查：
+
+```bash
+backend/.venv/bin/python scripts/export_review_packet.py --help
+```
+
+實際匯出必須指定 repo 外 output dir，例如 `/tmp/groovescribe-review-packet`；不要提交 generated JSON、Markdown、ZIP 或 artifacts。
 
 manual eval CSV 可單獨驗證：
 

@@ -11,6 +11,7 @@ RC sign-off 建議順序：
 ```bash
 npm run check:local
 npm run test:e2e
+backend/.venv/bin/python scripts/export_review_packet.py --help
 .venv-ai/bin/python scripts/run_v1_release_gate.py
 .venv-ai/bin/python scripts/generate_v1_release_evidence.py \
   --output-dir /tmp/groovescribe-v1-release-evidence
@@ -92,11 +93,32 @@ npm run test:e2e
 - Runtime 區 mock pipeline ready。
 - Upload 可建立 queued job。
 - Result 可顯示 MIDI / MusicXML download。
+- Result 可顯示 Review packet JSON / ZIP handoff actions。
 - MusicXML preview 或 fallback 可見。
 - PDF failed / unavailable 顯示 optional。
 - History 可回到 completed job，failed/interrupted 可 retry。
 
 若 backend 尚未啟動，frontend Runtime 區會提示先執行 `npm run dev:local` 或 `npm run check:local`。
+
+## Review packet handoff
+
+Completed job 應可取得：
+
+- `GET /api/v1/transcriptions/{job_id}/review-packet`
+- `GET /api/v1/transcriptions/{job_id}/download/review-packet`
+
+review packet 只包含 public-safe 摘要、quality diagnostics、validation、review checklist、manual eval seed 與可用 artifacts。ZIP entry 固定為 `review_packet.json`、`review_notes.md`、`drums.mid`、`score.musicxml`、`score.pdf`；PDF 不可用時不阻塞 ZIP 產生。
+
+CLI export 必須寫到 repo 外：
+
+```bash
+backend/.venv/bin/python scripts/export_review_packet.py \
+  --job-id <job_id> \
+  --output-dir /tmp/groovescribe-review-packet \
+  --zip
+```
+
+不得提交 generated review packet、ZIP 或任何本機 artifact。
 
 ## Opt-in true-AI
 

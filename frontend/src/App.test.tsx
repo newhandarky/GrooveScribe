@@ -283,6 +283,12 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('Demo Groove');
     expect(html).toContain('MOCK');
     expect(html).toContain('Pipeline summary');
+    expect(html).toContain('Review packet');
+    expect(html).toContain('/api/v1/transcriptions/job-1/review-packet');
+    expect(html).toContain('/api/v1/transcriptions/job-1/download/review-packet');
+    expect(html).toContain('manual eval seed');
+    expect(html).toContain('artifacts + notes');
+    expect(html).toContain('PDF 是 optional');
     expect(html).toContain('Raw events');
     expect(html).toContain('Processed events');
     expect(html).toContain('closed_hat: 2');

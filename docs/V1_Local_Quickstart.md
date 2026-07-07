@@ -73,6 +73,7 @@ Vite 會將 `/api/*` proxy 到 `http://127.0.0.1:8000`。
    - MusicXML download 可見。
    - MusicXML preview 或 fallback 可見。
    - PDF 若 failed / unavailable，會顯示 optional，不阻塞 MIDI / MusicXML。
+   - Review packet JSON / ZIP 可見，可交給 reviewer 做人工修譜與評分。
 
 ## 4. 使用近期任務與 Retry
 
@@ -81,7 +82,27 @@ Vite 會將 `/api/*` proxy 到 `http://127.0.0.1:8000`。
 - `completed` 可按「重新執行」，同樣建立新 job。
 - 舊 artifacts 不會被 UI 刪除。
 
-## 5. 本機資料與 Reset
+## 5. 交接 Review Packet
+
+Completed result 會提供 review packet：
+
+- JSON：包含 job/audio/export 摘要、quality diagnostics、validation、review checklist 與 manual eval seed。
+- ZIP：包含 `review_packet.json`、`review_notes.md`，以及可用的 `drums.mid`、`score.musicxml`、`score.pdf`。
+
+PDF 仍是 optional；PDF unavailable 時，review packet 仍可用 MusicXML / MIDI 交接。
+
+若要從 CLI 匯出，請輸出到 repo 外：
+
+```bash
+backend/.venv/bin/python scripts/export_review_packet.py \
+  --job-id <job_id> \
+  --output-dir /tmp/groovescribe-review-packet \
+  --zip
+```
+
+不要提交 generated review packet、ZIP、storage、DB 或本機 artifact。
+
+## 6. 本機資料與 Reset
 
 Runtime / Local data 區只顯示 public-safe dry-run 統計：
 
@@ -99,7 +120,7 @@ UI 不提供刪除資料功能。工程檢查請使用：
 
 `--execute` 目前必須拒絕；V1 不自動刪除 storage 或 DB。
 
-## 6. Release Sign-off
+## 7. Release Sign-off
 
 一般 deterministic gate：
 
@@ -121,7 +142,7 @@ UI 不提供刪除資料功能。工程檢查請使用：
 
 不要提交 generated evidence、`frontend/dist`、`storage/`、SQLite/DB、tmp 或 Playwright reports。
 
-## 7. True AI Opt-in
+## 8. True AI Opt-in
 
 true AI 需另外設定 Demucs / ADTOF runtime。流程見：
 
