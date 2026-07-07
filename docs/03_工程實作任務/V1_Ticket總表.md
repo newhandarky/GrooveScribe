@@ -23,7 +23,7 @@ Future optional：
 
 ## 目前完成狀態摘要
 
-截至 2026-07-03，local-first V1 已完成下列可驗收能力：
+截至 2026-07-07，local-first V1 已完成下列可驗收能力：
 
 - local web app vertical slice：localhost UI 可做 runtime preflight、upload、job polling、result download。
 - runtime diagnostics：`GET /api/v1/runtime/preflight` 與 ADTOF diagnostics 可回傳 structured status / next steps。
@@ -35,11 +35,14 @@ Future optional：
 - cleanup dry-run：local storage cleanup 可 dry-run 檢查，report 含 storage root name、job dir count、orphan dirs 與 DB status；execute mode 維持拒絕。
 - manual eval gate：`tests/manual_eval/manual_eval_template.csv` 已包含 baseline report、event counts、drum counts、quality flags 與 blocked reason，並可用 `scripts/generate_manual_eval_row.py` 從 baseline report 產生 row。
 - browser smoke gate：Playwright mocked API gate 可用 `npm run test:e2e` 覆蓋 desktop/mobile upload -> result review、history、local data summary 與 failed/interrupted retry UI。
+- RC pilot handoff：`scripts/run_v1_rc_pilot.py --output-dir /tmp/groovescribe-v1-rc-pilot` 可產生 repo 外 handoff bundle，`scripts/check_v1_rc_handoff.py` 驗證 `status=passed` 且 `issues=[]`。
 
-下一階段主線是 V1 release hardening：重跑 mock browser smoke、true-AI opt-in baseline、redaction regression、startup recovery 與 manual eval gate，確認不提交 storage / DB / dist / tmp artifacts。
-本階段新增 release gate orchestrator 後，主線命令會收斂為 `.venv-ai/bin/python scripts/run_v1_release_gate.py`。
+目前主線是 V1 release candidate finalization：重跑 RC pilot handoff、release gate、redaction scan 與 git hygiene，確認不提交 storage / DB / dist / tmp artifacts。
+主線驗收命令已收斂為 `.venv-ai/bin/python scripts/run_v1_release_gate.py` 與 `.venv-ai/bin/python scripts/run_v1_rc_pilot.py --output-dir /tmp/groovescribe-v1-rc-pilot`。
 
 ## Ticket 總表
+
+> Status note：下表保留為 phase backlog / historical implementation index。表內 `Todo` 不代表目前 release readiness 未完成；V1 RC readiness 的實際來源是 `docs/V1_Release_Checklist.md`、`docs/V1_Release_Runbook.md`、`docs/V1_Tag_Prep_Checklist.md` 與 RC handoff validation。
 
 | Ticket ID | Phase | Ticket 名稱 | 優先級 | 預估難度 | 相依任務 | 對應文件 | 完成狀態 |
 |---|---|---|---|---|---|---|---|

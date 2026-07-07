@@ -6,6 +6,8 @@ GrooveScribe V1 is a local-first web app for turning a single MP3 or WAV file in
 
 This release candidate is validated through deterministic local gates, browser smoke tests, manual eval checks, artifact hygiene checks, redaction checks, release evidence generation, and RC handoff validation.
 
+2026-07-07 RC finalization note: the default RC pilot handoff flow completed with `status=passed`, the handoff validator returned `issues=[]`, and the RC bundle redaction scan had no matches. true-AI remains opt-in and was not required for the deterministic sign-off path.
+
 ## Included Capabilities
 
 - Local upload, status, result, download, job history, retry/rerun, and local data summary APIs.
@@ -31,8 +33,12 @@ Expected deterministic result:
 
 - RC pilot status: `passed`
 - RC handoff validator status: `passed`
+- RC handoff validator issues: `[]`
+- RC handoff redaction scan: no matches
 - Git status: clean `main...origin/main`
 - `git diff --check`: no output
+
+Playwright browser smoke starts a local Vite server during the release gate. In sandboxed environments that cannot bind localhost ports, rerun the gate in a local environment that permits `127.0.0.1` server startup before treating the result as final.
 
 ## Known Limitations
 

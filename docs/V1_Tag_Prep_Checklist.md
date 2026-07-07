@@ -2,6 +2,8 @@
 
 This checklist prepares the repository for an annotated V1 release candidate tag. It documents the final checks only; this work pack must not create the tag automatically.
 
+2026-07-07 status: the RC pilot handoff flow has been validated with `status=passed`, `check_v1_rc_handoff.py` returned `issues=[]`, and the redaction scan found no matches. Re-run the commands below immediately before creating any tag.
+
 ## Suggested Tag
 
 ```text
@@ -29,6 +31,8 @@ Expected result:
 - The RC handoff redaction scan has no matches.
 - Git status does not include generated artifacts.
 - `git diff --check` has no output.
+
+The RC pilot includes the Playwright browser smoke gate. If a restricted sandbox blocks localhost port binding, run the final checks in a local shell that can start the Vite web server.
 
 ## Suggested Annotated Tag Command
 
