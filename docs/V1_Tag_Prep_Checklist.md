@@ -4,10 +4,12 @@ This checklist prepares the repository for an annotated V1 release candidate tag
 
 2026-07-07 status: the RC pilot handoff flow has been validated with `status=passed`, `check_v1_rc_handoff.py` returned `issues=[]`, and the redaction scan found no matches. Re-run the commands below immediately before creating any tag.
 
+RC1 has already been published and must not be moved. Use `v1.0.0-rc2` for the current release candidate line.
+
 ## Suggested Tag
 
 ```text
-v1.0.0-rc1
+v1.0.0-rc2
 ```
 
 ## Final Checks
@@ -39,9 +41,11 @@ The RC pilot includes the Playwright browser smoke gate. If a restricted sandbox
 Only run this after the final checks pass:
 
 ```bash
-git tag -a v1.0.0-rc1 -m "GrooveScribe V1.0.0 RC1
+git tag -a v1.0.0-rc2 -m "GrooveScribe V1.0.0 RC2
 
 Local-first V1 release candidate.
+
+Includes RC handoff documentation correction after the published RC1 tag.
 
 Validated with RC pilot handoff:
 - rc_manifest.json

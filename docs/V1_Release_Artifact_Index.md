@@ -2,7 +2,7 @@
 
 V1 release artifacts are generated evidence files for reviewer handoff. They are not source files and must not be committed.
 
-Current RC1 candidate handoff artifacts are expected to be regenerated under `/tmp/groovescribe-v1-rc-pilot` and validated with `scripts/check_v1_rc_handoff.py`. They remain repo-external even when the validation passes.
+Current RC2 candidate handoff artifacts are expected to be regenerated under `/tmp/groovescribe-v1-rc-pilot` and validated with `scripts/check_v1_rc_handoff.py`. They remain repo-external even when the validation passes. The published RC1 tag must not be moved or reused.
 
 ## RC Handoff Bundle
 
