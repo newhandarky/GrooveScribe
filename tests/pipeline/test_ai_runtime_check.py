@@ -1,6 +1,7 @@
 import sys
 
-from scripts.check_ai_runtime import _adtof_runtime_check, _true_pipeline_missing
+from scripts import check_ai_runtime
+from scripts.check_ai_runtime import _adtof_runtime_check, _command_status, _true_pipeline_missing
 
 
 def test_adtof_runtime_check_requires_explicit_template() -> None:
@@ -183,3 +184,42 @@ def test_true_pipeline_missing_lists_model_runtime_gaps() -> None:
         "Demucs package/command probe is not ready",
         adtof_missing,
     ]
+
+
+def test_musescore_command_status_does_not_execute_gui_app(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr(check_ai_runtime.shutil, "which", lambda name: f"/Applications/{name}.app/Contents/MacOS/{name}")
+
+    def fake_run(command: list[str], **_kwargs: object) -> object:
+        calls.append(command)
+        raise AssertionError("MuseScore command should not be executed during runtime preflight")
+
+    monkeypatch.setattr(check_ai_runtime.subprocess, "run", fake_run)
+
+    result = _command_status("MuseScore")
+
+    assert result == {
+        "available": True,
+        "path": "/Applications/MuseScore.app/Contents/MacOS/MuseScore",
+        "version": None,
+    }
+    assert calls == []
+
+
+def test_ffmpeg_command_status_keeps_version_probe(monkeypatch) -> None:
+    monkeypatch.setattr(check_ai_runtime.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def fake_run(command: list[str], **_kwargs: object) -> object:
+        assert command == ["/usr/bin/ffmpeg", "-version"]
+        return check_ai_runtime.subprocess.CompletedProcess(command, 0, stdout="ffmpeg version 7\n", stderr="")
+
+    monkeypatch.setattr(check_ai_runtime.subprocess, "run", fake_run)
+
+    result = _command_status("ffmpeg")
+
+    assert result == {
+        "available": True,
+        "path": "/usr/bin/ffmpeg",
+        "version": "ffmpeg version 7",
+    }

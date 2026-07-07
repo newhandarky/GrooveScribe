@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 from scripts import check_v1_local_setup as local_setup
-from scripts.run_v1_local_dev import build_process_specs
+from scripts.run_v1_local_dev import build_process_specs, format_setup_failure, setup_failure_issues
 
 
 def test_local_setup_report_passes_with_safe_prerequisites(tmp_path: Path, monkeypatch) -> None:
@@ -113,6 +113,53 @@ def test_local_dev_launcher_builds_backend_and_frontend_commands() -> None:
         "--port",
         "5174",
     ]
+    assert specs[1].env == {"VITE_API_PROXY_TARGET": "http://127.0.0.1:9000"}
+
+
+def test_local_dev_launcher_formats_blocked_port_failure_without_raw_diagnostics() -> None:
+    setup = {
+        "status": "failed",
+        "checks": {
+            "python_venvs": {"status": "passed"},
+            "ports": {
+                "backend": {"status": "blocked", "host": "127.0.0.1", "port": 8000, "available": False},
+                "frontend": {"status": "passed", "host": "127.0.0.1", "port": 5173, "available": True},
+            },
+        },
+        "next_steps": ["Free backend port or pass --backend-port to the launcher."],
+        "redaction": {"status": "passed", "unsafe_tokens": []},
+    }
+
+    assert setup_failure_issues(setup) == ["ports.backend: blocked (127.0.0.1:8000)"]
+    rendered = format_setup_failure(setup)
+
+    assert "Local setup check failed:" in rendered
+    assert "ports.backend: blocked (127.0.0.1:8000)" in rendered
+    assert "Free backend port or pass --backend-port to the launcher." in rendered
+    assert_no_unsafe_tokens(rendered)
+
+
+def test_local_dev_launcher_formats_dependency_failure_without_sensitive_details() -> None:
+    setup = {
+        "status": "failed",
+        "checks": {
+            "python_venvs": {"status": "failed"},
+            "backend_import": {"status": "failed", "reason": "backend_python_missing"},
+            "ports": {
+                "backend": {"status": "passed", "host": "127.0.0.1", "port": 8000, "available": True},
+                "frontend": {"status": "passed", "host": "127.0.0.1", "port": 5173, "available": True},
+            },
+        },
+        "next_steps": ["Create backend/.venv and .venv-ai before launching V1 locally."],
+        "redaction": {"status": "passed", "unsafe_tokens": []},
+    }
+
+    rendered = format_setup_failure(setup)
+
+    assert "python_venvs: failed" in rendered
+    assert "backend_import: failed (backend_python_missing)" in rendered
+    assert "Create backend/.venv and .venv-ai before launching V1 locally." in rendered
+    assert_no_unsafe_tokens(rendered)
 
 
 def _fake_available_port(host: str, port: int) -> dict:

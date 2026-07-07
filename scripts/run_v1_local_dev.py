@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import subprocess
 import sys
@@ -22,6 +23,7 @@ class DevProcessSpec:
     name: str
     command: list[str]
     cwd: Path
+    env: dict[str, str] | None = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -38,13 +40,47 @@ def main() -> int:
     if not args.skip_doctor:
         setup = check_local_setup(backend_port=args.backend_port, frontend_port=args.frontend_port)
         if setup["status"] == "failed":
-            print("Local setup check failed. Run npm run check:local for details.", file=sys.stderr)
+            print(format_setup_failure(setup), file=sys.stderr)
             return 1
     specs = build_process_specs(host=args.host, backend_port=args.backend_port, frontend_port=args.frontend_port)
     return run_processes(specs)
 
 
+def format_setup_failure(setup: dict) -> str:
+    lines = ["Local setup check failed:"]
+    for issue in setup_failure_issues(setup):
+        lines.append(f"- {issue}")
+    next_steps = [str(step) for step in setup.get("next_steps", []) if str(step).strip()]
+    if next_steps:
+        lines.append("Next steps:")
+        lines.extend(f"- {step}" for step in next_steps)
+    lines.append("Run npm run check:local for the full setup report.")
+    return "\n".join(lines)
+
+
+def setup_failure_issues(setup: dict) -> list[str]:
+    checks = setup.get("checks", {})
+    issues: list[str] = []
+    for name, check in checks.items():
+        if name == "ports" and isinstance(check, dict):
+            for port_name, port_check in check.items():
+                if isinstance(port_check, dict) and port_check.get("status") in {"failed", "blocked"}:
+                    issues.append(
+                        f"ports.{port_name}: {port_check.get('status')} "
+                        f"({port_check.get('host')}:{port_check.get('port')})"
+                    )
+            continue
+        if isinstance(check, dict) and check.get("status") in {"failed", "blocked"}:
+            reason = check.get("reason")
+            suffix = f" ({reason})" if reason else ""
+            issues.append(f"{name}: {check.get('status')}{suffix}")
+    if setup.get("redaction", {}).get("status") == "failed":
+        issues.append("redaction: failed")
+    return issues or [f"setup status: {setup.get('status', 'failed')}"]
+
+
 def build_process_specs(*, host: str = "127.0.0.1", backend_port: int = 8000, frontend_port: int = 5173) -> list[DevProcessSpec]:
+    api_proxy_target = f"http://{host}:{backend_port}"
     return [
         DevProcessSpec(
             name="backend",
@@ -76,6 +112,7 @@ def build_process_specs(*, host: str = "127.0.0.1", backend_port: int = 8000, fr
                 str(frontend_port),
             ],
             cwd=REPO_ROOT,
+            env={"VITE_API_PROXY_TARGET": api_proxy_target},
         ),
     ]
 
@@ -107,7 +144,8 @@ def run_processes(specs: list[DevProcessSpec]) -> int:
     previous_sigterm = signal.signal(signal.SIGTERM, handle_signal)
     try:
         for spec in specs:
-            processes.append(subprocess.Popen(spec.command, cwd=spec.cwd))
+            env = None if spec.env is None else {**os.environ, **spec.env}
+            processes.append(subprocess.Popen(spec.command, cwd=spec.cwd, env=env))
         while True:
             for process in processes:
                 returncode = process.poll()
