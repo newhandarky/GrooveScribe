@@ -35,6 +35,10 @@ class MidiPostProcessConfig:
     dedupe_window_ticks: int = 30
     velocity_floor: int = 1
     default_duration_ticks: int = 120
+    tom_filter_enabled: bool = False
+    tom_filter_preset: str | None = None
+    tom_filter_target_max_ratio: float = 0.30
+    tom_filter_core_overlap_window_ticks: int = 60
 
 
 @dataclass(frozen=True)
@@ -48,6 +52,7 @@ class MidiPostProcessReport:
     warnings: tuple[str, ...] = ()
     raw_note_histogram: dict[int, int] | None = None
     processed_drum_counts: dict[str, int] | None = None
+    postprocess_filters: dict[str, dict] | None = None
 
 
 @dataclass(frozen=True)

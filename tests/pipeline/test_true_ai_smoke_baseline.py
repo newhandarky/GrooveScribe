@@ -91,6 +91,31 @@ def test_true_ai_baseline_writes_completed_artifact_inspection(tmp_path: Path) -
     assert report["pipeline"]["warnings"] == ["hihat_missing_likely"]
 
 
+def test_true_ai_baseline_preserves_zero_processed_event_count(tmp_path: Path) -> None:
+    def fake_runner(command: list[str], **_kwargs) -> subprocess.CompletedProcess[str]:
+        if _has_command(command, "check_ai_runtime.py"):
+            return subprocess.CompletedProcess(command, 0, json.dumps(_preflight_payload(true_ai_ready=True)), "")
+        assert _has_command(command, "run_local_pipeline.py")
+        output_dir = Path(command[command.index("--output-dir") + 1])
+        _write_pipeline_artifacts_with_empty_processed_midi(output_dir)
+        return subprocess.CompletedProcess(command, 0, json.dumps({"status": "completed"}), "")
+
+    result = run_baseline(
+        _config(tmp_path),
+        process_runner=fake_runner,
+        checked_at=datetime(2026, 7, 3, tzinfo=UTC),
+    )
+
+    report = json.loads(result.report_path.read_text(encoding="utf-8"))
+    assert result.status == "completed"
+    assert report["inspection"]["processed_midi"]["event_count"] == 0
+    assert report["inspection"]["drum_events"]["event_count"] == 2
+    assert report["quality"]["processed_event_count"] == 0
+    assert report["quality"]["processed_drum_counts"] == {}
+    assert "no_usable_groove" in report["quality"]["quality_flags"]
+    assert "too_few_events" in report["quality"]["quality_flags"]
+
+
 def _preflight_payload(*, true_ai_ready: bool) -> dict:
     return {
         "python": {"version": "3.11.15"},
@@ -153,6 +178,49 @@ def _write_pipeline_artifacts(output_dir: Path) -> None:
                         "name": "midi_post_processing",
                         "status": "completed",
                         "report": {"warnings": ["hihat_missing_likely"]},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_pipeline_artifacts_with_empty_processed_midi(output_dir: Path) -> None:
+    (output_dir / "audio").mkdir(parents=True)
+    (output_dir / "stems").mkdir()
+    (output_dir / "midi").mkdir()
+    (output_dir / "notation").mkdir()
+    (output_dir / "logs").mkdir()
+    (output_dir / "audio" / "normalized.wav").write_bytes(b"wav")
+    (output_dir / "stems" / "drums.wav").write_bytes(b"drums")
+    raw_events = (
+        ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),
+        ProcessedDrumEvent(tick=480, note=38, drum="snare", velocity=90),
+    )
+    write_drum_midi(output_dir / "midi" / "raw_drum.mid", raw_events, ticks_per_beat=480)
+    write_drum_midi(output_dir / "midi" / "processed_drum.mid", (), ticks_per_beat=480)
+    (output_dir / "midi" / "drum_events.json").write_text(
+        json.dumps(
+            {
+                "event_count": 2,
+                "raw_note_histogram": {"36": 1, "38": 1},
+                "processed_drum_counts": {"kick": 1, "snare": 1},
+                "warnings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (output_dir / "notation" / "score.musicxml").write_text("<score-partwise />", encoding="utf-8")
+    (output_dir / "logs" / "pipeline.json").write_text(
+        json.dumps(
+            {
+                "status": "completed",
+                "stages": [
+                    {
+                        "name": "midi_post_processing",
+                        "status": "completed",
+                        "report": {"warnings": []},
                     }
                 ],
             }

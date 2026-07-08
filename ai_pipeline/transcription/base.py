@@ -19,6 +19,7 @@ class DrumTranscriptionReport:
     threshold: float
     runtime_seconds: float
     command: tuple[str, ...]
+    class_thresholds: dict[str, float] | None = None
     checkpoint_path: str | None = None
     warnings: tuple[str, ...] = ()
 

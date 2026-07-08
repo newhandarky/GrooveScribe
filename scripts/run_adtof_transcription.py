@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from ai_pipeline.transcription.adtof import resolve_class_thresholds
 from ai_pipeline.transcription import AdtofDrumTranscriber, DrumTranscriptionError
 
 
@@ -14,6 +15,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, default=None)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument(
+        "--class-thresholds",
+        default=None,
+        help="Optional per-class thresholds: kick=0.06,snare=0.04,tom=0.12,closed_hat=0.06,cymbal=0.08",
+    )
+    parser.add_argument("--threshold-preset", default=None, help="Optional opt-in threshold preset, e.g. separated_v1")
     parser.add_argument("--timeout-seconds", type=int, default=1_800)
     parser.add_argument(
         "--command-template",
@@ -29,6 +36,7 @@ def main() -> int:
         "checkpoint_path": args.checkpoint,
         "device": args.device,
         "threshold": args.threshold,
+        "class_thresholds": resolve_class_thresholds(args.class_thresholds, preset=args.threshold_preset),
         "timeout_seconds": args.timeout_seconds,
     }
     if args.command_template:
@@ -56,6 +64,7 @@ def main() -> int:
                     "model_name": result.report.model_name,
                     "device": result.report.device,
                     "threshold": result.report.threshold,
+                    "class_thresholds": result.report.class_thresholds,
                     "runtime_seconds": result.report.runtime_seconds,
                     "checkpoint_path": result.report.checkpoint_path,
                     "command": list(result.report.command),

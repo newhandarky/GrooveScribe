@@ -142,6 +142,34 @@ def _write_fake_pipeline_output(output_dir: Path) -> None:
             "processed_drum_counts": {"kick": 1, "tom": 6},
             "quality_flags": ["hihat_missing_likely", "mostly_tom_output"],
             "warnings": ["hihat_missing_likely", "mostly_tom_output"],
+            "postprocess_filters": {
+                "tom_false_positive": {
+                    "enabled": True,
+                    "preset": "tom_guard_v1",
+                    "status": "no_safe_tom_filter_change",
+                    "input_tom_count": 6,
+                    "output_tom_count": 6,
+                    "dropped_tom_count": 0,
+                    "target_max_tom_ratio": 0.3,
+                }
+            },
+            "quality_verdict": {
+                "verdict": "draft_candidate_needs_review",
+                "usability_score": 3,
+                "limitations": ["tom_false_positive_likely"],
+                "candidate_gate": {
+                    "status": "passed",
+                    "run_completed": True,
+                    "processed_event_count": 7,
+                    "min_event_count": 4,
+                    "kick_present": True,
+                    "snare_present": True,
+                    "hihat_present": True,
+                    "blocking_flags": [],
+                    "musicxml_available": True,
+                    "musicxml_parseable": True,
+                },
+            },
         },
         "validation": {
             "musicxml": {"available": True, "parseable": True, "error_code": None, "warnings": []},
@@ -340,6 +368,10 @@ def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path)
     assert result_body["pipeline"]["quality"]["raw_event_count"] == 7
     assert result_body["pipeline"]["quality"]["processed_drum_counts"] == {"kick": 1, "tom": 6}
     assert "mostly_tom_output" in result_body["pipeline"]["quality"]["quality_flags"]
+    assert result_body["pipeline"]["quality"]["postprocess_filters"]["tom_false_positive"]["status"] == "no_safe_tom_filter_change"
+    assert result_body["pipeline"]["quality"]["quality_verdict"]["verdict"] == "draft_candidate_needs_review"
+    assert result_body["pipeline"]["quality"]["quality_verdict"]["limitations"] == ["tom_false_positive_likely"]
+    assert result_body["pipeline"]["quality"]["quality_verdict"]["musicxml_parseable"] is True
     assert result_body["pipeline"]["validation"]["musicxml"]["parseable"] is True
     assert result_body["pipeline"]["validation"]["pdf"]["openable"] is True
     assert "/tmp/" not in str(result_body["pipeline"])
@@ -352,6 +384,7 @@ def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path)
     assert packet_body["status"] == "ready"
     assert packet_body["manual_eval_seed"]["artifact_ref"] == f"review:{job_id}"
     assert packet_body["quality"]["raw_event_count"] == 7
+    assert packet_body["quality"]["postprocess_filters"]["tom_false_positive"]["preset"] == "tom_guard_v1"
     assert packet_body["validation"]["musicxml"]["status"] == "parseable"
     assert packet_body["redaction"]["status"] == "passed"
     assert "/tmp/" not in str(packet_body)
