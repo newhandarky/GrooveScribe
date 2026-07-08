@@ -635,6 +635,124 @@ input {
   padding: 10px;
 }
 
+.qualityStatusPanel {
+  border: 1px solid #d6e0e5;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.qualityStatusPanel.ready {
+  background: #edf7f0;
+  border-color: #a9d2b7;
+}
+
+.qualityStatusPanel.warn {
+  background: #fff7df;
+  border-color: #dfc775;
+}
+
+.qualityStatusPanel.error {
+  background: #fae0dc;
+  border-color: #d89b91;
+}
+
+.qualityStatusPanel.unknown {
+  background: #f7f9fa;
+}
+
+.qualityStatusHeader {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.qualityStatusHeader strong,
+.qualityStatusHeader span {
+  display: block;
+}
+
+.qualityStatusHeader span,
+.qualityStatusNote {
+  color: #69736d;
+  font-size: 13px;
+  margin: 0;
+}
+
+.qualityScore {
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 760;
+  padding: 6px 9px;
+  white-space: nowrap;
+}
+
+.qualityScore.ready {
+  background: #dbeee2;
+  color: #1e5732;
+}
+
+.qualityScore.warn {
+  background: #fff1c7;
+  color: #765700;
+}
+
+.qualityScore.error {
+  background: #f7d9d4;
+  color: #8d2d22;
+}
+
+.qualityScore.unknown {
+  background: #e7edf0;
+  color: #344851;
+}
+
+.qualityStatusGrid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.limitationList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.limitationList span {
+  background: #ffffff;
+  border: 1px solid #d6e0e5;
+  border-radius: 999px;
+  color: #33443d;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 8px;
+}
+
+.qualityFilterStatus {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #d6e0e5;
+  border-radius: 8px;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 8px 10px;
+}
+
+.qualityFilterStatus span {
+  color: #69736d;
+  font-size: 12px;
+}
+
+.qualityFilterStatus strong {
+  color: #33443d;
+  font-size: 13px;
+  text-align: right;
+}
+
 .artifactValidation,
 .validationGrid {
   display: grid;
@@ -811,6 +929,7 @@ input {
   .localDataGrid,
   .artifactValidation,
   .validationGrid,
+  .qualityStatusGrid,
   .qualityMetrics,
   .downloadGrid {
     grid-template-columns: 1fr;

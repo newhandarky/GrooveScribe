@@ -136,6 +136,26 @@ export interface TranscriptionResultResponse {
       estimated_measure_count: number | null;
       quality_flags: string[];
       warnings: string[];
+      postprocess_filters: Record<string, Record<string, string | number | boolean | null>>;
+      quality_verdict: {
+        verdict: string;
+        usability_score: number | null;
+        limitations: string[];
+        candidate_gate: {
+          status: string;
+          run_completed: boolean | null;
+          processed_event_count: number | null;
+          min_event_count: number | null;
+          kick_present: boolean | null;
+          snare_present: boolean | null;
+          hihat_present: boolean | null;
+          blocking_flags: string[];
+          musicxml_available: boolean;
+          musicxml_parseable: boolean;
+        };
+        musicxml_available: boolean;
+        musicxml_parseable: boolean;
+      };
     } | null;
     validation?: {
       musicxml: {

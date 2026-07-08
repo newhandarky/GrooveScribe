@@ -176,7 +176,38 @@ def test_result_service_builds_redacted_pipeline_summary(tmp_path) -> None:
             "tempo_bpm": 118.2,
             "estimated_measure_count": 6,
             "quality_flags": ["hihat_missing_likely", "mostly_tom_output", "/tmp/private"],
-            "warnings": ["hihat_missing_likely", "stderr leaked"]
+            "warnings": ["hihat_missing_likely", "stderr leaked"],
+            "postprocess_filters": {
+              "tom_false_positive": {
+                "enabled": true,
+                "preset": "tom_guard_v1",
+                "status": "applied",
+                "input_tom_count": 6,
+                "output_tom_count": 4,
+                "dropped_tom_count": 2,
+                "target_max_tom_ratio": 0.3,
+                "input_event_count": 16,
+                "output_event_count": 14,
+                "debug_path": "/tmp/private"
+              }
+            },
+            "quality_verdict": {
+              "verdict": "draft_candidate_needs_review",
+              "usability_score": 3,
+              "limitations": ["tom_false_positive_likely", "/tmp/private"],
+              "candidate_gate": {
+                "status": "passed",
+                "run_completed": true,
+                "processed_event_count": 7,
+                "min_event_count": 4,
+                "kick_present": true,
+                "snare_present": true,
+                "hihat_present": true,
+                "blocking_flags": [],
+                "musicxml_available": true,
+                "musicxml_parseable": true
+              }
+            }
           },
           "validation": {
             "musicxml": {
@@ -230,6 +261,38 @@ def test_result_service_builds_redacted_pipeline_summary(tmp_path) -> None:
             "estimated_measure_count": 6,
             "quality_flags": ["hihat_missing_likely", "mostly_tom_output"],
             "warnings": ["hihat_missing_likely"],
+            "postprocess_filters": {
+                "tom_false_positive": {
+                    "enabled": True,
+                    "preset": "tom_guard_v1",
+                    "status": "applied",
+                    "input_tom_count": 6,
+                    "output_tom_count": 4,
+                    "dropped_tom_count": 2,
+                    "target_max_tom_ratio": 0.3,
+                    "input_event_count": 16,
+                    "output_event_count": 14,
+                }
+            },
+            "quality_verdict": {
+                "verdict": "draft_candidate_needs_review",
+                "usability_score": 3,
+                "limitations": ["tom_false_positive_likely"],
+                "candidate_gate": {
+                    "status": "passed",
+                    "run_completed": True,
+                    "processed_event_count": 7,
+                    "min_event_count": 4,
+                    "kick_present": True,
+                    "snare_present": True,
+                    "hihat_present": True,
+                    "blocking_flags": [],
+                    "musicxml_available": True,
+                    "musicxml_parseable": True,
+                },
+                "musicxml_available": True,
+                "musicxml_parseable": True,
+            },
         }
         assert summary["validation"] == {
             "musicxml": {
@@ -290,6 +353,8 @@ def test_result_service_keeps_legacy_pipeline_log_without_validation_graceful(tm
         assert model.pipeline_log_available is True
         assert model.quality is not None
         assert model.quality.processed_event_count == 4
+        assert model.quality.quality_verdict.verdict == "unknown"
+        assert model.quality.quality_verdict.limitations == ["quality_verdict_unavailable"]
 
 
 def test_transcription_result_response_allows_legacy_null_pipeline() -> None:
@@ -355,6 +420,7 @@ def test_result_service_quality_fallback_keeps_warning_and_flag_contract_separat
 
         assert summary["quality"]["quality_flags"] == ["too_few_events"]
         assert summary["quality"]["warnings"] == ["high_drop_ratio", "mock_ai_enabled", "too_few_events"]
+        assert summary["quality"]["quality_verdict"]["verdict"] == "unknown"
 
 
 def test_public_transcription_openapi_does_not_expose_storage_or_raw_diagnostics() -> None:

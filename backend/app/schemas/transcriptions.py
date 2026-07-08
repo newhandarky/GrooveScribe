@@ -99,6 +99,28 @@ class PipelineArtifactSummary(BaseModel):
     status: str | None = None
 
 
+class PipelineCandidateGate(BaseModel):
+    status: str = "unknown"
+    run_completed: bool | None = None
+    processed_event_count: int | None = None
+    min_event_count: int | None = None
+    kick_present: bool | None = None
+    snare_present: bool | None = None
+    hihat_present: bool | None = None
+    blocking_flags: list[str] = Field(default_factory=list)
+    musicxml_available: bool = False
+    musicxml_parseable: bool = False
+
+
+class PipelineQualityVerdict(BaseModel):
+    verdict: str = "unknown"
+    usability_score: int | None = None
+    limitations: list[str] = Field(default_factory=list)
+    candidate_gate: PipelineCandidateGate = Field(default_factory=PipelineCandidateGate)
+    musicxml_available: bool = False
+    musicxml_parseable: bool = False
+
+
 class PipelineQualitySummary(BaseModel):
     raw_event_count: int | None = None
     processed_event_count: int | None = None
@@ -109,6 +131,8 @@ class PipelineQualitySummary(BaseModel):
     estimated_measure_count: int | None = None
     quality_flags: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    postprocess_filters: dict[str, dict] = Field(default_factory=dict)
+    quality_verdict: PipelineQualityVerdict = Field(default_factory=PipelineQualityVerdict)
 
 
 class PipelineArtifactValidation(BaseModel):

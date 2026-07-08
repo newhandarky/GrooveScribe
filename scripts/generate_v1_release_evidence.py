@@ -5,7 +5,6 @@ import csv
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 try:
     from scripts.check_manual_eval_gate import check_manual_eval_gate

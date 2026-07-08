@@ -2,7 +2,13 @@ import subprocess
 import wave
 from pathlib import Path
 
-from ai_pipeline.transcription.adtof import AdtofDrumTranscriber
+from ai_pipeline.transcription.adtof import (
+    AdtofDrumTranscriber,
+    class_thresholds_csv,
+    class_thresholds_for_preset,
+    parse_class_thresholds,
+    resolve_class_thresholds,
+)
 from ai_pipeline.transcription.midi_validation import count_note_on_events
 
 
@@ -48,7 +54,115 @@ def test_build_command_supports_checkpoint_append(tmp_path) -> None:
         threshold=0.42,
     )
     command = transcriber.build_command(Path("drums.wav"), tmp_path / "raw_drum.mid")
-    assert command == ["adtof", "--in", "drums.wav", "--out", str(tmp_path / "raw_drum.mid"), "--checkpoint", "model.ckpt"]
+    assert command == [
+        "adtof",
+        "--in",
+        "drums.wav",
+        "--out",
+        str(tmp_path / "raw_drum.mid"),
+        "--threshold",
+        "0.42",
+        "--checkpoint",
+        "model.ckpt",
+    ]
+
+
+def test_build_command_keeps_scalar_threshold_compatible(tmp_path) -> None:
+    transcriber = AdtofDrumTranscriber(
+        command_template=("adtof", "--audio", "{input}", "--out", "{output}"),
+        threshold=0.42,
+    )
+
+    command = transcriber.build_command(Path("drums.wav"), tmp_path / "raw_drum.mid")
+
+    assert command == ["adtof", "--audio", "drums.wav", "--out", str(tmp_path / "raw_drum.mid"), "--threshold", "0.42"]
+
+
+def test_parse_class_thresholds_uses_adtof_label_order() -> None:
+    thresholds = parse_class_thresholds("kick=0.06,snare=0.04,tom=0.12,closed_hat=0.06,cymbal=0.08")
+
+    assert thresholds == {
+        "kick": 0.06,
+        "snare": 0.04,
+        "tom": 0.12,
+        "closed_hat": 0.06,
+        "cymbal": 0.08,
+    }
+    assert class_thresholds_csv(thresholds) == "0.06,0.04,0.12,0.06,0.08"
+
+
+def test_parse_separated_v1_threshold_preset() -> None:
+    thresholds = class_thresholds_for_preset("separated_v1")
+
+    assert thresholds == {
+        "kick": 0.06,
+        "snare": 0.04,
+        "tom": 0.18,
+        "closed_hat": 0.06,
+        "cymbal": 0.08,
+    }
+    assert class_thresholds_csv(thresholds) == "0.06,0.04,0.18,0.06,0.08"
+
+
+def test_resolve_class_thresholds_rejects_preset_and_explicit_thresholds() -> None:
+    try:
+        resolve_class_thresholds("kick=0.06,snare=0.04,tom=0.18,closed_hat=0.06,cymbal=0.08", preset="separated_v1")
+    except ValueError as exc:
+        assert "cannot be combined" in str(exc)
+    else:
+        raise AssertionError("expected preset plus explicit thresholds to fail")
+
+
+def test_build_command_supports_per_class_thresholds(tmp_path) -> None:
+    transcriber = AdtofDrumTranscriber(
+        command_template=("adtof", "--audio", "{input}", "--out", "{output}"),
+        threshold=0.06,
+        class_thresholds=parse_class_thresholds("kick=0.06,snare=0.04,tom=0.12,closed_hat=0.06,cymbal=0.08"),
+    )
+
+    command = transcriber.build_command(Path("drums.wav"), tmp_path / "raw_drum.mid")
+
+    assert command == [
+        "adtof",
+        "--audio",
+        "drums.wav",
+        "--out",
+        str(tmp_path / "raw_drum.mid"),
+        "--thresholds",
+        "0.06,0.04,0.12,0.06,0.08",
+    ]
+
+
+def test_build_command_replaces_thresholds_placeholder(tmp_path) -> None:
+    transcriber = AdtofDrumTranscriber(
+        command_template=("adtof", "--audio", "{input}", "--out", "{output}", "--thresholds", "{thresholds}"),
+        class_thresholds=parse_class_thresholds("kick=0.06,snare=0.04,tom=0.12,closed_hat=0.06,cymbal=0.08"),
+    )
+
+    command = transcriber.build_command(Path("drums.wav"), tmp_path / "raw_drum.mid")
+
+    assert command[-2:] == ["--thresholds", "0.06,0.04,0.12,0.06,0.08"]
+
+
+def test_build_command_uses_per_class_thresholds_over_scalar_placeholder(tmp_path) -> None:
+    transcriber = AdtofDrumTranscriber(
+        command_template=(
+            "adtof",
+            "--audio",
+            "{input}",
+            "--out",
+            "{output}",
+            "--threshold",
+            "{threshold}",
+        ),
+        threshold=0.06,
+        class_thresholds=parse_class_thresholds("kick=0.06,snare=0.04,tom=0.12,closed_hat=0.06,cymbal=0.08"),
+    )
+
+    command = transcriber.build_command(Path("drums.wav"), tmp_path / "raw_drum.mid")
+
+    assert "--threshold" not in command
+    assert command[-2:] == ["--thresholds", "0.06,0.04,0.12,0.06,0.08"]
 
 
 def test_transcribe_validates_raw_midi_output(tmp_path) -> None:

@@ -8,9 +8,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ai_pipeline.midi import MidiPostProcessor
-from ai_pipeline.midi.quality import quality_flag_subset
+from ai_pipeline.midi.quality import evaluate_drum_draft_quality, quality_flag_subset
 from ai_pipeline.midi.simple_midi import write_drum_midi
-from ai_pipeline.midi.types import ProcessedDrumEvent
+from ai_pipeline.midi.types import MidiPostProcessConfig, ProcessedDrumEvent
 from ai_pipeline.notation import (
     MusicXmlGenerator,
     MuseScorePdfExporter,
@@ -19,8 +19,9 @@ from ai_pipeline.notation import (
     validate_score_artifacts,
 )
 from ai_pipeline.preprocessing import FfmpegAudioNormalizer
-from ai_pipeline.source_separation import DemucsSourceSeparator, SourceSeparationError
-from ai_pipeline.transcription import AdtofDrumTranscriber, DrumTranscriptionError
+from ai_pipeline.source_separation import DemucsSourceSeparator
+from ai_pipeline.transcription import AdtofDrumTranscriber
+from ai_pipeline.transcription.adtof import class_thresholds_for_preset
 
 
 @dataclass(frozen=True)
@@ -36,7 +37,10 @@ class LocalPipelineConfig:
     adtof_checkpoint_path: Path | None = None
     adtof_device: str = "cpu"
     adtof_threshold: float = 0.5
+    adtof_class_thresholds: dict[str, float] | None = None
+    adtof_threshold_preset: str | None = None
     adtof_timeout_seconds: int = 1_800
+    tom_filter_preset: str | None = None
     pdf_renderer: str | None = None
 
 
@@ -187,12 +191,16 @@ class LocalPipelineRunner:
                 "warnings": ["mock_ai_enabled"],
             }
 
+        class_thresholds = self.config.adtof_class_thresholds or class_thresholds_for_preset(
+            self.config.adtof_threshold_preset
+        )
         if self.config.adtof_command_template:
             transcriber = AdtofDrumTranscriber.from_command_template_string(
                 self.config.adtof_command_template,
                 checkpoint_path=self.config.adtof_checkpoint_path,
                 device=self.config.adtof_device,
                 threshold=self.config.adtof_threshold,
+                class_thresholds=class_thresholds,
                 timeout_seconds=self.config.adtof_timeout_seconds,
             )
         else:
@@ -200,6 +208,7 @@ class LocalPipelineRunner:
                 checkpoint_path=self.config.adtof_checkpoint_path,
                 device=self.config.adtof_device,
                 threshold=self.config.adtof_threshold,
+                class_thresholds=class_thresholds,
                 timeout_seconds=self.config.adtof_timeout_seconds,
             )
         result = transcriber.transcribe(artifacts["drums_stem"], output_dir / "midi")
@@ -208,6 +217,8 @@ class LocalPipelineRunner:
             "model_name": result.report.model_name,
             "device": result.report.device,
             "threshold": result.report.threshold,
+            "threshold_preset": self.config.adtof_threshold_preset,
+            "class_thresholds": result.report.class_thresholds,
             "event_count": result.metadata.event_count,
             "warnings": list(result.report.warnings),
         }
@@ -217,7 +228,12 @@ class LocalPipelineRunner:
         artifacts: dict[str, Path],
         output_dir: Path,
     ) -> tuple[dict[str, Path], dict]:
-        result = MidiPostProcessor().process(artifacts["raw_midi"], output_dir / "midi")
+        result = MidiPostProcessor(
+            MidiPostProcessConfig(
+                tom_filter_enabled=self.config.tom_filter_preset is not None,
+                tom_filter_preset=self.config.tom_filter_preset,
+            )
+        ).process(artifacts["raw_midi"], output_dir / "midi")
         return {
             "processed_midi": result.processed_midi_path,
             "drum_events": result.drum_events_path,
@@ -232,6 +248,7 @@ class LocalPipelineRunner:
                 str(key): value for key, value in (result.report.raw_note_histogram or {}).items()
             },
             "processed_drum_counts": result.report.processed_drum_counts or {},
+            "postprocess_filters": result.report.postprocess_filters or {},
             "quality_flags": quality_flag_subset(result.report.warnings),
         }
 
@@ -316,17 +333,30 @@ def _build_quality_summary(stage_logs: list[StageLog]) -> dict | None:
     notation_report = _stage_report(stage_logs, "notation_generation") or {}
 
     warnings = [str(warning) for warning in midi_report.get("warnings", []) if isinstance(warning, str)]
+    validation = _build_validation_summary(stage_logs) or {}
+    musicxml = validation.get("musicxml") if isinstance(validation.get("musicxml"), dict) else {}
+    processed_counts = _string_int_dict(midi_report.get("processed_drum_counts"))
+    quality_flags = midi_report.get("quality_flags") or quality_flag_subset(warnings)
+    verdict = evaluate_drum_draft_quality(
+        processed_drum_counts=processed_counts,
+        processed_event_count=midi_report.get("output_event_count"),
+        quality_flags=quality_flags,
+        musicxml_available=bool(musicxml.get("available")),
+        musicxml_parseable=bool(musicxml.get("parseable")),
+    )
     return {
         "schema_version": "1.0",
         "raw_event_count": midi_report.get("input_event_count"),
         "processed_event_count": midi_report.get("output_event_count"),
         "raw_note_histogram": _string_int_dict(midi_report.get("raw_note_histogram")),
-        "processed_drum_counts": _string_int_dict(midi_report.get("processed_drum_counts")),
+        "processed_drum_counts": processed_counts,
         "duration_seconds": _first_number(stage_logs, "audio_preprocessing", "duration_seconds"),
         "tempo_bpm": midi_report.get("estimated_bpm"),
         "estimated_measure_count": notation_report.get("measure_count"),
-        "quality_flags": midi_report.get("quality_flags") or quality_flag_subset(warnings),
+        "quality_flags": quality_flags,
         "warnings": sorted(set(warnings)),
+        "postprocess_filters": midi_report.get("postprocess_filters") or {},
+        "quality_verdict": verdict,
     }
 
 

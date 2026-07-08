@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from pathlib import Path
 
 from ai_pipeline.notation.errors import PdfExportFailedError, PdfRendererNotAvailableError

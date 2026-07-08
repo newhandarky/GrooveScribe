@@ -10,20 +10,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from ai_pipeline.midi.quality import QUALITY_FLAG_CODES, evaluate_drum_draft_quality, quality_diagnostics
 from scripts.inspect_midi import inspect_midi
 from ai_pipeline.notation.validation import validate_score_artifacts
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 ProcessRunner = Callable[..., subprocess.CompletedProcess[str]]
-_QUALITY_FLAG_CODES = {
-    "too_few_events",
-    "sparse_transcription",
-    "hihat_missing_likely",
-    "mostly_tom_output",
-    "no_snare_detected",
-}
-
-
 @dataclass(frozen=True)
 class BaselineConfig:
     input_path: Path
@@ -36,6 +28,9 @@ class BaselineConfig:
     adtof_device: str
     adtof_threshold: str
     timeout_seconds: int
+    adtof_class_thresholds: str | None = None
+    adtof_threshold_preset: str | None = None
+    tom_filter_preset: str | None = None
     export_pdf: bool = True
     fail_on_blocked: bool = False
 
@@ -62,6 +57,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--adtof-checkpoint", default=os.environ.get("GROOVESCRIBE_ADTOF_CHECKPOINT"))
     parser.add_argument("--adtof-device", default=os.environ.get("GROOVESCRIBE_ADTOF_DEVICE", "cpu"))
     parser.add_argument("--adtof-threshold", default=os.environ.get("GROOVESCRIBE_ADTOF_THRESHOLD", "0.5"))
+    parser.add_argument("--adtof-class-thresholds", default=os.environ.get("GROOVESCRIBE_ADTOF_CLASS_THRESHOLDS"))
+    parser.add_argument("--adtof-threshold-preset", default=os.environ.get("GROOVESCRIBE_ADTOF_THRESHOLD_PRESET"))
+    parser.add_argument("--tom-filter-preset", default=os.environ.get("GROOVESCRIBE_TOM_FILTER_PRESET"))
     parser.add_argument("--timeout-seconds", type=int, default=int(os.environ.get("PIPELINE_TRUE_AI_TIMEOUT_SECONDS", "3600")))
     parser.add_argument("--no-export-pdf", action="store_true")
     parser.add_argument("--fail-on-blocked", action="store_true")
@@ -81,6 +79,9 @@ def main() -> int:
             adtof_checkpoint=args.adtof_checkpoint,
             adtof_device=args.adtof_device,
             adtof_threshold=args.adtof_threshold,
+            adtof_class_thresholds=args.adtof_class_thresholds,
+            adtof_threshold_preset=args.adtof_threshold_preset,
+            tom_filter_preset=args.tom_filter_preset,
             timeout_seconds=args.timeout_seconds,
             export_pdf=not args.no_export_pdf,
             fail_on_blocked=args.fail_on_blocked,
@@ -163,6 +164,12 @@ def _runtime_env(config: BaselineConfig) -> dict[str, str]:
     env["GROOVESCRIBE_DEMUCS_DEVICE"] = config.demucs_device
     env["GROOVESCRIBE_ADTOF_DEVICE"] = config.adtof_device
     env["GROOVESCRIBE_ADTOF_THRESHOLD"] = config.adtof_threshold
+    if config.adtof_class_thresholds:
+        env["GROOVESCRIBE_ADTOF_CLASS_THRESHOLDS"] = config.adtof_class_thresholds
+    if config.adtof_threshold_preset:
+        env["GROOVESCRIBE_ADTOF_THRESHOLD_PRESET"] = config.adtof_threshold_preset
+    if config.tom_filter_preset:
+        env["GROOVESCRIBE_TOM_FILTER_PRESET"] = config.tom_filter_preset
     if config.adtof_command_template:
         env["GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE"] = config.adtof_command_template
     if config.adtof_checkpoint:
@@ -189,6 +196,12 @@ def _pipeline_command(config: BaselineConfig, output_dir: Path) -> list[str]:
         command.extend(["--adtof-command-template", config.adtof_command_template])
     if config.adtof_checkpoint:
         command.extend(["--adtof-checkpoint", config.adtof_checkpoint])
+    if config.adtof_class_thresholds:
+        command.extend(["--adtof-class-thresholds", config.adtof_class_thresholds])
+    if config.adtof_threshold_preset:
+        command.extend(["--adtof-threshold-preset", config.adtof_threshold_preset])
+    if config.tom_filter_preset:
+        command.extend(["--tom-filter-preset", config.tom_filter_preset])
     if config.export_pdf:
         command.append("--export-pdf")
     return command
@@ -360,6 +373,7 @@ def _drum_events_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "event_count": payload.get("event_count"),
         "processed_drum_counts": _dict(payload.get("processed_drum_counts")),
         "raw_note_histogram": _dict(payload.get("raw_note_histogram")),
+        "postprocess_filters": _dict(payload.get("postprocess_filters")),
         "warnings": _list(payload.get("warnings")),
     }
 
@@ -370,19 +384,44 @@ def _quality_summary(
     drum_events: dict[str, Any],
     validation: dict[str, Any],
 ) -> dict[str, Any]:
+    raw_note_histogram = _dict(_first_not_none(raw_inspection.get("note_histogram"), drum_events.get("raw_note_histogram")))
+    processed_drum_counts = _dict(
+        _first_not_none(processed_inspection.get("mapped_drum_counts"), drum_events.get("processed_drum_counts"))
+    )
+    processed_event_count = _int_or_none(
+        _first_not_none(processed_inspection.get("event_count"), drum_events.get("event_count"))
+    )
     warnings = set(str(item) for item in _list(drum_events.get("warnings")))
     warnings.update(str(item) for item in _list(raw_inspection.get("quality_flags")))
     warnings.update(str(item) for item in _list(processed_inspection.get("quality_flags")))
+    warnings.update(
+        quality_diagnostics(
+            raw_note_histogram=raw_note_histogram,
+            processed_drum_counts=processed_drum_counts,
+            raw_event_count=_int_or_none(raw_inspection.get("event_count")),
+            processed_event_count=processed_event_count,
+        )
+    )
     for item in (validation.get("musicxml"), validation.get("pdf")):
         warnings.update(str(warning) for warning in _list(_dict(item).get("warnings")))
+    quality_flags = sorted(warning for warning in warnings if warning in QUALITY_FLAG_CODES)
+    musicxml = _dict(validation.get("musicxml"))
+    postprocess_filters = _dict(drum_events.get("postprocess_filters"))
     return {
         "raw_event_count": raw_inspection.get("event_count"),
-        "processed_event_count": processed_inspection.get("event_count"),
-        "raw_note_histogram": _dict(raw_inspection.get("note_histogram")),
-        "processed_drum_counts": _dict(processed_inspection.get("mapped_drum_counts"))
-        or _dict(drum_events.get("processed_drum_counts")),
-        "quality_flags": sorted(warning for warning in warnings if warning in _QUALITY_FLAG_CODES),
+        "processed_event_count": processed_event_count,
+        "raw_note_histogram": raw_note_histogram,
+        "processed_drum_counts": processed_drum_counts,
+        "quality_flags": quality_flags,
+        "quality_verdict": evaluate_drum_draft_quality(
+            processed_drum_counts=processed_drum_counts,
+            processed_event_count=processed_event_count,
+            quality_flags=quality_flags,
+            musicxml_available=bool(musicxml.get("available")),
+            musicxml_parseable=bool(musicxml.get("parseable")),
+        ),
         "warnings": sorted(warnings),
+        "postprocess_filters": postprocess_filters,
     }
 
 
@@ -413,6 +452,9 @@ def _runtime_summary(config: BaselineConfig, preflight: dict[str, Any] | None) -
         "adtof_checkpoint_configured": bool(config.adtof_checkpoint),
         "adtof_device": config.adtof_device,
         "adtof_threshold": config.adtof_threshold,
+        "adtof_class_thresholds": config.adtof_class_thresholds,
+        "adtof_threshold_preset": config.adtof_threshold_preset,
+        "tom_filter_preset": config.tom_filter_preset,
     }
 
 
@@ -482,6 +524,20 @@ def _dict(value: Any) -> dict[str, Any]:
 
 def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _first_not_none(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
 
 
 if __name__ == "__main__":

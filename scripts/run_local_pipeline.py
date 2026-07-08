@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ai_pipeline.local_runner import LocalPipelineConfig, LocalPipelineRunner
 from ai_pipeline.runner import build_pipeline_plan
+from ai_pipeline.transcription.adtof import resolve_class_thresholds
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,7 +32,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--adtof-checkpoint", type=Path, default=None)
     parser.add_argument("--adtof-device", default="cpu")
     parser.add_argument("--adtof-threshold", type=float, default=0.5)
+    parser.add_argument(
+        "--adtof-class-thresholds",
+        default=None,
+        help="Optional per-class thresholds: kick=0.06,snare=0.04,tom=0.12,closed_hat=0.06,cymbal=0.08",
+    )
+    parser.add_argument(
+        "--adtof-threshold-preset",
+        default=None,
+        help="Optional opt-in ADTOF threshold preset, e.g. separated_v1",
+    )
     parser.add_argument("--adtof-timeout-seconds", type=int, default=1_800)
+    parser.add_argument(
+        "--tom-filter-preset",
+        default=None,
+        help="Optional opt-in MIDI postprocess filter preset, e.g. tom_guard_v1",
+    )
     return parser.parse_args()
 
 
@@ -81,7 +97,13 @@ def main() -> int:
         adtof_checkpoint_path=args.adtof_checkpoint,
         adtof_device=args.adtof_device,
         adtof_threshold=args.adtof_threshold,
+        adtof_class_thresholds=resolve_class_thresholds(
+            args.adtof_class_thresholds,
+            preset=args.adtof_threshold_preset,
+        ),
+        adtof_threshold_preset=args.adtof_threshold_preset,
         adtof_timeout_seconds=args.adtof_timeout_seconds,
+        tom_filter_preset=args.tom_filter_preset,
         pdf_renderer=args.pdf_renderer,
     )
     result = LocalPipelineRunner(config).run(args.input, args.output_dir)

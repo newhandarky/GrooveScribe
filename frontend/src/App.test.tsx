@@ -133,6 +133,26 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
         estimated_measure_count: 4,
         quality_flags: ['sparse_transcription'],
         warnings: ['sparse_transcription'],
+        postprocess_filters: {},
+        quality_verdict: {
+          verdict: 'unknown',
+          usability_score: null,
+          limitations: ['quality_verdict_unavailable'],
+          candidate_gate: {
+            status: 'unknown',
+            run_completed: null,
+            processed_event_count: null,
+            min_event_count: null,
+            kick_present: null,
+            snare_present: null,
+            hihat_present: null,
+            blocking_flags: [],
+            musicxml_available: true,
+            musicxml_parseable: true,
+          },
+          musicxml_available: true,
+          musicxml_parseable: true,
+        },
       },
       validation: {
         musicxml: {
@@ -294,6 +314,8 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('closed_hat: 2');
     expect(html).toContain('sparse_transcription');
     expect(html).toContain('MusicXML preview');
+    expect(html).toContain('品質狀態未知');
+    expect(html).toContain('尚未產生品質判斷');
     expect(html).toContain('MusicXML validation');
     expect(html).toContain('parseable');
     expect(html).toContain('PDF validation');
@@ -346,6 +368,38 @@ describe('local app smoke rendering', () => {
               estimated_measure_count: 8,
               quality_flags: ['hihat_missing_likely', 'mostly_tom_output'],
               warnings: ['hihat_missing_likely', 'mostly_tom_output'],
+              postprocess_filters: {
+                tom_false_positive: {
+                  enabled: true,
+                  preset: 'tom_guard_v1',
+                  status: 'applied',
+                  input_tom_count: 6,
+                  output_tom_count: 4,
+                  dropped_tom_count: 2,
+                  target_max_tom_ratio: 0.3,
+                  input_event_count: 18,
+                  output_event_count: 16,
+                },
+              },
+              quality_verdict: {
+                verdict: 'draft_candidate_needs_review',
+                usability_score: 3,
+                limitations: ['tom_false_positive_likely'],
+                candidate_gate: {
+                  status: 'passed',
+                  run_completed: true,
+                  processed_event_count: 7,
+                  min_event_count: 4,
+                  kick_present: true,
+                  snare_present: true,
+                  hihat_present: true,
+                  blocking_flags: [],
+                  musicxml_available: true,
+                  musicxml_parseable: false,
+                },
+                musicxml_available: true,
+                musicxml_parseable: false,
+              },
             },
             validation: {
               musicxml: {
@@ -369,6 +423,11 @@ describe('local app smoke rendering', () => {
     );
 
     expect(html).toContain('TRUE AI');
+    expect(html).toContain('草稿需人工檢查');
+    expect(html).toContain('3/5');
+    expect(html).toContain('Tom 誤判偏多');
+    expect(html).toContain('已套用 tom filter');
+    expect(html).toContain('需檢查');
     expect(html).toContain('Drum Transcription');
     expect(html).toContain('hihat_missing_likely');
     expect(html).toContain('tom: 6');
@@ -407,6 +466,76 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('MusicXML validation');
     expect(html).toContain('not reported');
     expect(html).not.toContain('Raw events');
+    expectPublicSafe(html);
+  });
+
+  it('renders unknown quality verdict without crashing', () => {
+    const html = renderToStaticMarkup(
+      <ResultCard
+        result={resultFixture({
+          pipeline: {
+            ...resultFixture().pipeline!,
+            quality: {
+              ...resultFixture().pipeline!.quality!,
+              quality_verdict: {
+                verdict: 'unknown',
+                usability_score: null,
+                limitations: ['quality_verdict_unavailable'],
+                candidate_gate: {
+                  status: 'unknown',
+                  run_completed: null,
+                  processed_event_count: null,
+                  min_event_count: null,
+                  kick_present: null,
+                  snare_present: null,
+                  hihat_present: null,
+                  blocking_flags: [],
+                  musicxml_available: true,
+                  musicxml_parseable: true,
+                },
+                musicxml_available: true,
+                musicxml_parseable: true,
+              },
+            },
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain('品質狀態未知');
+    expect(html).toContain('未評分');
+    expect(html).toContain('尚未產生品質判斷');
+    expectPublicSafe(html);
+  });
+
+  it('renders tom filter still-high status without raw JSON', () => {
+    const html = renderToStaticMarkup(
+      <ResultCard
+        result={resultFixture({
+          pipeline: {
+            ...resultFixture().pipeline!,
+            quality: {
+              ...resultFixture().pipeline!.quality!,
+              postprocess_filters: {
+                tom_false_positive: {
+                  enabled: true,
+                  preset: 'tom_guard_v1',
+                  status: 'no_safe_tom_filter_change',
+                  input_tom_count: 7,
+                  output_tom_count: 7,
+                  dropped_tom_count: 0,
+                  target_max_tom_ratio: 0.3,
+                },
+              },
+            },
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain('Tom filter');
+    expect(html).toContain('Tom 誤判仍偏多');
+    expect(html).not.toContain('no_safe_tom_filter_change');
     expectPublicSafe(html);
   });
 

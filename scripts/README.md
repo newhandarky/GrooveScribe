@@ -16,6 +16,7 @@
 - `inspect_midi.py`：讀 raw / processed MIDI，輸出 note histogram、mapped drum counts、event count、duration / measure estimate 與 quality flags。
 - `inspect_pipeline_artifacts.py`：合併 raw / processed MIDI inspection，輸出 manual eval 與 result API 可重用的 quality summary。
 - `run_true_ai_smoke_baseline.py`：opt-in 執行 true-AI preflight / pipeline smoke，並輸出 `baseline.json`；runtime degraded 時保存 blocked reason。
+- `run_true_ai_quality_matrix.py`：對多個 fixture 與 ADTOF threshold 跑 true-AI baseline matrix，彙整 raw note histogram、processed drum counts、quality flags、MusicXML validation 與最低可用性門檻。
 - `generate_manual_eval_row.py`：從 `baseline.json` 產生一列符合 `tests/manual_eval/manual_eval_template.csv` 的 CSV row；artifact ref 只輸出 redacted label。
 - `check_manual_eval_gate.py`：驗證 manual eval CSV schema、blocked/completed row contract 與 redaction。
 - `cleanup_storage.py`：檢查 repo-local `storage/local` 狀態；目前只支援 dry-run，不刪檔。
@@ -96,6 +97,23 @@ baseline report v2 會包含 raw/processed MIDI inspection、MusicXML validation
 ```bash
 PYTHONPATH=. "$PYTHON" scripts/generate_manual_eval_row.py \
   /tmp/groovescribe-true-ai-baseline/<run>/baseline.json
+```
+
+若要比較多組 ADTOF threshold 與固定 fixture 品質，可跑 matrix：
+
+```bash
+PYTHONPATH=. "$PYTHON" scripts/run_true_ai_quality_matrix.py \
+  --output-dir /tmp/groovescribe-true-ai-quality-matrix \
+  --thresholds 0.2,0.3,0.4,0.5,0.6 \
+  --demucs-device cpu \
+  --adtof-command-template "$GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE" \
+  --adtof-device cpu
+```
+
+若有 repo 外授權真實鼓聲片段，使用環境變數加入 matrix；script 只會在 report 中記錄 redacted label，不會提交音檔或 artifact：
+
+```bash
+export GROOVESCRIBE_AUTHORIZED_REAL_DRUM_FIXTURE="/path/to/authorized_real_drum.wav"
 ```
 
 也可以針對既有 artifact 產出 inspection JSON：

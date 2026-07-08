@@ -94,6 +94,8 @@ class ResultService:
         if job.drum_track:
             warnings.extend(warning for warning in job.drum_track.warnings if _is_public_safe_text(warning))
 
+        validation = _pipeline_validation_summary(pipeline_log)
+        quality = _pipeline_quality_summary(pipeline_log, job, validation)
         return {
             "mode": mode,
             "status": pipeline_log.status if pipeline_log else None,
@@ -108,8 +110,8 @@ class ResultService:
                 for export in sorted(job.export_files, key=lambda item: item.type.value)
             ],
             "warnings": sorted(set(warnings)),
-            "quality": _pipeline_quality_summary(pipeline_log, job),
-            "validation": _pipeline_validation_summary(pipeline_log),
+            "quality": quality,
+            "validation": validation,
             "pipeline_log_available": pipeline_log is not None,
         }
 
@@ -141,21 +143,21 @@ def _is_public_safe_text(value: str) -> bool:
     )
 
 
-def _pipeline_quality_summary(pipeline_log, job: TranscriptionJob) -> dict | None:
+def _pipeline_quality_summary(pipeline_log, job: TranscriptionJob, validation: dict | None = None) -> dict | None:
     if pipeline_log is not None and pipeline_log.quality:
-        return _sanitize_quality_summary(pipeline_log.quality)
+        return _with_quality_verdict(_sanitize_quality_summary(pipeline_log.quality), validation)
 
     if pipeline_log is not None:
         for stage in pipeline_log.stage_reports:
             if stage.name == "midi_post_processing":
                 summary = _quality_from_midi_report(stage.report)
                 if summary is not None:
-                    return summary
+                    return _with_quality_verdict(summary, validation)
 
     if job.drum_track is None:
         return None
     flags = [warning for warning in job.drum_track.warnings if _is_public_safe_text(warning)]
-    return {
+    summary = {
         "raw_event_count": None,
         "processed_event_count": job.drum_track.event_count,
         "raw_note_histogram": {},
@@ -165,7 +167,9 @@ def _pipeline_quality_summary(pipeline_log, job: TranscriptionJob) -> dict | Non
         "estimated_measure_count": None,
         "quality_flags": _quality_flag_subset(flags),
         "warnings": sorted(set(flags)),
+        "postprocess_filters": {},
     }
+    return _with_quality_verdict(summary, validation)
 
 
 def _pipeline_validation_summary(pipeline_log) -> dict | None:
@@ -240,13 +244,14 @@ def _quality_from_midi_report(report: dict) -> dict | None:
         "estimated_measure_count": None,
         "quality_flags": _quality_flag_subset(_string_list(report.get("quality_flags")) or warnings),
         "warnings": sorted(set(warnings)),
+        "postprocess_filters": _sanitize_postprocess_filters(report.get("postprocess_filters")),
     }
 
 
 def _sanitize_quality_summary(raw: dict) -> dict:
     warnings = [item for item in _string_list(raw.get("warnings")) if _is_public_safe_text(item)]
     flags = [item for item in _string_list(raw.get("quality_flags")) if _is_public_safe_text(item)]
-    return {
+    quality = {
         "raw_event_count": _int_or_none(raw.get("raw_event_count")),
         "processed_event_count": _int_or_none(raw.get("processed_event_count")),
         "raw_note_histogram": _int_dict(raw.get("raw_note_histogram")),
@@ -256,6 +261,70 @@ def _sanitize_quality_summary(raw: dict) -> dict:
         "estimated_measure_count": _int_or_none(raw.get("estimated_measure_count")),
         "quality_flags": _quality_flag_subset(flags),
         "warnings": sorted(set(warnings)),
+        "postprocess_filters": _sanitize_postprocess_filters(raw.get("postprocess_filters")),
+    }
+    raw_verdict = raw.get("quality_verdict")
+    if isinstance(raw_verdict, dict):
+        quality["quality_verdict"] = _sanitize_quality_verdict(raw_verdict)
+    return quality
+
+
+def _with_quality_verdict(quality: dict, validation: dict | None) -> dict:
+    verdict = quality.get("quality_verdict")
+    if isinstance(verdict, dict):
+        quality["quality_verdict"] = _sanitize_quality_verdict(verdict)
+        return quality
+    quality["quality_verdict"] = _unknown_quality_verdict(validation)
+    return quality
+
+
+def _sanitize_quality_verdict(raw: dict) -> dict:
+    gate = raw.get("candidate_gate") if isinstance(raw.get("candidate_gate"), dict) else {}
+    musicxml_available = bool(raw.get("musicxml_available", gate.get("musicxml_available", False)))
+    musicxml_parseable = bool(raw.get("musicxml_parseable", gate.get("musicxml_parseable", False)))
+    return {
+        "verdict": _safe_code(raw.get("verdict")) or "unknown",
+        "usability_score": _int_or_none(raw.get("usability_score")),
+        "limitations": [item for item in _string_list(raw.get("limitations")) if _is_public_safe_text(item)],
+        "candidate_gate": {
+            "status": _safe_code(gate.get("status")) or "unknown",
+            "run_completed": _bool_or_none(gate.get("run_completed")),
+            "processed_event_count": _int_or_none(gate.get("processed_event_count")),
+            "min_event_count": _int_or_none(gate.get("min_event_count")),
+            "kick_present": _bool_or_none(gate.get("kick_present")),
+            "snare_present": _bool_or_none(gate.get("snare_present")),
+            "hihat_present": _bool_or_none(gate.get("hihat_present")),
+            "blocking_flags": [item for item in _string_list(gate.get("blocking_flags")) if _is_public_safe_text(item)],
+            "musicxml_available": musicxml_available,
+            "musicxml_parseable": musicxml_parseable,
+        },
+        "musicxml_available": musicxml_available,
+        "musicxml_parseable": musicxml_parseable,
+    }
+
+
+def _unknown_quality_verdict(validation: dict | None) -> dict:
+    musicxml = validation.get("musicxml") if isinstance(validation, dict) and isinstance(validation.get("musicxml"), dict) else {}
+    musicxml_available = bool(musicxml.get("available"))
+    musicxml_parseable = bool(musicxml.get("parseable"))
+    return {
+        "verdict": "unknown",
+        "usability_score": None,
+        "limitations": ["quality_verdict_unavailable"],
+        "candidate_gate": {
+            "status": "unknown",
+            "run_completed": None,
+            "processed_event_count": None,
+            "min_event_count": None,
+            "kick_present": None,
+            "snare_present": None,
+            "hihat_present": None,
+            "blocking_flags": [],
+            "musicxml_available": musicxml_available,
+            "musicxml_parseable": musicxml_parseable,
+        },
+        "musicxml_available": musicxml_available,
+        "musicxml_parseable": musicxml_parseable,
     }
 
 
@@ -283,6 +352,41 @@ def _int_dict(value: object) -> dict[str, int]:
         if parsed is not None:
             result[str(key)] = parsed
     return dict(sorted(result.items()))
+
+
+def _sanitize_postprocess_filters(value: object) -> dict[str, dict]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, dict] = {}
+    allowed_scalar_keys = {
+        "enabled",
+        "preset",
+        "status",
+        "input_tom_count",
+        "output_tom_count",
+        "dropped_tom_count",
+        "target_max_tom_ratio",
+        "input_event_count",
+        "output_event_count",
+    }
+    for filter_name, summary in value.items():
+        name = _safe_code(filter_name)
+        if not name or not isinstance(summary, dict):
+            continue
+        clean_summary: dict[str, object] = {}
+        for key, item in summary.items():
+            safe_key = _safe_code(key)
+            if not safe_key or safe_key not in allowed_scalar_keys:
+                continue
+            if isinstance(item, bool) or item is None:
+                clean_summary[safe_key] = item
+            elif isinstance(item, int | float) and not isinstance(item, bool):
+                clean_summary[safe_key] = item
+            elif isinstance(item, str) and _is_public_safe_text(item):
+                clean_summary[safe_key] = item
+        if clean_summary:
+            result[name] = clean_summary
+    return result
 
 
 def _string_list(value: object) -> list[str]:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ai_pipeline.midi.errors import NoUsableDrumEventsError, ProcessedMidiInvalidError
 from ai_pipeline.midi.mapping import map_to_general_midi_drum
-from ai_pipeline.midi.quality import quality_flags
+from ai_pipeline.midi.quality import quality_diagnostics
 from ai_pipeline.midi.simple_midi import DEFAULT_TEMPO_BPM, parse_midi, write_drum_midi
 from ai_pipeline.midi.types import (
     MidiPostProcessConfig,
@@ -28,8 +28,12 @@ class MidiPostProcessor:
         mapped_events, mapping_warnings = self._map_and_filter_events(midi_data.notes)
         quantized_events = self._quantize_events(mapped_events, midi_data.ticks_per_beat)
         deduped_events, dedupe_warnings = self._dedupe_events(quantized_events)
+        filtered_events, filter_summary = self._apply_tom_false_positive_filter(deduped_events)
+        filter_warnings = self._filter_warnings(filter_summary)
         if not deduped_events:
             raise NoUsableDrumEventsError("no MIDI note events survived mapping, filtering, and dedupe")
+        if not filtered_events:
+            raise NoUsableDrumEventsError("no MIDI note events survived tom false-positive filtering")
 
         estimated_bpm = midi_data.tempo_bpm or DEFAULT_TEMPO_BPM
         processed_midi_path = output_dir / "processed_drum.mid"
@@ -37,7 +41,7 @@ class MidiPostProcessor:
 
         write_drum_midi(
             processed_midi_path,
-            tuple(deduped_events),
+            tuple(filtered_events),
             ticks_per_beat=midi_data.ticks_per_beat,
             tempo_bpm=estimated_bpm,
             time_signature=midi_data.time_signature,
@@ -46,27 +50,29 @@ class MidiPostProcessor:
         self._validate_processed_midi(processed_midi_path)
 
         raw_note_histogram = Counter(event.note for event in midi_data.notes)
-        processed_drum_counts = Counter(event.drum for event in deduped_events)
+        processed_drum_counts = Counter(event.drum for event in filtered_events)
         quality_warnings = self._quality_warnings(
             input_event_count=len(midi_data.notes),
-            output_event_count=len(deduped_events),
-            dropped_event_count=len(midi_data.notes) - len(deduped_events),
+            output_event_count=len(filtered_events),
+            dropped_event_count=len(midi_data.notes) - len(filtered_events),
+            raw_note_histogram=raw_note_histogram,
             processed_drum_counts=processed_drum_counts,
         )
         report = MidiPostProcessReport(
             input_event_count=len(midi_data.notes),
-            output_event_count=len(deduped_events),
-            dropped_event_count=len(midi_data.notes) - len(deduped_events),
+            output_event_count=len(filtered_events),
+            dropped_event_count=len(midi_data.notes) - len(filtered_events),
             quantize_grid=self.config.quantize_grid,
             estimated_bpm=estimated_bpm,
             time_signature=midi_data.time_signature,
-            warnings=tuple(sorted(mapping_warnings | dedupe_warnings | quality_warnings)),
+            warnings=tuple(sorted(mapping_warnings | dedupe_warnings | filter_warnings | quality_warnings)),
             raw_note_histogram=dict(sorted(raw_note_histogram.items())),
             processed_drum_counts=dict(sorted(processed_drum_counts.items())),
+            postprocess_filters={"tom_false_positive": filter_summary},
         )
         drum_events_path.write_text(
             json.dumps(
-                self._build_events_payload(deduped_events, midi_data.ticks_per_beat, report),
+                self._build_events_payload(filtered_events, midi_data.ticks_per_beat, report),
                 ensure_ascii=False,
                 indent=2,
             ),
@@ -76,7 +82,7 @@ class MidiPostProcessor:
         return MidiPostProcessResult(
             processed_midi_path=processed_midi_path,
             drum_events_path=drum_events_path,
-            events=tuple(deduped_events),
+            events=tuple(filtered_events),
             report=report,
         )
 
@@ -134,6 +140,110 @@ class MidiPostProcessor:
             deduped.append(event)
         return sorted(deduped, key=lambda item: (item.tick, item.note)), warnings
 
+    def _apply_tom_false_positive_filter(
+        self,
+        events: list[ProcessedDrumEvent],
+    ) -> tuple[list[ProcessedDrumEvent], dict]:
+        summary = self._tom_filter_summary(events, events, status="disabled")
+        if not self.config.tom_filter_enabled:
+            return events, summary
+
+        summary["enabled"] = True
+        summary["preset"] = self.config.tom_filter_preset
+        if self.config.tom_filter_preset != "tom_guard_v1":
+            summary["status"] = "unsupported_preset"
+            return events, summary
+
+        counts = Counter(event.drum for event in events)
+        core_present = counts.get("kick", 0) > 0 and counts.get("snare", 0) > 0 and self._hihat_count(counts) > 0
+        if not core_present:
+            summary["status"] = "skipped_missing_core_groove"
+            return events, summary
+
+        tom_count = counts.get("tom", 0)
+        event_count = len(events)
+        if not event_count or tom_count / event_count <= self.config.tom_filter_target_max_ratio:
+            summary["status"] = "no_op_ratio_within_target"
+            return events, summary
+
+        drop_needed = 0
+        while drop_needed < tom_count:
+            remaining_tom = tom_count - drop_needed
+            remaining_events = event_count - drop_needed
+            if remaining_events and remaining_tom / remaining_events <= self.config.tom_filter_target_max_ratio:
+                break
+            drop_needed += 1
+        if drop_needed <= 0:
+            summary["status"] = "no_op_ratio_within_target"
+            return events, summary
+
+        tom_candidates = [event for event in events if event.drum == "tom"]
+        core_events = [event for event in events if event.drum in {"kick", "snare", "closed_hat", "pedal_hat", "open_hat"}]
+        ranked_toms = sorted(
+            tom_candidates,
+            key=lambda event: (
+                self._nearest_core_distance(event, core_events),
+                event.velocity,
+                event.tick,
+            ),
+        )
+        droppable = [
+            event
+            for event in ranked_toms
+            if self._nearest_core_distance(event, core_events) <= self.config.tom_filter_core_overlap_window_ticks
+        ]
+        if not droppable:
+            summary["status"] = "no_safe_tom_filter_change"
+            return events, summary
+
+        drop_ids = {id(event) for event in droppable[:drop_needed]}
+        filtered = [event for event in events if id(event) not in drop_ids]
+        if filtered == events:
+            summary["status"] = "no_safe_tom_filter_change"
+            return events, summary
+        return filtered, self._tom_filter_summary(events, filtered, status="applied")
+
+    def _tom_filter_summary(
+        self,
+        input_events: list[ProcessedDrumEvent],
+        output_events: list[ProcessedDrumEvent],
+        *,
+        status: str,
+    ) -> dict:
+        input_counts = Counter(event.drum for event in input_events)
+        output_counts = Counter(event.drum for event in output_events)
+        input_tom_count = input_counts.get("tom", 0)
+        output_tom_count = output_counts.get("tom", 0)
+        return {
+            "enabled": self.config.tom_filter_enabled,
+            "preset": self.config.tom_filter_preset,
+            "status": status,
+            "input_tom_count": input_tom_count,
+            "output_tom_count": output_tom_count,
+            "dropped_tom_count": max(0, input_tom_count - output_tom_count),
+            "target_max_tom_ratio": self.config.tom_filter_target_max_ratio,
+            "input_event_count": len(input_events),
+            "output_event_count": len(output_events),
+        }
+
+    def _filter_warnings(self, summary: dict) -> set[str]:
+        status = str(summary.get("status") or "")
+        if status in {"no_safe_tom_filter_change", "unsupported_preset"}:
+            return {status}
+        return set()
+
+    def _nearest_core_distance(
+        self,
+        event: ProcessedDrumEvent,
+        core_events: list[ProcessedDrumEvent],
+    ) -> int:
+        if not core_events:
+            return 1_000_000
+        return min(abs(event.tick - core_event.tick) for core_event in core_events)
+
+    def _hihat_count(self, counts: Counter[str]) -> int:
+        return sum(counts.get(drum, 0) for drum in ("closed_hat", "pedal_hat", "open_hat"))
+
     def _validate_processed_midi(self, processed_midi_path: Path) -> None:
         try:
             event_count = count_note_on_events(processed_midi_path)
@@ -148,13 +258,16 @@ class MidiPostProcessor:
         input_event_count: int,
         output_event_count: int,
         dropped_event_count: int,
+        raw_note_histogram: Counter[int],
         processed_drum_counts: Counter[str],
     ) -> set[str]:
         warnings: set[str] = set()
         warnings.update(
-            quality_flags(
-                event_count=output_event_count,
-                drum_counts=processed_drum_counts,
+            quality_diagnostics(
+                raw_note_histogram=raw_note_histogram,
+                processed_drum_counts=processed_drum_counts,
+                raw_event_count=input_event_count,
+                processed_event_count=output_event_count,
             )
         )
         if input_event_count and dropped_event_count / input_event_count >= 0.5:
@@ -177,6 +290,7 @@ class MidiPostProcessor:
             "warnings": list(report.warnings),
             "raw_note_histogram": {str(key): value for key, value in (report.raw_note_histogram or {}).items()},
             "processed_drum_counts": report.processed_drum_counts or {},
+            "postprocess_filters": report.postprocess_filters or {},
             "events": [
                 {
                     "index": index,

@@ -720,6 +720,7 @@ export function ResultCard({
 
       <PipelineReview pipeline={result.pipeline} exports={result.exports} />
       <ReviewPacketPanel result={result} />
+      <QualityStatusPanel pipeline={result.pipeline} />
       <MusicXmlPreview url={result.preview.musicxml_url} validation={validation} />
 
       {result.drum_track?.warnings.length ? (
@@ -750,6 +751,50 @@ export function ResultCard({
               <span>{item.type === 'pdf' ? `${item.status} · optional` : item.status}</span>
             </div>
           ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type QualityVerdict = NonNullable<NonNullable<NonNullable<TranscriptionResultResponse['pipeline']>['quality']>['quality_verdict']>;
+
+function QualityStatusPanel({ pipeline }: { pipeline: TranscriptionResultResponse['pipeline'] }) {
+  const verdict = pipeline?.quality?.quality_verdict ?? unknownQualityVerdict(pipeline?.validation ?? null);
+  const gate = verdict.candidate_gate;
+  const limitations = verdict.limitations ?? [];
+  const tomFilter = pipeline?.quality?.postprocess_filters?.tom_false_positive ?? null;
+  const tomFilterLabel = tomFilter ? qualityTomFilterLabel(String(tomFilter.status ?? 'unknown')) : null;
+  const tone = qualityVerdictTone(verdict.verdict);
+
+  return (
+    <div className={`qualityStatusPanel ${tone}`}>
+      <div className="qualityStatusHeader">
+        <div>
+          <strong>{qualityVerdictLabel(verdict.verdict)}</strong>
+          <span>鼓譜草稿品質</span>
+        </div>
+        <span className={`qualityScore ${tone}`}>
+          {verdict.usability_score !== null ? `${verdict.usability_score}/5` : '未評分'}
+        </span>
+      </div>
+      <div className="qualityStatusGrid">
+        <Metric label="Candidate gate" value={gate.status === 'passed' ? 'passed' : gate.status || 'unknown'} />
+        <Metric label="MusicXML" value={verdict.musicxml_parseable ? '可讀取' : verdict.musicxml_available ? '需檢查' : '未提供'} />
+      </div>
+      {limitations.length ? (
+        <div className="limitationList">
+          {limitations.map((limitation) => (
+            <span key={limitation}>{qualityLimitationLabel(limitation)}</span>
+          ))}
+        </div>
+      ) : (
+        <p className="qualityStatusNote">未回報明確限制。</p>
+      )}
+      {tomFilterLabel ? (
+        <div className="qualityFilterStatus">
+          <span>Tom filter</span>
+          <strong>{tomFilterLabel}</strong>
         </div>
       ) : null}
     </div>
@@ -801,6 +846,72 @@ function ReviewPacketPanel({ result }: { result: TranscriptionResultResponse }) 
       </ul>
     </div>
   );
+}
+
+function unknownQualityVerdict(
+  validation: NonNullable<NonNullable<TranscriptionResultResponse['pipeline']>['validation']> | null,
+): QualityVerdict {
+  const musicxmlAvailable = Boolean(validation?.musicxml.available);
+  const musicxmlParseable = Boolean(validation?.musicxml.parseable);
+  return {
+    verdict: 'unknown',
+    usability_score: null,
+    limitations: ['quality_verdict_unavailable'],
+    candidate_gate: {
+      status: 'unknown',
+      run_completed: null,
+      processed_event_count: null,
+      min_event_count: null,
+      kick_present: null,
+      snare_present: null,
+      hihat_present: null,
+      blocking_flags: [],
+      musicxml_available: musicxmlAvailable,
+      musicxml_parseable: musicxmlParseable,
+    },
+    musicxml_available: musicxmlAvailable,
+    musicxml_parseable: musicxmlParseable,
+  };
+}
+
+function qualityVerdictLabel(verdict: string): string {
+  if (verdict === 'mvp_candidate') return '接近可用草稿';
+  if (verdict === 'draft_candidate_needs_review') return '草稿需人工檢查';
+  if (verdict === 'not_candidate') return '目前不建議修譜';
+  return '品質狀態未知';
+}
+
+function qualityVerdictTone(verdict: string): 'ready' | 'warn' | 'error' | 'unknown' {
+  if (verdict === 'mvp_candidate') return 'ready';
+  if (verdict === 'draft_candidate_needs_review') return 'warn';
+  if (verdict === 'not_candidate') return 'error';
+  return 'unknown';
+}
+
+function qualityLimitationLabel(limitation: string): string {
+  const labels: Record<string, string> = {
+    hihat_missing_likely: 'Hi-hat 可能缺失',
+    kick_missing: 'Kick 缺失',
+    musicxml_unavailable: 'MusicXML 未產出',
+    musicxml_unparseable: 'MusicXML 無法解析',
+    no_snare_detected: 'Snare 未偵測到',
+    quality_verdict_unavailable: '尚未產生品質判斷',
+    snare_missing: 'Snare 缺失',
+    tom_false_positive_likely: 'Tom 誤判偏多',
+  };
+  return labels[limitation] ?? limitation.replaceAll('_', ' ');
+}
+
+function qualityTomFilterLabel(status: string): string {
+  const labels: Record<string, string> = {
+    applied: '已套用 tom filter',
+    disabled: '未套用 tom filter',
+    no_op_ratio_within_target: 'Tom filter 未啟動：比例已達標',
+    no_safe_tom_filter_change: 'Tom 誤判仍偏多',
+    skipped_missing_core_groove: 'Tom filter 未啟動：核心節奏不足',
+    unsupported_preset: 'Tom filter preset 不支援',
+  };
+  return labels[status] ?? 'Tom filter 狀態未知';
 }
 
 function MusicXmlPreview({
