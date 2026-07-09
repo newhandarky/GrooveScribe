@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import BigInteger, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.models.mixins import CreatedAtMixin, UuidPrimaryKeyMixin
+
+if TYPE_CHECKING:
+    from app.models.transcription_job import TranscriptionJob
+    from app.models.user import User
 
 
 class AudioFile(UuidPrimaryKeyMixin, CreatedAtMixin, Base):

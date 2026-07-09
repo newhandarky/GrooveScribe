@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from starlette.background import BackgroundTask
 from starlette.responses import Response, StreamingResponse
 
@@ -29,6 +29,7 @@ from app.services.download_service import DownloadService
 from app.services.job_history_service import JobHistoryService, RetryJobResult
 from app.services.job_query_service import JobQueryService
 from app.services.job_queue import JobQueue, get_job_queue
+from app.services.pipeline_config import pipeline_config_for_job
 from app.services.result_service import ResultService
 from app.services.review_packet_service import ReviewPacketService
 from app.services.upload_service import UploadService
@@ -99,6 +100,9 @@ async def create_transcription(
     settings: Annotated[Settings, Depends(get_settings)],
     upload_service: Annotated[UploadService, Depends(get_upload_service)],
     title: Annotated[str | None, Form()] = None,
+    pipeline_mode: Annotated[str | None, Form()] = None,
+    adtof_threshold_preset: Annotated[str | None, Form()] = None,
+    tom_filter_preset: Annotated[str | None, Form()] = None,
 ) -> UploadAcceptedResponse:
     content = await _read_upload_file(file, max_size_bytes=settings.upload_max_size_bytes)
     result = upload_service.create_upload_job(
@@ -107,6 +111,9 @@ async def create_transcription(
         content_type=file.content_type,
         content=content,
         title=title,
+        pipeline_mode=pipeline_mode,
+        adtof_threshold_preset=adtof_threshold_preset,
+        tom_filter_preset=tom_filter_preset,
     )
     base_path = f"{settings.api_v1_prefix}/transcriptions/{result.job_id}"
     return UploadAcceptedResponse(
@@ -124,8 +131,17 @@ def retry_transcription(
     db: Annotated[Session, Depends(get_db_session)],
     settings: Annotated[Settings, Depends(get_settings)],
     job_history_service: Annotated[JobHistoryService, Depends(get_job_history_service)],
+    pipeline_mode: Annotated[str | None, Form()] = None,
+    adtof_threshold_preset: Annotated[str | None, Form()] = None,
+    tom_filter_preset: Annotated[str | None, Form()] = None,
 ) -> UploadAcceptedResponse:
-    result = job_history_service.retry_job(db, job_id=job_id)
+    result = job_history_service.retry_job(
+        db,
+        job_id=job_id,
+        pipeline_mode=pipeline_mode,
+        adtof_threshold_preset=adtof_threshold_preset,
+        tom_filter_preset=tom_filter_preset,
+    )
     return _build_upload_response(result, settings)
 
 
@@ -159,7 +175,7 @@ def get_transcription_result(
     result_service: Annotated[ResultService, Depends(get_result_service)],
 ) -> TranscriptionResultResponse:
     job = result_service.get_completed_result(db, job_id)
-    return _build_result_response(job, result_service)
+    return _build_result_response(db, job, result_service)
 
 
 @router.get("/{job_id}/review-packet", response_model=ReviewPacketResponse)
@@ -213,6 +229,7 @@ async def _read_upload_file(file: UploadFile, *, max_size_bytes: int) -> bytes:
 
 
 def _build_result_response(
+    db: Session,
     job: TranscriptionJob,
     result_service: ResultService,
 ) -> TranscriptionResultResponse:
@@ -220,6 +237,7 @@ def _build_result_response(
     drum_track = job.drum_track
     return TranscriptionResultResponse(
         job_id=job.id,
+        source_job_id=job.source_job_id,
         status=job.status.value,
         stage=job.stage.value,
         title=job.title,
@@ -263,7 +281,62 @@ def _build_result_response(
             for export in sorted(job.export_files, key=lambda item: item.type.value)
         ],
         pipeline=result_service.pipeline_summary(job),
+        source_result_summary=_source_result_summary(db, job, result_service),
     )
+
+
+def _source_result_summary(
+    db: Session,
+    job: TranscriptionJob,
+    result_service: ResultService,
+) -> dict | None:
+    if not job.source_job_id:
+        return None
+    source_job = (
+        db.query(TranscriptionJob)
+        .options(
+            selectinload(TranscriptionJob.audio_file),
+            selectinload(TranscriptionJob.drum_track),
+            selectinload(TranscriptionJob.export_files),
+        )
+        .filter(TranscriptionJob.id == job.source_job_id)
+        .one_or_none()
+    )
+    if source_job is None:
+        return _empty_source_result_summary(job.source_job_id, status="missing")
+    pipeline = result_service.pipeline_summary(source_job) or {}
+    quality = pipeline.get("quality") if isinstance(pipeline.get("quality"), dict) else {}
+    validation = pipeline.get("validation") if isinstance(pipeline.get("validation"), dict) else {}
+    musicxml = validation.get("musicxml") if isinstance(validation.get("musicxml"), dict) else {}
+    return {
+        "job_id": source_job.id,
+        "status": source_job.status.value,
+        "pipeline_config": pipeline.get("config") or {},
+        "quality_verdict": quality.get("quality_verdict") if isinstance(quality, dict) else None,
+        "processed_drum_counts": quality.get("processed_drum_counts", {}) if isinstance(quality, dict) else {},
+        "tom_filter": (quality.get("postprocess_filters", {}) or {}).get("tom_false_positive")
+        if isinstance(quality, dict)
+        else None,
+        "musicxml_parseable": bool(musicxml.get("parseable")),
+    }
+
+
+def _empty_source_result_summary(job_id: str | None, *, status: str) -> dict:
+    return {
+        "job_id": job_id,
+        "status": status,
+        "pipeline_config": {
+            "mode": "unknown",
+            "adtof_threshold_preset": None,
+            "tom_filter_preset": None,
+            "runtime_fallback_status": None,
+            "source_job_id": None,
+        },
+        "quality_verdict": None,
+        "processed_drum_counts": {},
+        "tom_filter": None,
+        "musicxml_parseable": None,
+    }
 
 
 def _build_upload_response(result: RetryJobResult, settings: Settings) -> UploadAcceptedResponse:
@@ -284,6 +357,7 @@ def _build_job_summary(
     error = job_query_service.error_payload(job)
     return TranscriptionJobSummary(
         job_id=job.id,
+        source_job_id=job.source_job_id,
         title=job.title,
         file_name=job.audio_file.original_filename,
         status=job.status.value,
@@ -292,6 +366,10 @@ def _build_job_summary(
         created_at=job.created_at,
         completed_at=job.completed_at,
         failed_at=job.failed_at,
-        exports={export.type.value: export.status.value for export in sorted(job.export_files, key=lambda item: item.type.value)},
+        exports={
+            export.type.value: export.status.value
+            for export in sorted(job.export_files, key=lambda item: item.type.value)
+        },
+        pipeline_config=pipeline_config_for_job(job),
         error=JobErrorResponse(**error) if error else None,
     )

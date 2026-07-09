@@ -17,6 +17,7 @@ from app.services.audio_metadata import (
     AudioMetadataInspector,
 )
 from app.services.job_queue import JobQueue
+from app.services.pipeline_config import normalize_pipeline_config
 from app.storage import ArtifactType, StorageAdapter, build_job_artifact_key, sanitize_filename
 
 _ALLOWED_EXTENSIONS = {".mp3", ".wav"}
@@ -58,9 +59,17 @@ class UploadService:
         content_type: str | None,
         content: bytes,
         title: str | None = None,
+        pipeline_mode: str | None = None,
+        adtof_threshold_preset: str | None = None,
+        tom_filter_preset: str | None = None,
     ) -> UploadResult:
         safe_filename = self._validate_file(filename=filename, content_type=content_type, content=content)
         clean_title = self._validate_title(title)
+        pipeline_config = normalize_pipeline_config(
+            pipeline_mode=pipeline_mode,
+            adtof_threshold_preset=adtof_threshold_preset,
+            tom_filter_preset=tom_filter_preset,
+        )
         metadata = self._inspect_metadata(
             content=content,
             filename=safe_filename,
@@ -93,6 +102,10 @@ class UploadService:
             stage=PipelineStage.UPLOADED,
             progress=0,
             title=clean_title,
+            pipeline_mode=pipeline_config.pipeline_mode,
+            adtof_threshold_preset=pipeline_config.adtof_threshold_preset,
+            tom_filter_preset=pipeline_config.tom_filter_preset,
+            runtime_fallback_status=pipeline_config.runtime_fallback_status,
         )
 
         db.add(audio_file)

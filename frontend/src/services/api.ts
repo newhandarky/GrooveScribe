@@ -1,6 +1,7 @@
 import type {
   JobStatusResponse,
   LocalDataSummaryResponse,
+  PipelineRunConfigInput,
   RuntimePreflightResponse,
   TranscriptionJobListResponse,
   ReviewPacketResponse,
@@ -52,7 +53,7 @@ export async function listTranscriptions(
 }
 
 export async function uploadTranscription(
-  input: { file: File; title?: string },
+  input: { file: File; title?: string } & PipelineRunConfigInput,
   fetcher: typeof fetch = fetch,
 ): Promise<UploadAcceptedResponse> {
   const formData = new FormData();
@@ -60,6 +61,7 @@ export async function uploadTranscription(
   if (input.title?.trim()) {
     formData.set('title', input.title.trim());
   }
+  appendPipelineConfig(formData, input);
   return requestJson<UploadAcceptedResponse>('/transcriptions', {
     fetcher,
     init: {
@@ -92,16 +94,38 @@ export async function getReviewPacket(
 
 export async function retryTranscription(
   jobId: string,
+  input: PipelineRunConfigInput | typeof fetch = {},
   fetcher: typeof fetch = fetch,
 ): Promise<UploadAcceptedResponse> {
+  const config = typeof input === 'function' ? {} : input;
+  const requestFetcher = typeof input === 'function' ? input : fetcher;
+  const formData = pipelineConfigFormData(config);
   return requestJson<UploadAcceptedResponse>(`/transcriptions/${encodeURIComponent(jobId)}/retry`, {
-    fetcher,
-    init: { method: 'POST' },
+    fetcher: requestFetcher,
+    init: { method: 'POST', body: formData },
   });
 }
 
 export function downloadUrl(url: string | null): string {
   return url ?? '#';
+}
+
+function pipelineConfigFormData(input: PipelineRunConfigInput): FormData | undefined {
+  const formData = new FormData();
+  appendPipelineConfig(formData, input);
+  return Array.from(formData.keys()).length ? formData : undefined;
+}
+
+function appendPipelineConfig(formData: FormData, input: PipelineRunConfigInput): void {
+  if (input.pipelineMode) {
+    formData.set('pipeline_mode', input.pipelineMode);
+  }
+  if (input.adtofThresholdPreset?.trim()) {
+    formData.set('adtof_threshold_preset', input.adtofThresholdPreset.trim());
+  }
+  if (input.tomFilterPreset?.trim()) {
+    formData.set('tom_filter_preset', input.tomFilterPreset.trim());
+  }
 }
 
 async function requestJson<T>(

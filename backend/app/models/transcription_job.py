@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -8,6 +9,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 from app.models.enums import JobStatus, PipelineStage
 from app.models.mixins import TimestampMixin, UuidPrimaryKeyMixin
+
+if TYPE_CHECKING:
+    from app.models.audio_file import AudioFile
+    from app.models.drum_track import DrumTrack
+    from app.models.export_file import ExportFile
+    from app.models.user import User
 
 
 class TranscriptionJob(UuidPrimaryKeyMixin, TimestampMixin, Base):
@@ -30,6 +37,12 @@ class TranscriptionJob(UuidPrimaryKeyMixin, TimestampMixin, Base):
     progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     title: Mapped[str | None] = mapped_column(String(512), nullable=True)
     pipeline_version: Mapped[str] = mapped_column(String(64), default="poc-local-v1", nullable=False)
+    pipeline_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    adtof_threshold_preset: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tom_filter_preset: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    runtime_fallback_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # V1 keeps this as a nullable logical reference so retry/compare can tolerate missing source jobs.
+    source_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     source_separator: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source_separator_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
     drum_transcriber: Mapped[str | None] = mapped_column(String(128), nullable=True)

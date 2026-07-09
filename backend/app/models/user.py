@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.models.mixins import TimestampMixin, UuidPrimaryKeyMixin
+
+if TYPE_CHECKING:
+    from app.models.audio_file import AudioFile
+    from app.models.transcription_job import TranscriptionJob
 
 
 class User(UuidPrimaryKeyMixin, TimestampMixin, Base):

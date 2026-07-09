@@ -14,6 +14,8 @@ import {
 import type {
   JobStatusResponse,
   LocalDataSummaryResponse,
+  PipelineModeSelection,
+  PipelineRunConfigInput,
   RuntimePreflightResponse,
   TranscriptionJobSummary,
   TranscriptionResultResponse,
@@ -27,6 +29,8 @@ import {
 
 const POLL_INTERVAL_MS = 1500;
 const ACTIVE_JOB_STORAGE_KEY = 'groovescribe.activeJobId';
+const TRUE_AI_THRESHOLD_PRESET = 'separated_v1';
+const TRUE_AI_TOM_FILTER_PRESET = 'tom_guard_v1';
 
 export function App() {
   const [runtime, setRuntime] = useState<RuntimePreflightResponse | null>(null);
@@ -34,6 +38,8 @@ export function App() {
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [title, setTitle] = useState('');
+  const [pipelineMode, setPipelineMode] = useState<PipelineModeSelection>('demo_mock');
+  const [pipelineModeTouched, setPipelineModeTouched] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(() => {
     const urlJobId = new URLSearchParams(window.location.search).get('jobId')?.trim();
@@ -93,6 +99,11 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (!runtime || pipelineModeTouched) return;
+    setPipelineMode(runtime.true_ai_ready ? 'true_ai' : 'demo_mock');
+  }, [pipelineModeTouched, runtime]);
+
+  useEffect(() => {
     if (!activeJobId) {
       setJobStatus(null);
       setResult(null);
@@ -144,7 +155,11 @@ export function App() {
     setJobError(null);
     setResult(null);
     try {
-      const upload = await uploadTranscription({ file: selectedFile, title });
+      const upload = await uploadTranscription({
+        file: selectedFile,
+        title,
+        ...pipelineConfigInput(pipelineMode),
+      });
       setActiveJobId(upload.job_id);
       setJobStatus({
         job_id: upload.job_id,
@@ -165,7 +180,7 @@ export function App() {
     }
   };
 
-  const retryJob = async (jobId: string) => {
+  const retryJob = async (jobId: string, config?: PipelineRunConfigInput) => {
     if (pollTimer.current) {
       window.clearTimeout(pollTimer.current);
     }
@@ -173,7 +188,7 @@ export function App() {
     setJobError(null);
     setResult(null);
     try {
-      const retry = await retryTranscription(jobId);
+      const retry = await retryTranscription(jobId, config);
       setActiveJobId(retry.job_id);
       setJobStatus({
         job_id: retry.job_id,
@@ -205,6 +220,7 @@ export function App() {
 
   const runtimeTone = runtime ? runtimeStatusTone(runtime.status) : 'neutral';
   const canUpload = runtime?.mock_ai_ready === true && !uploading;
+  const trueAiReady = runtime?.true_ai_ready === true;
 
   return (
     <main className="appShell">
@@ -236,9 +252,15 @@ export function App() {
             uploading={uploading}
             selectedFile={selectedFile}
             title={title}
+            pipelineMode={pipelineMode}
             runtime={runtime}
+            trueAiReady={trueAiReady}
             onFileChange={setSelectedFile}
             onTitleChange={setTitle}
+            onPipelineModeChange={(mode) => {
+              setPipelineModeTouched(true);
+              setPipelineMode(mode);
+            }}
             onSubmit={submitUpload}
           />
           <JobHistoryPanel
@@ -259,9 +281,10 @@ export function App() {
           result={result}
           error={jobError}
           onRefresh={() => activeJobId && void refreshJob(activeJobId)}
-          onRetry={(jobId) => void retryJob(jobId)}
+          onRetry={(jobId, config) => void retryJob(jobId, config)}
           onReset={resetJob}
           retryingJobId={retryingJobId}
+          trueAiReady={trueAiReady}
         />
       </section>
     </main>
@@ -432,18 +455,24 @@ export function UploadPanel({
   uploading,
   selectedFile,
   title,
+  pipelineMode,
   runtime,
+  trueAiReady,
   onFileChange,
   onTitleChange,
+  onPipelineModeChange,
   onSubmit,
 }: {
   canUpload: boolean;
   uploading: boolean;
   selectedFile: File | null;
   title: string;
+  pipelineMode: PipelineModeSelection;
   runtime: RuntimePreflightResponse | null;
+  trueAiReady: boolean;
   onFileChange: (file: File | null) => void;
   onTitleChange: (value: string) => void;
+  onPipelineModeChange: (value: PipelineModeSelection) => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
 }) {
   const blockedReason = useMemo(() => {
@@ -465,6 +494,43 @@ export function UploadPanel({
           <span>Title</span>
           <input value={title} onChange={(event) => onTitleChange(event.target.value)} placeholder="Demo groove" />
         </label>
+        <fieldset className="modeSelector">
+          <legend>分析模式</legend>
+          <label className={pipelineMode === 'demo_mock' ? 'modeOption active' : 'modeOption'}>
+            <input
+              type="radio"
+              name="pipeline_mode"
+              checked={pipelineMode === 'demo_mock'}
+              onChange={() => onPipelineModeChange('demo_mock')}
+            />
+            <span>
+              <strong>Demo mode</strong>
+              <small>使用 mock pipeline，適合 runtime degraded 或產品流程展示。</small>
+            </span>
+          </label>
+          <label className={pipelineMode === 'true_ai' ? 'modeOption active' : 'modeOption'}>
+            <input
+              type="radio"
+              name="pipeline_mode"
+              checked={pipelineMode === 'true_ai'}
+              disabled={!trueAiReady}
+              onChange={() => onPipelineModeChange('true_ai')}
+            />
+            <span>
+              <strong>True-AI V1 preset</strong>
+              <small>套用 separated_v1 + tom_guard_v1，產出 MIDI / MusicXML 與品質報告。</small>
+            </span>
+          </label>
+        </fieldset>
+        {!trueAiReady ? <p className="formNote">True-AI runtime 尚未 ready；Demo mode 仍可用。</p> : null}
+        {pipelineMode === 'true_ai' ? (
+          <div className="presetSummary">
+            <span>Preset</span>
+            <strong>{TRUE_AI_THRESHOLD_PRESET}</strong>
+            <span>Filter</span>
+            <strong>{TRUE_AI_TOM_FILTER_PRESET}</strong>
+          </div>
+        ) : null}
         <label className="fileDrop">
           <input
             type="file"
@@ -527,6 +593,7 @@ export function JobHistoryPanel({
               </div>
               <div className="historyMeta">
                 <span>{stageLabel(job.stage)}</span>
+                <span>{pipelineModeLabel(job.pipeline_config?.mode ?? 'unknown')}</span>
                 <span>{job.progress}%</span>
                 <span>{formatDateTime(job.completed_at ?? job.failed_at ?? job.created_at)}</span>
               </div>
@@ -572,15 +639,17 @@ function JobPanel({
   onRetry,
   onReset,
   retryingJobId,
+  trueAiReady,
 }: {
   activeJobId: string | null;
   status: JobStatusResponse | null;
   result: TranscriptionResultResponse | null;
   error: string | null;
   onRefresh: () => void;
-  onRetry: (jobId: string) => void;
+  onRetry: (jobId: string, config?: PipelineRunConfigInput) => void;
   onReset: () => void;
   retryingJobId: string | null;
+  trueAiReady: boolean;
 }) {
   return (
     <section className="panel jobPanel">
@@ -611,11 +680,18 @@ function JobPanel({
       {status ? (
         <JobStatusCard
           status={status}
-          onRetry={canRetryJobStatus(status.status) ? onRetry : undefined}
+          onRetry={canRetryJobStatus(status.status) ? (jobId) => onRetry(jobId) : undefined}
           retrying={retryingJobId === status.job_id}
         />
       ) : null}
-      {result ? <ResultCard result={result} onRerun={onRetry} rerunning={retryingJobId === result.job_id} /> : null}
+      {result ? (
+        <ResultCard
+          result={result}
+          onRerun={onRetry}
+          rerunning={retryingJobId === result.job_id}
+          trueAiReady={trueAiReady}
+        />
+      ) : null}
     </section>
   );
 }
@@ -678,10 +754,12 @@ export function ResultCard({
   result,
   onRerun,
   rerunning = false,
+  trueAiReady = false,
 }: {
   result: TranscriptionResultResponse;
-  onRerun?: (jobId: string) => void;
+  onRerun?: (jobId: string, config?: PipelineRunConfigInput) => void;
   rerunning?: boolean;
+  trueAiReady?: boolean;
 }) {
   const availableExports = result.exports.filter((item) => item.status === 'available');
   const unavailableExports = result.exports.filter((item) => item.status !== 'available');
@@ -702,9 +780,29 @@ export function ResultCard({
             {pipelineMode === 'true_ai' ? 'TRUE AI' : pipelineMode.toUpperCase()}
           </span>
           {onRerun ? (
-            <button className="secondaryButton compactButton" type="button" onClick={() => onRerun(result.job_id)} disabled={rerunning}>
-              {rerunning ? '重新排隊中' : '重新執行'}
-            </button>
+            <div className="rerunActions">
+              <button className="secondaryButton compactButton" type="button" onClick={() => onRerun(result.job_id)} disabled={rerunning}>
+                {rerunning ? '重新排隊中' : '沿用設定重跑'}
+              </button>
+              <button
+                className="secondaryButton compactButton"
+                type="button"
+                onClick={() => onRerun(result.job_id, pipelineConfigInput('true_ai'))}
+                disabled={rerunning || !trueAiReady}
+              >
+                True-AI V1
+              </button>
+              {pipelineMode === 'true_ai' ? (
+                <button
+                  className="secondaryButton compactButton"
+                  type="button"
+                  onClick={() => onRerun(result.job_id, pipelineConfigInput('demo_mock'))}
+                  disabled={rerunning}
+                >
+                  Demo mode
+                </button>
+              ) : null}
+            </div>
           ) : null}
           {result.drum_track ? (
             <div className="scoreStats">
@@ -718,6 +816,8 @@ export function ResultCard({
         </div>
       </div>
 
+      <PipelineConfigPanel pipeline={result.pipeline} sourceJobId={result.source_job_id} />
+      <SourceComparisonPanel summary={result.source_result_summary} currentPipeline={result.pipeline} />
       <PipelineReview pipeline={result.pipeline} exports={result.exports} />
       <ReviewPacketPanel result={result} />
       <QualityStatusPanel pipeline={result.pipeline} />
@@ -759,10 +859,79 @@ export function ResultCard({
 
 type QualityVerdict = NonNullable<NonNullable<NonNullable<TranscriptionResultResponse['pipeline']>['quality']>['quality_verdict']>;
 
+function PipelineConfigPanel({
+  pipeline,
+  sourceJobId,
+}: {
+  pipeline: TranscriptionResultResponse['pipeline'];
+  sourceJobId: string | null;
+}) {
+  const config = pipeline?.config;
+  if (!config && !sourceJobId) return null;
+  const mode = config?.mode ?? pipeline?.mode ?? 'unknown';
+  return (
+    <div className="pipelineConfigPanel">
+      <div className="pipelineConfigHeader">
+        <strong>Pipeline config</strong>
+        <span>per-job settings</span>
+      </div>
+      <div>
+        <span>Mode</span>
+        <strong>{pipelineModeLabel(mode)}</strong>
+      </div>
+      <div>
+        <span>ADTOF preset</span>
+        <strong>{config?.adtof_threshold_preset ?? '-'}</strong>
+      </div>
+      <div>
+        <span>Postprocess filter</span>
+        <strong>{config?.tom_filter_preset ?? '-'}</strong>
+      </div>
+      {sourceJobId ? (
+        <div>
+          <span>Source job</span>
+          <strong>{sourceJobId}</strong>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SourceComparisonPanel({
+  summary,
+  currentPipeline,
+}: {
+  summary: TranscriptionResultResponse['source_result_summary'];
+  currentPipeline: TranscriptionResultResponse['pipeline'];
+}) {
+  if (!summary) return null;
+  const currentVerdict = currentPipeline?.quality?.quality_verdict;
+  const currentCounts = currentPipeline?.quality?.processed_drum_counts ?? {};
+  const sourceVerdict = summary.quality_verdict;
+  const sourceCounts = summary.processed_drum_counts ?? {};
+  return (
+    <div className="sourceComparisonPanel">
+      <div className="reviewHeader">
+        <strong>與前一次比較</strong>
+        <span>{summary.job_id}</span>
+      </div>
+      <div className="comparisonGrid">
+        <Metric label="Previous verdict" value={sourceVerdict?.verdict ? qualityVerdictLabel(sourceVerdict.verdict) : 'unknown'} />
+        <Metric label="Current verdict" value={currentVerdict?.verdict ? qualityVerdictLabel(currentVerdict.verdict) : 'unknown'} />
+        <Metric label="Previous tom" value={formatNumber(sourceCounts.tom)} />
+        <Metric label="Current tom" value={formatNumber(currentCounts.tom)} />
+        <Metric label="Previous MusicXML" value={summary.musicxml_parseable === true ? '可讀取' : '需檢查'} />
+        <Metric label="Current MusicXML" value={currentVerdict?.musicxml_parseable ? '可讀取' : '需檢查'} />
+      </div>
+    </div>
+  );
+}
+
 function QualityStatusPanel({ pipeline }: { pipeline: TranscriptionResultResponse['pipeline'] }) {
   const verdict = pipeline?.quality?.quality_verdict ?? unknownQualityVerdict(pipeline?.validation ?? null);
   const gate = verdict.candidate_gate;
   const limitations = verdict.limitations ?? [];
+  const suggestions = qualitySuggestionList(limitations, verdict.musicxml_parseable);
   const tomFilter = pipeline?.quality?.postprocess_filters?.tom_false_positive ?? null;
   const tomFilterLabel = tomFilter ? qualityTomFilterLabel(String(tomFilter.status ?? 'unknown')) : null;
   const tone = qualityVerdictTone(verdict.verdict);
@@ -795,6 +964,16 @@ function QualityStatusPanel({ pipeline }: { pipeline: TranscriptionResultRespons
         <div className="qualityFilterStatus">
           <span>Tom filter</span>
           <strong>{tomFilterLabel}</strong>
+        </div>
+      ) : null}
+      {suggestions.length ? (
+        <div className="qualitySuggestions">
+          <strong>修譜建議</strong>
+          <ul>
+            {suggestions.map((suggestion) => (
+              <li key={suggestion}>{suggestion}</li>
+            ))}
+          </ul>
         </div>
       ) : null}
     </div>
@@ -912,6 +1091,33 @@ function qualityTomFilterLabel(status: string): string {
     unsupported_preset: 'Tom filter preset 不支援',
   };
   return labels[status] ?? 'Tom filter 狀態未知';
+}
+
+function qualitySuggestionList(limitations: string[], musicxmlParseable: boolean): string[] {
+  const suggestions = new Set<string>();
+  if (!musicxmlParseable) {
+    suggestions.add('先確認 MusicXML 能否在預覽或 MuseScore 中開啟。');
+  }
+  for (const limitation of limitations) {
+    if (limitation === 'tom_false_positive_likely') {
+      suggestions.add('優先檢查 tom 音符是否誤判，必要時對照原音刪除多餘 tom。');
+    } else if (limitation === 'hihat_missing_likely') {
+      suggestions.add('檢查 hi-hat 八分或十六分節奏是否缺失。');
+    } else if (limitation === 'no_snare_detected' || limitation === 'snare_missing') {
+      suggestions.add('先補正 snare backbeat，避免後續小節判讀偏移。');
+    } else if (limitation === 'kick_missing') {
+      suggestions.add('先檢查 kick downbeat 與低頻重音是否漏記。');
+    } else if (limitation === 'quality_verdict_unavailable') {
+      suggestions.add('這份結果缺少品質判斷，請以 MusicXML 可讀性與 MIDI 事件數人工檢查。');
+    }
+  }
+  return [...suggestions];
+}
+
+function pipelineModeLabel(mode: string): string {
+  if (mode === 'true_ai') return 'True-AI';
+  if (mode === 'demo_mock' || mode === 'mock') return 'Demo / mock';
+  return 'Unknown';
 }
 
 function MusicXmlPreview({
@@ -1161,6 +1367,17 @@ function stringListFromUnknown(value: unknown): string[] {
 
 function canRetryJobStatus(status: string): boolean {
   return status === 'failed' || status === 'interrupted' || status === 'completed';
+}
+
+function pipelineConfigInput(mode: PipelineModeSelection): PipelineRunConfigInput {
+  if (mode === 'true_ai') {
+    return {
+      pipelineMode: 'true_ai',
+      adtofThresholdPreset: TRUE_AI_THRESHOLD_PRESET,
+      tomFilterPreset: TRUE_AI_TOM_FILTER_PRESET,
+    };
+  }
+  return { pipelineMode: 'demo_mock' };
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

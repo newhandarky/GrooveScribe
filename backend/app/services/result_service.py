@@ -7,6 +7,7 @@ from app.core.errors import ApiErrorException, ErrorCode
 from app.models import TranscriptionJob
 from app.models.enums import ExportFileStatus, ExportFileType, JobStatus
 from app.services.job_query_service import JobQueryService
+from app.services.pipeline_config import PIPELINE_MODE_DEMO_MOCK, PIPELINE_MODE_TRUE_AI, pipeline_config_for_job
 from app.services.pipeline_log_read_model import PipelineLogReadService
 from app.storage.base import StorageAdapter
 from app.storage.errors import ArtifactInvalidError, ArtifactNotFoundError, StorageReadFailedError
@@ -73,7 +74,8 @@ class ResultService:
             except (ArtifactInvalidError, ArtifactNotFoundError, StorageReadFailedError, ValueError):
                 pipeline_log = None
 
-        mode = "mock" if job.drum_track and job.drum_track.confidence_label else "unknown"
+        pipeline_config = _pipeline_config_summary(job, pipeline_log)
+        mode = _mode_from_pipeline_config(pipeline_config) or ("mock" if job.drum_track and job.drum_track.confidence_label else "unknown")
         stage_summaries = []
         warnings: list[str] = []
         if pipeline_log is not None:
@@ -89,7 +91,7 @@ class ResultService:
                     }
                 )
             if pipeline_log.status:
-                mode = _infer_pipeline_mode(job, stage_summaries)
+                mode = _mode_from_pipeline_config(pipeline_config) or _infer_pipeline_mode(job, stage_summaries)
 
         if job.drum_track:
             warnings.extend(warning for warning in job.drum_track.warnings if _is_public_safe_text(warning))
@@ -110,6 +112,7 @@ class ResultService:
                 for export in sorted(job.export_files, key=lambda item: item.type.value)
             ],
             "warnings": sorted(set(warnings)),
+            "config": pipeline_config,
             "quality": quality,
             "validation": validation,
             "pipeline_log_available": pipeline_log is not None,
@@ -123,6 +126,36 @@ def _infer_pipeline_mode(job: TranscriptionJob, stages: list[dict]) -> str:
     if {"source_separation", "drum_transcription"} & stage_names:
         return "true_ai"
     return "unknown"
+
+
+def _pipeline_config_summary(job: TranscriptionJob, pipeline_log) -> dict:
+    config = pipeline_config_for_job(job)
+    if pipeline_log is not None and pipeline_log.quality:
+        logged_config = pipeline_log.quality.get("pipeline_config") if isinstance(pipeline_log.quality, dict) else None
+        if isinstance(logged_config, dict):
+            config.update(_sanitize_pipeline_config(logged_config))
+    return _sanitize_pipeline_config(config)
+
+
+def _sanitize_pipeline_config(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        "mode": _safe_code(value.get("mode")) or "unknown",
+        "adtof_threshold_preset": _safe_code(value.get("adtof_threshold_preset")),
+        "tom_filter_preset": _safe_code(value.get("tom_filter_preset")),
+        "runtime_fallback_status": _safe_code(value.get("runtime_fallback_status")),
+        "source_job_id": _safe_code(value.get("source_job_id")),
+    }
+
+
+def _mode_from_pipeline_config(config: dict) -> str | None:
+    mode = config.get("mode")
+    if mode == PIPELINE_MODE_TRUE_AI:
+        return "true_ai"
+    if mode == PIPELINE_MODE_DEMO_MOCK:
+        return "mock"
+    return None
 
 
 def _is_public_safe_text(value: str) -> bool:

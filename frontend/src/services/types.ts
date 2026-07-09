@@ -19,6 +19,22 @@ export interface UploadAcceptedResponse {
   created_at: string;
 }
 
+export type PipelineModeSelection = 'demo_mock' | 'true_ai';
+
+export interface PipelineRunConfigInput {
+  pipelineMode?: PipelineModeSelection;
+  adtofThresholdPreset?: string | null;
+  tomFilterPreset?: string | null;
+}
+
+export interface PipelineConfigSummary {
+  mode: string;
+  adtof_threshold_preset: string | null;
+  tom_filter_preset: string | null;
+  runtime_fallback_status: string | null;
+  source_job_id: string | null;
+}
+
 export interface JobStatusResponse {
   job_id: string;
   status: string;
@@ -40,6 +56,7 @@ export interface JobStatusResponse {
 
 export interface TranscriptionJobSummary {
   job_id: string;
+  source_job_id: string | null;
   title: string | null;
   file_name: string;
   status: string;
@@ -49,6 +66,7 @@ export interface TranscriptionJobSummary {
   completed_at: string | null;
   failed_at: string | null;
   exports: Record<string, string>;
+  pipeline_config: PipelineConfigSummary;
   error: {
     code: string | null;
     message: string | null;
@@ -77,6 +95,7 @@ export interface LocalDataSummaryResponse {
 
 export interface TranscriptionResultResponse {
   job_id: string;
+  source_job_id: string | null;
   status: string;
   stage: string;
   title: string | null;
@@ -126,6 +145,7 @@ export interface TranscriptionResultResponse {
       status: string | null;
     }>;
     warnings: string[];
+    config: PipelineConfigSummary;
     quality?: {
       raw_event_count: number | null;
       processed_event_count: number | null;
@@ -174,6 +194,19 @@ export interface TranscriptionResultResponse {
     } | null;
     pipeline_log_available: boolean;
   } | null;
+  source_result_summary: {
+    job_id: string | null;
+    status: string;
+    pipeline_config?: PipelineConfigSummary;
+    quality_verdict?: {
+      verdict: string;
+      usability_score: number | null;
+      limitations: string[];
+    } | null;
+    processed_drum_counts?: Record<string, number>;
+    tom_filter?: Record<string, string | number | boolean | null> | null;
+    musicxml_parseable?: boolean | null;
+  } | null;
 }
 
 export interface ReviewPacketResponse {
@@ -190,6 +223,7 @@ export interface ReviewPacketResponse {
     download_url: string | null;
     included_in_zip: boolean;
   }>;
+  pipeline_config?: PipelineConfigSummary | Record<string, unknown> | null;
   quality?: TranscriptionResultResponse['pipeline'] extends infer Pipeline
     ? Pipeline extends { quality?: infer Quality }
       ? Quality
@@ -202,5 +236,5 @@ export interface ReviewPacketResponse {
     : unknown;
   review_checklist: Array<{ code: string; label: string; detail: string }>;
   manual_eval_seed: Record<string, unknown>;
-  redaction: { status: string; unsafe_tokens: string[] };
+  redaction: { status: string; unsafe_token_count: number };
 }

@@ -360,6 +360,74 @@ input {
   gap: 12px;
 }
 
+.modeSelector {
+  border: 0;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+.modeSelector legend {
+  color: #33443d;
+  font-size: 13px;
+  font-weight: 720;
+  margin-bottom: 6px;
+}
+
+.modeOption {
+  align-items: start;
+  background: #f7f9fa;
+  border: 1px solid #d6e0e5;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+}
+
+.modeOption.active {
+  border-color: #2f6f89;
+  box-shadow: inset 3px 0 0 #2f6f89;
+}
+
+.modeOption input {
+  margin-top: 3px;
+}
+
+.modeOption strong,
+.modeOption small {
+  display: block;
+}
+
+.modeOption small {
+  color: #69736d;
+  font-size: 12px;
+  line-height: 1.35;
+  margin-top: 3px;
+}
+
+.presetSummary {
+  background: #edf6f3;
+  border: 1px solid #c0d8cf;
+  border-radius: 8px;
+  display: grid;
+  gap: 6px 10px;
+  grid-template-columns: auto 1fr;
+  padding: 10px;
+}
+
+.presetSummary span {
+  color: #69736d;
+  font-size: 12px;
+}
+
+.presetSummary strong {
+  color: #235245;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
 .field {
   display: grid;
   gap: 6px;
@@ -563,6 +631,13 @@ input {
   justify-content: flex-end;
 }
 
+.rerunActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .resultMetaStack {
   align-items: flex-end;
   display: grid;
@@ -603,13 +678,51 @@ input {
 }
 
 .pipelineReview,
-.reviewPacketPanel {
+.reviewPacketPanel,
+.pipelineConfigPanel,
+.sourceComparisonPanel {
   background: #ffffff;
   border: 1px solid #d6e0e5;
   border-radius: 8px;
   display: grid;
   gap: 10px;
   padding: 12px;
+}
+
+.pipelineConfigPanel {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.pipelineConfigHeader {
+  grid-column: 1 / -1;
+}
+
+.pipelineConfigHeader strong,
+.pipelineConfigHeader span {
+  display: block;
+}
+
+.pipelineConfigPanel div {
+  min-width: 0;
+}
+
+.pipelineConfigPanel span,
+.sourceComparisonPanel .reviewHeader span {
+  color: #69736d;
+  font-size: 12px;
+}
+
+.pipelineConfigPanel strong {
+  display: block;
+  font-size: 13px;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.comparisonGrid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .compactDownloads {
@@ -751,6 +864,29 @@ input {
   color: #33443d;
   font-size: 13px;
   text-align: right;
+}
+
+.qualitySuggestions {
+  background: #ffffff;
+  border: 1px solid #d6e0e5;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.qualitySuggestions strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.qualitySuggestions ul {
+  color: #33443d;
+  display: grid;
+  font-size: 13px;
+  gap: 5px;
+  line-height: 1.45;
+  margin: 0;
+  padding-left: 18px;
 }
 
 .artifactValidation,
@@ -929,6 +1065,8 @@ input {
   .localDataGrid,
   .artifactValidation,
   .validationGrid,
+  .pipelineConfigPanel,
+  .comparisonGrid,
   .qualityStatusGrid,
   .qualityMetrics,
   .downloadGrid {

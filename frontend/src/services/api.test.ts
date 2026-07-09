@@ -67,12 +67,14 @@ describe('api client', () => {
   });
 
   it('uploads an audio file as form data', async () => {
-    const calls: Array<{ url: string; method?: string; bodyIsFormData: boolean }> = [];
+    const calls: Array<{ url: string; method?: string; bodyIsFormData: boolean; entries: Record<string, string> }> = [];
     const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      const formData = init?.body instanceof FormData ? init.body : null;
       calls.push({
         url: String(url),
         method: init?.method,
-        bodyIsFormData: init?.body instanceof FormData,
+        bodyIsFormData: Boolean(formData),
+        entries: formData ? formDataEntries(formData) : {},
       });
       return jsonResponse({
         job_id: 'job-1',
@@ -84,11 +86,29 @@ describe('api client', () => {
     };
 
     const response = await uploadTranscription(
-      { file: new File(['audio'], 'demo.wav', { type: 'audio/wav' }), title: 'Demo' },
+      {
+        file: new File(['audio'], 'demo.wav', { type: 'audio/wav' }),
+        title: 'Demo',
+        pipelineMode: 'true_ai',
+        adtofThresholdPreset: 'separated_v1',
+        tomFilterPreset: 'tom_guard_v1',
+      },
       fetcher as typeof fetch,
     );
 
-    expect(calls).toEqual([{ url: '/api/v1/transcriptions', method: 'POST', bodyIsFormData: true }]);
+    expect(calls).toEqual([
+      {
+        url: '/api/v1/transcriptions',
+        method: 'POST',
+        bodyIsFormData: true,
+        entries: {
+          adtof_threshold_preset: 'separated_v1',
+          pipeline_mode: 'true_ai',
+          title: 'Demo',
+          tom_filter_preset: 'tom_guard_v1',
+        },
+      },
+    ]);
     expect(response.job_id).toBe('job-1');
   });
 
@@ -140,6 +160,46 @@ describe('api client', () => {
 
     expect(calls).toEqual([{ url: '/api/v1/transcriptions/job%201/retry', method: 'POST' }]);
     expect(response.job_id).toBe('retry-job');
+  });
+
+  it('retries a transcription with a selected true-AI config', async () => {
+    const calls: Array<{ url: string; method?: string; entries: Record<string, string> }> = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({
+        url: String(url),
+        method: init?.method,
+        entries: init?.body instanceof FormData ? formDataEntries(init.body) : {},
+      });
+      return jsonResponse({
+        job_id: 'retry-job',
+        status: 'queued',
+        status_url: '/api/v1/transcriptions/retry-job/status',
+        result_url: '/api/v1/transcriptions/retry-job',
+        created_at: '2026-07-02T00:00:00Z',
+      });
+    };
+
+    await retryTranscription(
+      'job 1',
+      {
+        pipelineMode: 'true_ai',
+        adtofThresholdPreset: 'separated_v1',
+        tomFilterPreset: 'tom_guard_v1',
+      },
+      fetcher as typeof fetch,
+    );
+
+    expect(calls).toEqual([
+      {
+        url: '/api/v1/transcriptions/job%201/retry',
+        method: 'POST',
+        entries: {
+          adtof_threshold_preset: 'separated_v1',
+          pipeline_mode: 'true_ai',
+          tom_filter_preset: 'tom_guard_v1',
+        },
+      },
+    ]);
   });
 
   it('loads local data summary from a public-safe endpoint', async () => {
@@ -229,7 +289,7 @@ describe('api client', () => {
         validation: null,
         review_checklist: [],
         manual_eval_seed: { artifact_ref: 'review:job 1' },
-        redaction: { status: 'passed', unsafe_tokens: [] },
+        redaction: { status: 'passed', unsafe_token_count: 0 },
       });
     };
 
@@ -239,6 +299,7 @@ describe('api client', () => {
     expect(packet.schema_version).toBe('1.0');
     expect(packet.status).toBe('ready');
     expect(packet.manual_eval_seed.artifact_ref).toBe('review:job 1');
+    expect(packet.redaction).toEqual({ status: 'passed', unsafe_token_count: 0 });
   });
 
   it('maps unified API errors', async () => {
@@ -262,3 +323,13 @@ describe('api client', () => {
     } satisfies Partial<ApiError>);
   });
 });
+
+function formDataEntries(formData: FormData): Record<string, string> {
+  const entries: Record<string, string> = {};
+  for (const [key, value] of formData.entries()) {
+    if (typeof value === 'string') {
+      entries[key] = value;
+    }
+  }
+  return entries;
+}

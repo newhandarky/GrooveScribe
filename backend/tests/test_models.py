@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import Session
 
 from app.db.base import Base
@@ -65,3 +65,17 @@ def test_enum_values_match_level_1_contract() -> None:
     assert PipelineStage.MIDI_POST_PROCESSING.value == "midi_post_processing"
     assert ExportFileType.MUSICXML.value == "musicxml"
     assert ExportFileStatus.AVAILABLE.value == "available"
+
+
+def test_source_job_id_is_logical_reference_without_db_foreign_key() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("transcription_jobs")}
+    indexes = {index["name"] for index in inspector.get_indexes("transcription_jobs")}
+    foreign_keys = inspector.get_foreign_keys("transcription_jobs")
+
+    assert "source_job_id" in columns
+    assert "ix_transcription_jobs_source_job_id" in indexes
+    assert not any("source_job_id" in foreign_key.get("constrained_columns", []) for foreign_key in foreign_keys)

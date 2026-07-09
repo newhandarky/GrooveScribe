@@ -242,6 +242,13 @@ def test_result_service_builds_redacted_pipeline_summary(tmp_path) -> None:
 
         assert summary["pipeline_log_available"] is True
         assert summary["mode"] == "unknown"
+        assert summary["config"] == {
+            "mode": "unknown",
+            "adtof_threshold_preset": None,
+            "tom_filter_preset": None,
+            "runtime_fallback_status": None,
+            "source_job_id": None,
+        }
         assert summary["stages"] == [
             {
                 "name": "midi_post_processing",
@@ -592,6 +599,13 @@ def test_review_packet_service_builds_public_safe_packet_and_zip(tmp_path) -> No
     assert packet["schema_version"] == "1.0"
     assert packet["status"] == "ready"
     assert packet["manual_eval_seed"]["baseline_report_ref"] == "review:job-1"
+    assert packet["pipeline_config"] == {
+        "mode": "unknown",
+        "adtof_threshold_preset": None,
+        "tom_filter_preset": None,
+        "runtime_fallback_status": None,
+        "source_job_id": None,
+    }
     assert packet["manual_eval_seed"]["processed_event_count"] == 4
     assert packet["validation"]["pdf"]["status"] == "optional_unavailable"
     assert any(item["code"] == "pdf_optional" for item in packet["review_checklist"])

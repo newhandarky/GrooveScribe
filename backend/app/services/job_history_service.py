@@ -11,6 +11,7 @@ from app.models import TranscriptionJob
 from app.models.enums import JobStatus, PipelineStage
 from app.models.mixins import new_uuid
 from app.services.job_queue import JobQueue
+from app.services.pipeline_config import normalize_pipeline_config
 from app.storage.base import StorageAdapter
 
 RETRYABLE_STATUSES = {JobStatus.FAILED, JobStatus.INTERRUPTED, JobStatus.COMPLETED}
@@ -43,7 +44,15 @@ class JobHistoryService:
             )
         )
 
-    def retry_job(self, db: Session, *, job_id: str) -> RetryJobResult:
+    def retry_job(
+        self,
+        db: Session,
+        *,
+        job_id: str,
+        pipeline_mode: str | None = None,
+        adtof_threshold_preset: str | None = None,
+        tom_filter_preset: str | None = None,
+    ) -> RetryJobResult:
         source_job = db.scalar(
             select(TranscriptionJob)
             .options(selectinload(TranscriptionJob.audio_file))
@@ -59,6 +68,15 @@ class JobHistoryService:
         if not self.storage.exists(source_job.audio_file.original_storage_key):
             raise ApiErrorException(ErrorCode.ARTIFACT_NOT_FOUND, details={"job_id": job_id, "artifact": "original_audio"})
 
+        explicit_mode = _clean(pipeline_mode) is not None
+        pipeline_config = normalize_pipeline_config(
+            pipeline_mode=_retry_pipeline_mode(pipeline_mode, source_job),
+            adtof_threshold_preset=adtof_threshold_preset
+            if explicit_mode
+            else adtof_threshold_preset or source_job.adtof_threshold_preset,
+            tom_filter_preset=tom_filter_preset if explicit_mode else tom_filter_preset or source_job.tom_filter_preset,
+            source_job_id=source_job.id,
+        )
         created_at = datetime.now(UTC)
         retry_job = TranscriptionJob(
             id=new_uuid(),
@@ -67,6 +85,11 @@ class JobHistoryService:
             stage=PipelineStage.QUEUED,
             progress=0,
             title=source_job.title,
+            pipeline_mode=pipeline_config.pipeline_mode,
+            adtof_threshold_preset=pipeline_config.adtof_threshold_preset,
+            tom_filter_preset=pipeline_config.tom_filter_preset,
+            runtime_fallback_status=pipeline_config.runtime_fallback_status,
+            source_job_id=source_job.id,
             queued_at=created_at,
             created_at=created_at,
         )
@@ -96,3 +119,18 @@ class JobHistoryService:
         job.error_stage = error_stage
         job.failed_at = datetime.now(UTC)
         db.commit()
+
+
+def _retry_pipeline_mode(pipeline_mode: str | None, source_job: TranscriptionJob) -> str | None:
+    requested_mode = _clean(pipeline_mode)
+    if requested_mode is not None:
+        return requested_mode
+    source_mode = _clean(source_job.pipeline_mode)
+    return source_mode if source_mode != "unknown" else None
+
+
+def _clean(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = value.strip()
+    return text or None

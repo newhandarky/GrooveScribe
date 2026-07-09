@@ -34,6 +34,18 @@ def test_alembic_upgrade_head_and_downgrade_base(tmp_path, monkeypatch) -> None:
         "export_files",
         "alembic_version",
     }.issubset(tables)
+    job_columns = {column["name"] for column in inspect(engine).get_columns("transcription_jobs")}
+    assert {
+        "pipeline_mode",
+        "adtof_threshold_preset",
+        "tom_filter_preset",
+        "runtime_fallback_status",
+        "source_job_id",
+    }.issubset(job_columns)
+    job_indexes = {index["name"] for index in inspect(engine).get_indexes("transcription_jobs")}
+    assert "ix_transcription_jobs_source_job_id" in job_indexes
+    job_foreign_keys = inspect(engine).get_foreign_keys("transcription_jobs")
+    assert not any("source_job_id" in foreign_key.get("constrained_columns", []) for foreign_key in job_foreign_keys)
     with engine.begin() as connection:
         connection.execute(
             text(

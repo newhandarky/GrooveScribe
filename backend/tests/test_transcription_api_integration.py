@@ -201,6 +201,7 @@ def _seed_job(
     status: JobStatus,
     stage: PipelineStage,
     export_types: tuple[ExportFileType, ...] = (),
+    source_job_id: str | None = None,
 ) -> None:
     audio = AudioFile(
         id=f"audio-{job_id}",
@@ -230,6 +231,7 @@ def _seed_job(
         error_stage=PipelineStage.DRUM_TRANSCRIPTION.value
         if status in {JobStatus.FAILED, JobStatus.INTERRUPTED}
         else None,
+        source_job_id=source_job_id,
     )
     session.add(job)
     if status == JobStatus.COMPLETED:
@@ -372,6 +374,7 @@ def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path)
     assert result_body["pipeline"]["quality"]["quality_verdict"]["verdict"] == "draft_candidate_needs_review"
     assert result_body["pipeline"]["quality"]["quality_verdict"]["limitations"] == ["tom_false_positive_likely"]
     assert result_body["pipeline"]["quality"]["quality_verdict"]["musicxml_parseable"] is True
+    assert result_body["pipeline"]["config"]["mode"] == "demo_mock"
     assert result_body["pipeline"]["validation"]["musicxml"]["parseable"] is True
     assert result_body["pipeline"]["validation"]["pdf"]["openable"] is True
     assert "/tmp/" not in str(result_body["pipeline"])
@@ -383,6 +386,7 @@ def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path)
     assert packet_body["schema_version"] == "1.0"
     assert packet_body["status"] == "ready"
     assert packet_body["manual_eval_seed"]["artifact_ref"] == f"review:{job_id}"
+    assert packet_body["pipeline_config"]["mode"] == "demo_mock"
     assert packet_body["quality"]["raw_event_count"] == 7
     assert packet_body["quality"]["postprocess_filters"]["tom_false_positive"]["preset"] == "tom_guard_v1"
     assert packet_body["validation"]["musicxml"]["status"] == "parseable"
@@ -406,6 +410,29 @@ def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path)
     with session_factory() as session:
         job = session.scalar(select(TranscriptionJob).where(TranscriptionJob.id == job_id))
         assert job.status == JobStatus.COMPLETED
+
+
+def test_upload_api_saves_true_ai_product_config(tmp_path: Path) -> None:
+    client, session_factory, _storage = _client(tmp_path)
+
+    response = client.post(
+        "/api/v1/transcriptions",
+        files={"file": ("demo.wav", b"fake-wav", "audio/wav")},
+        data={
+            "pipeline_mode": "true_ai",
+            "adtof_threshold_preset": "separated_v1",
+            "tom_filter_preset": "tom_guard_v1",
+        },
+    )
+
+    assert response.status_code == 202
+    with session_factory() as session:
+        job = session.scalar(select(TranscriptionJob).where(TranscriptionJob.id == response.json()["job_id"]))
+        assert job is not None
+        assert job.pipeline_mode == "true_ai"
+        assert job.adtof_threshold_preset == "separated_v1"
+        assert job.tom_filter_preset == "tom_guard_v1"
+        assert job.runtime_fallback_status == "not_applied"
 
 
 def test_upload_api_local_queue_failure_marks_job_failed(tmp_path: Path) -> None:
@@ -454,6 +481,43 @@ def test_result_api_uses_audio_contract(tmp_path: Path) -> None:
     assert "stage_reports" not in body
     assert body["audio"]["file_name"] == "demo.wav"
     assert body["preview"]["musicxml_url"] == "/api/v1/transcriptions/job-result/download/musicxml"
+
+
+def test_result_api_source_missing_returns_safe_compare_shape(tmp_path: Path) -> None:
+    client, session_factory, storage = _client(tmp_path)
+    with session_factory() as session:
+        _seed_job(
+            session,
+            job_id="job-rerun",
+            status=JobStatus.COMPLETED,
+            stage=PipelineStage.COMPLETED,
+            export_types=(ExportFileType.MUSICXML,),
+            source_job_id="missing-source",
+        )
+    storage.put_bytes(b"<score-partwise />", "jobs/job-rerun/notation/score.musicxml", "application/vnd.recordare.musicxml+xml")
+
+    response = client.get("/api/v1/transcriptions/job-rerun")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_result_summary"] == {
+        "job_id": "missing-source",
+        "status": "missing",
+        "pipeline_config": {
+            "mode": "unknown",
+            "adtof_threshold_preset": None,
+            "tom_filter_preset": None,
+            "runtime_fallback_status": None,
+            "source_job_id": None,
+        },
+        "quality_verdict": None,
+        "processed_drum_counts": {},
+        "tom_filter": None,
+        "musicxml_parseable": None,
+    }
+    assert "/tmp/" not in str(body["source_result_summary"])
+    assert "/Users/" not in str(body["source_result_summary"])
+    assert "command_template" not in str(body["source_result_summary"])
 
 
 def test_review_packet_api_rejects_non_completed_job(tmp_path: Path) -> None:

@@ -76,10 +76,88 @@ def test_upload_service_creates_job_audio_file_and_original_artifact(tmp_path) -
         assert job is not None
         assert job.status == JobStatus.QUEUED
         assert job.stage == PipelineStage.QUEUED
+        assert job.pipeline_mode is None
+        assert job.adtof_threshold_preset is None
+        assert job.tom_filter_preset is None
         assert audio is not None
         assert audio.original_filename == "demo.wav"
         assert storage.exists(audio.original_storage_key) is True
         assert queue.calls == [{"job_id": result.job_id, "pipeline_config_id": None}]
+
+
+def test_upload_service_saves_true_ai_product_config(tmp_path) -> None:
+    settings = _settings(tmp_path)
+    storage = LocalStorageAdapter(settings.storage_root)
+    queue = RecordingQueue()
+    service = UploadService(
+        settings=settings,
+        storage=storage,
+        queue=queue,
+        metadata_inspector=FakeMetadataInspector(),
+    )
+
+    with _session() as session:
+        result = service.create_upload_job(
+            db=session,
+            filename="demo.wav",
+            content_type="audio/wav",
+            content=b"fake-wav",
+            pipeline_mode="true_ai",
+        )
+
+        job = session.scalar(select(TranscriptionJob).where(TranscriptionJob.id == result.job_id))
+
+        assert job is not None
+        assert job.pipeline_mode == "true_ai"
+        assert job.adtof_threshold_preset == "separated_v1"
+        assert job.tom_filter_preset == "tom_guard_v1"
+        assert job.runtime_fallback_status == "not_applied"
+
+
+def test_upload_service_rejects_true_ai_presets_without_mode(tmp_path) -> None:
+    service = UploadService(
+        settings=_settings(tmp_path),
+        storage=LocalStorageAdapter(tmp_path / "storage"),
+        queue=NoopJobQueue(),
+        metadata_inspector=FakeMetadataInspector(),
+    )
+
+    with _session() as session:
+        try:
+            service.create_upload_job(
+                db=session,
+                filename="demo.wav",
+                content_type="audio/wav",
+                content=b"fake-wav",
+                adtof_threshold_preset="separated_v1",
+            )
+        except ApiErrorException as exc:
+            assert exc.code == ErrorCode.VALIDATION_ERROR
+        else:
+            raise AssertionError("expected VALIDATION_ERROR")
+
+
+def test_upload_service_rejects_public_unknown_pipeline_mode(tmp_path) -> None:
+    service = UploadService(
+        settings=_settings(tmp_path),
+        storage=LocalStorageAdapter(tmp_path / "storage"),
+        queue=NoopJobQueue(),
+        metadata_inspector=FakeMetadataInspector(),
+    )
+
+    with _session() as session:
+        try:
+            service.create_upload_job(
+                db=session,
+                filename="demo.wav",
+                content_type="audio/wav",
+                content=b"fake-wav",
+                pipeline_mode="unknown",
+            )
+        except ApiErrorException as exc:
+            assert exc.code == ErrorCode.VALIDATION_ERROR
+        else:
+            raise AssertionError("expected VALIDATION_ERROR")
 
 
 def test_upload_service_rejects_invalid_file_type(tmp_path) -> None:

@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings, get_settings
@@ -76,6 +76,10 @@ def _seed_job(
     created_at: datetime | None = None,
     storage_key: str | None = None,
     export_statuses: dict[ExportFileType, ExportFileStatus] | None = None,
+    pipeline_mode: str | None = None,
+    adtof_threshold_preset: str | None = None,
+    tom_filter_preset: str | None = None,
+    runtime_fallback_status: str | None = None,
 ) -> TranscriptionJob:
     key = storage_key or f"jobs/{job_id}/original/demo.wav"
     audio = AudioFile(
@@ -106,6 +110,10 @@ def _seed_job(
         error_stage=PipelineStage.DRUM_TRANSCRIPTION.value
         if status in {JobStatus.FAILED, JobStatus.INTERRUPTED}
         else None,
+        pipeline_mode=pipeline_mode,
+        adtof_threshold_preset=adtof_threshold_preset,
+        tom_filter_preset=tom_filter_preset,
+        runtime_fallback_status=runtime_fallback_status,
         **job_kwargs,
     )
     session.add(job)
@@ -166,6 +174,7 @@ def test_lists_recent_jobs_with_redacted_summaries(tmp_path: Path) -> None:
     body = response.json()
     assert body["limit"] == 2
     assert [job["job_id"] for job in body["jobs"]] == ["completed", "failed"]
+    assert body["jobs"][0]["pipeline_config"]["mode"] == "unknown"
     assert body["jobs"][0]["exports"] == {"midi": "available", "musicxml": "available"}
     assert body["jobs"][1]["error"] == {
         "code": "PIPELINE_FAILED",
@@ -200,6 +209,91 @@ def test_retry_creates_new_job_from_original_audio_without_mutating_source(tmp_p
         assert retry.status == JobStatus.QUEUED
         assert retry.stage == PipelineStage.QUEUED
         assert retry.audio_file_id == source.audio_file_id
+        assert retry.source_job_id == source.id
+
+
+def test_retry_copies_or_overrides_pipeline_config(tmp_path: Path) -> None:
+    client, session_factory, storage, _queue = _client(tmp_path)
+    with session_factory() as session:
+        source = _seed_job(
+            session,
+            job_id="completed",
+            status=JobStatus.COMPLETED,
+            pipeline_mode="demo_mock",
+            runtime_fallback_status="not_required",
+        )
+        storage.put_bytes(b"audio", source.audio_file.original_storage_key, "audio/wav")
+
+    copy_response = client.post("/api/v1/transcriptions/completed/retry")
+    override_response = client.post(
+        "/api/v1/transcriptions/completed/retry",
+        data={
+            "pipeline_mode": "true_ai",
+            "adtof_threshold_preset": "separated_v1",
+            "tom_filter_preset": "tom_guard_v1",
+        },
+    )
+
+    assert copy_response.status_code == 202
+    assert override_response.status_code == 202
+    with session_factory() as session:
+        copied = session.get(TranscriptionJob, copy_response.json()["job_id"])
+        overridden = session.get(TranscriptionJob, override_response.json()["job_id"])
+        assert copied is not None
+        assert overridden is not None
+        assert copied.source_job_id == "completed"
+        assert copied.pipeline_mode == "demo_mock"
+        assert copied.runtime_fallback_status == "not_required"
+        assert overridden.source_job_id == "completed"
+        assert overridden.pipeline_mode == "true_ai"
+        assert overridden.adtof_threshold_preset == "separated_v1"
+        assert overridden.tom_filter_preset == "tom_guard_v1"
+        assert overridden.runtime_fallback_status == "not_applied"
+
+
+def test_retry_can_switch_true_ai_source_back_to_demo_mock(tmp_path: Path) -> None:
+    client, session_factory, storage, _queue = _client(tmp_path)
+    with session_factory() as session:
+        source = _seed_job(
+            session,
+            job_id="true-ai-source",
+            status=JobStatus.COMPLETED,
+            pipeline_mode="true_ai",
+            adtof_threshold_preset="separated_v1",
+            tom_filter_preset="tom_guard_v1",
+            runtime_fallback_status="not_applied",
+        )
+        storage.put_bytes(b"audio", source.audio_file.original_storage_key, "audio/wav")
+
+    response = client.post(
+        "/api/v1/transcriptions/true-ai-source/retry",
+        data={"pipeline_mode": "demo_mock"},
+    )
+
+    assert response.status_code == 202
+    with session_factory() as session:
+        retry = session.get(TranscriptionJob, response.json()["job_id"])
+        assert retry is not None
+        assert retry.source_job_id == "true-ai-source"
+        assert retry.pipeline_mode == "demo_mock"
+        assert retry.adtof_threshold_preset is None
+        assert retry.tom_filter_preset is None
+        assert retry.runtime_fallback_status == "not_required"
+
+
+def test_retry_rejects_public_unknown_pipeline_mode(tmp_path: Path) -> None:
+    client, session_factory, storage, _queue = _client(tmp_path)
+    with session_factory() as session:
+        source = _seed_job(session, job_id="completed", status=JobStatus.COMPLETED)
+        storage.put_bytes(b"audio", source.audio_file.original_storage_key, "audio/wav")
+
+    response = client.post(
+        "/api/v1/transcriptions/completed/retry",
+        data={"pipeline_mode": "unknown"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
 def test_retry_allows_completed_and_interrupted_jobs(tmp_path: Path) -> None:

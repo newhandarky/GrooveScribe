@@ -22,6 +22,11 @@ from app.models.enums import (
     PipelineStage,
 )
 from app.services.local_pipeline_runner import LocalPipelineRunResult, LocalPipelineRunnerError
+from app.services.pipeline_config import (
+    PIPELINE_MODE_DEMO_MOCK,
+    PIPELINE_MODE_TRUE_AI,
+    pipeline_config_for_job,
+)
 from app.storage import ArtifactRef, ArtifactType, LocalStorageAdapter, StorageAdapter, build_job_artifact_key
 from app.storage.types import CONTENT_TYPE_BY_ARTIFACT_TYPE
 
@@ -119,6 +124,7 @@ class PipelineServiceRunner:
         pipeline_config_id: str | None = None,
     ) -> LocalPipelineRunResult:
         job = self._load_job(db, job_id)
+        pipeline_config = pipeline_config_for_job(job)
         workspace = self._workspace_path(job.id)
         input_path = self._prepare_input_file(job, workspace)
         output_dir = workspace / "output"
@@ -131,6 +137,7 @@ class PipelineServiceRunner:
             input_path=input_path,
             output_dir=output_dir,
             title=job.title or "GrooveScribe Drum Draft",
+            job=job,
         )
         try:
             process = self._run_process(command)
@@ -141,6 +148,7 @@ class PipelineServiceRunner:
                 payload={},
                 process=None,
                 pipeline_config_id=pipeline_config_id,
+                pipeline_config=pipeline_config,
                 error_code=exc.error_code,
                 error_stage=exc.error_stage,
             )
@@ -156,6 +164,7 @@ class PipelineServiceRunner:
                 payload={},
                 process=process,
                 pipeline_config_id=pipeline_config_id,
+                pipeline_config=pipeline_config,
                 error_code=ErrorCode.PIPELINE_FAILED.value,
                 error_stage=PipelineStage.PREPROCESSING.value,
                 failure_reason="invalid_pipeline_json",
@@ -166,6 +175,7 @@ class PipelineServiceRunner:
                 internal_error_ref=log_ref.storage_key,
             ) from exc
 
+        payload.setdefault("pipeline_config", pipeline_config)
         log_ref = self._store_pipeline_log(job.id, output_dir, payload, process, pipeline_config_id)
 
         if process.returncode != 0 or payload.get("status") == "failed":
@@ -186,6 +196,7 @@ class PipelineServiceRunner:
                 payload=payload,
                 process=process,
                 pipeline_config_id=pipeline_config_id,
+                pipeline_config=pipeline_config,
                 error_code=exc.error_code,
                 error_stage=exc.error_stage,
                 failure_reason=exc.error_code,
@@ -204,7 +215,14 @@ class PipelineServiceRunner:
         db.flush()
         return LocalPipelineRunResult(job_id=job.id, pipeline_log_storage_key=log_ref.storage_key)
 
-    def build_command(self, *, input_path: Path, output_dir: Path, title: str) -> list[str]:
+    def build_command(
+        self,
+        *,
+        input_path: Path,
+        output_dir: Path,
+        title: str,
+        job: TranscriptionJob | None = None,
+    ) -> list[str]:
         command = [
             self.settings.ai_python_path,
             str(self.pipeline_script_path),
@@ -227,8 +245,15 @@ class PipelineServiceRunner:
             "--adtof-timeout-seconds",
             str(self.settings.pipeline_adtof_timeout_seconds),
         ]
-        if self.settings.pipeline_mock_ai:
+        mode = job.pipeline_mode if job and job.pipeline_mode in {PIPELINE_MODE_DEMO_MOCK, PIPELINE_MODE_TRUE_AI} else None
+        use_mock = mode == PIPELINE_MODE_DEMO_MOCK if mode else self.settings.pipeline_mock_ai
+        if use_mock:
             command.append("--mock-ai")
+        if job and mode == PIPELINE_MODE_TRUE_AI:
+            if job.adtof_threshold_preset:
+                command.extend(["--adtof-threshold-preset", job.adtof_threshold_preset])
+            if job.tom_filter_preset:
+                command.extend(["--tom-filter-preset", job.tom_filter_preset])
         if self.settings.pipeline_adtof_command_template:
             command.extend(["--adtof-command-template", self.settings.pipeline_adtof_command_template])
         if self.settings.pipeline_adtof_checkpoint_path:
@@ -374,6 +399,7 @@ class PipelineServiceRunner:
         pipeline_config_id: str | None,
         error_code: str,
         error_stage: str,
+        pipeline_config: dict | None = None,
         failure_reason: str | None = None,
     ) -> ArtifactRef:
         failure_payload = {
@@ -381,6 +407,7 @@ class PipelineServiceRunner:
             "status": "failed",
             "runner": "backend.pipeline_service_subprocess",
             "pipeline_config_id": pipeline_config_id,
+            "pipeline_config": pipeline_config or payload.get("pipeline_config") or {},
             "error": {
                 "code": error_code,
                 "stage": error_stage,

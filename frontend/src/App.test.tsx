@@ -57,6 +57,7 @@ function runtimeFixture(overrides: Partial<RuntimePreflightResponse> = {}): Runt
 function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): TranscriptionResultResponse {
   return {
     job_id: 'job-1',
+    source_job_id: null,
     status: 'completed',
     stage: 'completed',
     title: 'Demo Groove',
@@ -109,6 +110,13 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
     pipeline: {
       mode: 'mock',
       status: 'completed',
+      config: {
+        mode: 'demo_mock',
+        adtof_threshold_preset: null,
+        tom_filter_preset: null,
+        runtime_fallback_status: 'not_required',
+        source_job_id: null,
+      },
       stages: [
         {
           name: 'midi_post_processing',
@@ -171,6 +179,7 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
       },
       pipeline_log_available: true,
     },
+    source_result_summary: null,
     ...overrides,
   };
 }
@@ -178,6 +187,7 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
 function jobSummaryFixture(overrides: Partial<TranscriptionJobSummary> = {}): TranscriptionJobSummary {
   return {
     job_id: 'job-1',
+    source_job_id: null,
     title: 'Demo Groove',
     file_name: 'demo.wav',
     status: 'completed',
@@ -187,6 +197,13 @@ function jobSummaryFixture(overrides: Partial<TranscriptionJobSummary> = {}): Tr
     completed_at: '2026-07-02T00:01:00Z',
     failed_at: null,
     exports: { midi: 'available', musicxml: 'available', pdf: 'failed' },
+    pipeline_config: {
+      mode: 'demo_mock',
+      adtof_threshold_preset: null,
+      tom_filter_preset: null,
+      runtime_fallback_status: 'not_required',
+      source_job_id: null,
+    },
     error: null,
     ...overrides,
   };
@@ -268,15 +285,43 @@ describe('local app smoke rendering', () => {
         uploading={false}
         selectedFile={{ name: 'demo.wav' } as File}
         title=""
+        pipelineMode="demo_mock"
         runtime={runtimeFixture()}
+        trueAiReady={false}
         onFileChange={() => undefined}
         onTitleChange={() => undefined}
+        onPipelineModeChange={() => undefined}
         onSubmit={() => undefined}
       />,
     );
 
     expect(html).toContain('開始本機分析');
-    expect(html).not.toContain('disabled=""');
+    expect(html).toContain('Demo mode');
+    expect(html).toContain('True-AI runtime 尚未 ready');
+    expect(html).not.toContain('<button class="primaryButton" type="submit" disabled=""');
+  });
+
+  it('shows the true-AI V1 product preset when runtime is ready', () => {
+    const html = renderToStaticMarkup(
+      <UploadPanel
+        canUpload
+        uploading={false}
+        selectedFile={{ name: 'demo.mp3' } as File}
+        title=""
+        pipelineMode="true_ai"
+        runtime={runtimeFixture({ status: 'ready', true_ai_ready: true })}
+        trueAiReady
+        onFileChange={() => undefined}
+        onTitleChange={() => undefined}
+        onPipelineModeChange={() => undefined}
+        onSubmit={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('True-AI V1 preset');
+    expect(html).toContain('separated_v1');
+    expect(html).toContain('tom_guard_v1');
+    expectPublicSafe(html);
   });
 
   it('keeps upload disabled when runtime is not ready', () => {
@@ -286,9 +331,12 @@ describe('local app smoke rendering', () => {
         uploading={false}
         selectedFile={{ name: 'demo.wav' } as File}
         title=""
+        pipelineMode="demo_mock"
         runtime={runtimeFixture({ status: 'not_ready', mock_ai_ready: false })}
+        trueAiReady={false}
         onFileChange={() => undefined}
         onTitleChange={() => undefined}
+        onPipelineModeChange={() => undefined}
         onSubmit={() => undefined}
       />,
     );
@@ -303,6 +351,8 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('Demo Groove');
     expect(html).toContain('MOCK');
     expect(html).toContain('Pipeline summary');
+    expect(html).toContain('Pipeline config');
+    expect(html).toContain('Demo / mock');
     expect(html).toContain('Review packet');
     expect(html).toContain('/api/v1/transcriptions/job-1/review-packet');
     expect(html).toContain('/api/v1/transcriptions/job-1/download/review-packet');
@@ -348,6 +398,13 @@ describe('local app smoke rendering', () => {
           pipeline: {
             mode: 'true_ai',
             status: 'completed',
+            config: {
+              mode: 'true_ai',
+              adtof_threshold_preset: 'separated_v1',
+              tom_filter_preset: 'tom_guard_v1',
+              runtime_fallback_status: 'not_applied',
+              source_job_id: null,
+            },
             stages: [
               {
                 name: 'drum_transcription',
@@ -423,6 +480,8 @@ describe('local app smoke rendering', () => {
     );
 
     expect(html).toContain('TRUE AI');
+    expect(html).toContain('separated_v1');
+    expect(html).toContain('tom_guard_v1');
     expect(html).toContain('草稿需人工檢查');
     expect(html).toContain('3/5');
     expect(html).toContain('Tom 誤判偏多');
@@ -452,6 +511,13 @@ describe('local app smoke rendering', () => {
           pipeline: {
             mode: 'unknown',
             status: 'completed',
+            config: {
+              mode: 'unknown',
+              adtof_threshold_preset: null,
+              tom_filter_preset: null,
+              runtime_fallback_status: null,
+              source_job_id: null,
+            },
             stages: [],
             artifacts: [],
             warnings: [],
@@ -536,6 +602,69 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('Tom filter');
     expect(html).toContain('Tom 誤判仍偏多');
     expect(html).not.toContain('no_safe_tom_filter_change');
+    expectPublicSafe(html);
+  });
+
+  it('renders rerun comparison without exposing artifact paths', () => {
+    const html = renderToStaticMarkup(
+      <ResultCard
+        trueAiReady
+        result={resultFixture({
+          source_job_id: 'job-source',
+          source_result_summary: {
+            job_id: 'job-source',
+            status: 'completed',
+            pipeline_config: {
+              mode: 'demo_mock',
+              adtof_threshold_preset: null,
+              tom_filter_preset: null,
+              runtime_fallback_status: 'not_required',
+              source_job_id: null,
+            },
+            quality_verdict: {
+              verdict: 'draft_candidate_needs_review',
+              usability_score: 3,
+              limitations: ['tom_false_positive_likely'],
+            },
+            processed_drum_counts: { kick: 3, snare: 3, tom: 7 },
+            tom_filter: null,
+            musicxml_parseable: true,
+          },
+        })}
+        onRerun={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('沿用設定重跑');
+    expect(html).toContain('True-AI V1');
+    expect(html).toContain('與前一次比較');
+    expect(html).toContain('Previous tom');
+    expect(html).toContain('Current tom');
+    expectPublicSafe(html);
+  });
+
+  it('renders missing source comparison summary without crashing', () => {
+    const html = renderToStaticMarkup(
+      <ResultCard
+        result={resultFixture({
+          source_job_id: 'missing-source',
+          source_result_summary: {
+            job_id: 'missing-source',
+            status: 'missing',
+            quality_verdict: null,
+            tom_filter: null,
+            musicxml_parseable: null,
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain('與前一次比較');
+    expect(html).toContain('missing-source');
+    expect(html).toContain('Previous verdict');
+    expect(html).toContain('unknown');
+    expect(html).toContain('Previous tom');
+    expect(html).toContain('需檢查');
     expectPublicSafe(html);
   });
 

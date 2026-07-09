@@ -33,7 +33,16 @@ def _settings(tmp_path: Path, **overrides) -> Settings:
     return Settings(**values)
 
 
-def _seed_job(session_factory, storage: LocalStorageAdapter, job_id: str = "job-pipeline") -> None:
+def _seed_job(
+    session_factory,
+    storage: LocalStorageAdapter,
+    job_id: str = "job-pipeline",
+    *,
+    pipeline_mode: str | None = None,
+    adtof_threshold_preset: str | None = None,
+    tom_filter_preset: str | None = None,
+    runtime_fallback_status: str | None = None,
+) -> None:
     storage.put_bytes(b"fake audio", f"jobs/{job_id}/original/demo.wav", "audio/wav")
     with session_factory() as session:
         audio = AudioFile(
@@ -51,6 +60,10 @@ def _seed_job(session_factory, storage: LocalStorageAdapter, job_id: str = "job-
             stage=PipelineStage.QUEUED,
             progress=0,
             title="Demo Song",
+            pipeline_mode=pipeline_mode,
+            adtof_threshold_preset=adtof_threshold_preset,
+            tom_filter_preset=tom_filter_preset,
+            runtime_fallback_status=runtime_fallback_status,
         )
         session.add(job)
         session.commit()
@@ -186,11 +199,74 @@ def test_pipeline_service_builds_subprocess_command(tmp_path: Path) -> None:
     ]
 
 
+def test_pipeline_service_builds_true_ai_command_from_job_config(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    runner = PipelineServiceRunner(settings=settings, pipeline_script_path=Path("/repo/scripts/run_local_pipeline.py"))
+    job = TranscriptionJob(
+        id="job-true-ai",
+        pipeline_mode="true_ai",
+        adtof_threshold_preset="separated_v1",
+        tom_filter_preset="tom_guard_v1",
+    )
+
+    command = runner.build_command(
+        input_path=Path("/tmp/input.wav"),
+        output_dir=Path("/tmp/output"),
+        title="Demo",
+        job=job,
+    )
+
+    assert "--mock-ai" not in command
+    assert command[command.index("--adtof-threshold-preset") + 1] == "separated_v1"
+    assert command[command.index("--tom-filter-preset") + 1] == "tom_guard_v1"
+
+
+def test_pipeline_service_builds_demo_mock_command_from_job_config(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, pipeline_mock_ai=False)
+    runner = PipelineServiceRunner(settings=settings, pipeline_script_path=Path("/repo/scripts/run_local_pipeline.py"))
+    job = TranscriptionJob(id="job-demo", pipeline_mode="demo_mock")
+
+    command = runner.build_command(
+        input_path=Path("/tmp/input.wav"),
+        output_dir=Path("/tmp/output"),
+        title="Demo",
+        job=job,
+    )
+
+    assert "--mock-ai" in command
+    assert "--adtof-threshold-preset" not in command
+    assert "--tom-filter-preset" not in command
+
+
+def test_pipeline_service_treats_unknown_job_config_as_global_default(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, pipeline_mock_ai=True)
+    runner = PipelineServiceRunner(settings=settings, pipeline_script_path=Path("/repo/scripts/run_local_pipeline.py"))
+    job = TranscriptionJob(id="job-legacy", pipeline_mode="unknown")
+
+    command = runner.build_command(
+        input_path=Path("/tmp/input.wav"),
+        output_dir=Path("/tmp/output"),
+        title="Demo",
+        job=job,
+    )
+
+    assert "--mock-ai" in command
+    assert "--adtof-threshold-preset" not in command
+    assert "--tom-filter-preset" not in command
+
+
 def test_pipeline_service_runs_fake_subprocess_and_writes_metadata(tmp_path: Path) -> None:
     session_factory = _session_factory(tmp_path)
     settings = _settings(tmp_path)
     storage = LocalStorageAdapter(settings.storage_root)
-    _seed_job(session_factory, storage)
+    _seed_job(
+        session_factory,
+        storage,
+        pipeline_mode="true_ai",
+        adtof_threshold_preset="separated_v1",
+        tom_filter_preset="tom_guard_v1",
+        runtime_fallback_status="not_applied",
+    )
     calls = []
 
     def fake_process(command, **_kwargs):
@@ -229,6 +305,13 @@ def test_pipeline_service_runs_fake_subprocess_and_writes_metadata(tmp_path: Pat
         assert storage.exists("jobs/job-pipeline/exports/score.pdf")
         log_payload = _read_storage_json(storage, "jobs/job-pipeline/logs/pipeline.json")
         assert log_payload["artifacts"]["musicxml"] == "jobs/job-pipeline/notation/score.musicxml"
+        assert log_payload["pipeline_config"] == {
+            "mode": "true_ai",
+            "adtof_threshold_preset": "separated_v1",
+            "tom_filter_preset": "tom_guard_v1",
+            "runtime_fallback_status": "not_applied",
+            "source_job_id": None,
+        }
         assert str(tmp_path) not in json.dumps(log_payload)
 
 

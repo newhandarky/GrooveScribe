@@ -60,12 +60,14 @@ class ReviewPacketService:
     def build_notes_markdown(self, packet: dict) -> str:
         quality = packet.get("quality") or {}
         validation = packet.get("validation") or {}
+        pipeline_config = packet.get("pipeline_config") or {}
         lines = [
             "# GrooveScribe Review Packet",
             "",
             f"- Job: `{packet['job'].get('job_id')}`",
             f"- Title: `{packet['job'].get('title') or 'untitled'}`",
             f"- Runtime mode: `{packet['manual_eval_seed'].get('runtime_mode', 'unknown')}`",
+            f"- Pipeline config: `{pipeline_config.get('mode', 'unknown')}`",
             f"- Artifact ref: `{packet['manual_eval_seed'].get('artifact_ref', '')}`",
             "",
             "## Exports",
@@ -154,6 +156,7 @@ class ReviewPacketService:
                 "channels": job.audio_file.channels,
             },
             "exports": exports,
+            "pipeline_config": pipeline.get("config"),
             "quality": quality,
             "validation": validation,
             "review_checklist": _review_checklist(flags, warnings, validation, exports),
@@ -230,6 +233,7 @@ def _manual_eval_seed(job: TranscriptionJob, pipeline: dict, quality: dict | Non
         "date": "",
         "fixture_name": _safe_filename(job.audio_file.original_filename),
         "runtime_mode": pipeline.get("mode", "unknown"),
+        "pipeline_config": pipeline.get("config", {}),
         "pipeline_version": job.pipeline_version,
         "runtime_version": "",
         "baseline_report_ref": f"review:{job.id}",

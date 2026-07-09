@@ -34,8 +34,17 @@ class JobStatusResponse(BaseModel):
     failed_at: datetime | None = None
 
 
+class PipelineConfigSummary(BaseModel):
+    mode: str = "unknown"
+    adtof_threshold_preset: str | None = None
+    tom_filter_preset: str | None = None
+    runtime_fallback_status: str | None = None
+    source_job_id: str | None = None
+
+
 class TranscriptionJobSummary(BaseModel):
     job_id: str
+    source_job_id: str | None = None
     title: str | None = None
     file_name: str
     status: str
@@ -45,6 +54,7 @@ class TranscriptionJobSummary(BaseModel):
     completed_at: datetime | None = None
     failed_at: datetime | None = None
     exports: dict[str, str] = Field(default_factory=dict)
+    pipeline_config: PipelineConfigSummary = Field(default_factory=PipelineConfigSummary)
     error: JobErrorResponse | None = None
 
 
@@ -155,6 +165,7 @@ class PipelineSummaryResult(BaseModel):
     stages: list[PipelineStageSummary] = Field(default_factory=list)
     artifacts: list[PipelineArtifactSummary] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    config: PipelineConfigSummary = Field(default_factory=PipelineConfigSummary)
     quality: PipelineQualitySummary | None = None
     validation: PipelineValidationSummary | None = None
     pipeline_log_available: bool = False
@@ -162,6 +173,7 @@ class PipelineSummaryResult(BaseModel):
 
 class TranscriptionResultResponse(BaseModel):
     job_id: str
+    source_job_id: str | None = None
     status: str
     stage: str
     title: str | None = None
@@ -172,6 +184,7 @@ class TranscriptionResultResponse(BaseModel):
     preview: PreviewResult
     exports: list[ExportFileResult]
     pipeline: PipelineSummaryResult | None = None
+    source_result_summary: dict | None = None
 
 
 class ReviewPacketResponse(BaseModel):
@@ -180,6 +193,7 @@ class ReviewPacketResponse(BaseModel):
     job: dict
     audio: dict
     exports: list[dict]
+    pipeline_config: dict | None = None
     quality: dict | None = None
     validation: dict | None = None
     review_checklist: list[dict] = Field(default_factory=list)

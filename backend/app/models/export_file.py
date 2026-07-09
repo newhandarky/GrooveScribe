@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import BigInteger, Enum, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.models.enums import ExportFileStatus, ExportFileType
 from app.models.mixins import CreatedAtMixin, UuidPrimaryKeyMixin
+
+if TYPE_CHECKING:
+    from app.models.transcription_job import TranscriptionJob
 
 
 class ExportFile(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
