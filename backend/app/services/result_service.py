@@ -9,6 +9,7 @@ from app.models.enums import ExportFileStatus, ExportFileType, JobStatus
 from app.services.job_query_service import JobQueryService
 from app.services.pipeline_config import PIPELINE_MODE_DEMO_MOCK, PIPELINE_MODE_TRUE_AI, pipeline_config_for_job
 from app.services.pipeline_log_read_model import PipelineLogReadService
+from app.services.review_timeline_service import ReviewTimelineService
 from app.storage.base import StorageAdapter
 from app.storage.errors import ArtifactInvalidError, ArtifactNotFoundError, StorageReadFailedError
 
@@ -65,6 +66,33 @@ class ResultService:
 
     def download_url(self, job_id: str, export_type: str) -> str:
         return f"{self.settings.api_v1_prefix}/transcriptions/{job_id}/download/{export_type}"
+
+    def review_audio_url(self, job: TranscriptionJob, audio_kind: str) -> str | None:
+        if self.storage is None:
+            return None
+        if audio_kind == "original":
+            storage_key = job.audio_file.original_storage_key
+        elif audio_kind == "drums_stem" and job.drum_track:
+            storage_key = job.drum_track.drums_stem_storage_key
+        else:
+            return None
+        try:
+            if not storage_key or not self.storage.exists(storage_key):
+                return None
+        except Exception:
+            return None
+        return f"{self.settings.api_v1_prefix}/transcriptions/{job.id}/review-audio/{audio_kind}"
+
+    def review_timeline(self, job: TranscriptionJob) -> dict:
+        if self.storage is None:
+            return {"schema_version": "1.0", "timing_source": "unavailable", "tempo_bpm": None, "audio_sources": [], "measures": []}
+        return ReviewTimelineService(storage=self.storage).build(
+            job,
+            audio_urls={
+                "original": self.review_audio_url(job, "original"),
+                "drums_stem": self.review_audio_url(job, "drums_stem"),
+            },
+        )
 
     def pipeline_summary(self, job: TranscriptionJob) -> dict | None:
         pipeline_log = None
@@ -197,7 +225,13 @@ def _pipeline_quality_summary(pipeline_log, job: TranscriptionJob, validation: d
         "processed_drum_counts": {},
         "duration_seconds": job.audio_file.duration_seconds,
         "tempo_bpm": job.drum_track.estimated_bpm,
+        "tempo_source": None,
         "estimated_measure_count": None,
+        "musicxml_parseable": None,
+        "visual_qa_status": None,
+        "visual_qa_reason_code": None,
+        "notation_readability": {},
+        "notation_chart": {},
         "quality_flags": _quality_flag_subset(flags),
         "warnings": sorted(set(flags)),
         "postprocess_filters": {},
@@ -221,9 +255,10 @@ def _pipeline_validation_summary(pipeline_log) -> dict | None:
 def _sanitize_validation_summary(raw: dict) -> dict | None:
     musicxml = _sanitize_validation_item(raw.get("musicxml"), artifact="musicxml")
     pdf = _sanitize_validation_item(raw.get("pdf"), artifact="pdf")
-    if musicxml is None and pdf is None:
+    visual_qa = _sanitize_visual_qa(raw.get("visual_qa"))
+    if musicxml is None and pdf is None and visual_qa is None:
         return None
-    return {
+    summary = {
         "musicxml": musicxml
         or {
             "available": False,
@@ -239,6 +274,30 @@ def _sanitize_validation_summary(raw: dict) -> dict | None:
             "error_code": "pdf_unavailable",
             "warnings": ["pdf_optional_unavailable"],
         },
+    }
+    if visual_qa is not None:
+        summary["visual_qa"] = visual_qa
+    return summary
+
+
+def _sanitize_visual_qa(value: object) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    status = _safe_code(value.get("status"))
+    if status not in {
+        "completed",
+        "musescore_gui_session_unavailable",
+        "renderer_unavailable",
+        "render_failed",
+        "not_requested",
+    }:
+        status = "not_requested"
+    reason_code = _safe_code(value.get("reason_code"))
+    return {
+        "status": status,
+        "reason_code": reason_code,
+        "pdf_available": bool(value.get("pdf_available")),
+        "first_page_png_available": bool(value.get("first_page_png_available")),
     }
 
 
@@ -274,7 +333,13 @@ def _quality_from_midi_report(report: dict) -> dict | None:
         "processed_drum_counts": _int_dict(report.get("processed_drum_counts")),
         "duration_seconds": None,
         "tempo_bpm": _float_or_none(report.get("estimated_bpm")),
+        "tempo_source": None,
         "estimated_measure_count": None,
+        "musicxml_parseable": None,
+        "visual_qa_status": None,
+        "visual_qa_reason_code": None,
+        "notation_readability": {},
+        "notation_chart": {},
         "quality_flags": _quality_flag_subset(_string_list(report.get("quality_flags")) or warnings),
         "warnings": sorted(set(warnings)),
         "postprocess_filters": _sanitize_postprocess_filters(report.get("postprocess_filters")),
@@ -292,10 +357,20 @@ def _sanitize_quality_summary(raw: dict) -> dict:
         "duration_seconds": _float_or_none(raw.get("duration_seconds")),
         "tempo_bpm": _float_or_none(raw.get("tempo_bpm")),
         "estimated_measure_count": _int_or_none(raw.get("estimated_measure_count")),
+        "notation_readability": _sanitize_notation_readability(raw.get("notation_readability")),
+        "notation_chart": _sanitize_notation_chart(raw.get("notation_chart")),
         "quality_flags": _quality_flag_subset(flags),
         "warnings": sorted(set(warnings)),
         "postprocess_filters": _sanitize_postprocess_filters(raw.get("postprocess_filters")),
     }
+    for key, sanitizer in (
+        ("musicxml_parseable", _bool_or_none),
+        ("visual_qa_status", _safe_code),
+        ("visual_qa_reason_code", _safe_code),
+        ("tempo_source", _safe_code),
+    ):
+        if key in raw:
+            quality[key] = sanitizer(raw.get(key))
     raw_verdict = raw.get("quality_verdict")
     if isinstance(raw_verdict, dict):
         quality["quality_verdict"] = _sanitize_quality_verdict(raw_verdict)
@@ -334,6 +409,74 @@ def _sanitize_quality_verdict(raw: dict) -> dict:
         "musicxml_available": musicxml_available,
         "musicxml_parseable": musicxml_parseable,
     }
+
+
+def _sanitize_notation_readability(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        "schema_version": _safe_code(value.get("schema_version")) or "1.0",
+        "layout_profile": _safe_code(value.get("layout_profile")) or "unknown",
+        "voice_count": _int_or_none(value.get("voice_count")),
+        "has_hand_voice": bool(value.get("has_hand_voice")),
+        "has_foot_voice": bool(value.get("has_foot_voice")),
+        "hand_event_count": _int_or_none(value.get("hand_event_count")),
+        "foot_event_count": _int_or_none(value.get("foot_event_count")),
+        "generic_tom_count": _int_or_none(value.get("generic_tom_count")),
+        "measure_count": _int_or_none(value.get("measure_count")),
+        "dense_measure_count": _int_or_none(value.get("dense_measure_count")),
+        "dense_measure_threshold": _int_or_none(value.get("dense_measure_threshold")),
+        "warnings": [item for item in _string_list(value.get("warnings")) if _is_public_safe_text(item)],
+    }
+
+
+def _sanitize_notation_chart(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    sanitized = {
+        "schema_version": _safe_code(value.get("schema_version")) or "1.0",
+        "mode": _safe_code(value.get("mode")) or "unknown",
+        "readability_verdict": _safe_code(value.get("readability_verdict")) or "unknown",
+        "original_event_count": _int_or_none(value.get("original_event_count")),
+        "chart_event_count": _int_or_none(value.get("chart_event_count")),
+        "max_events_per_measure": _int_or_none(value.get("max_events_per_measure")),
+        "max_visible_notes_per_measure": _int_or_none(value.get("max_visible_notes_per_measure")),
+        "measure_count": _int_or_none(value.get("measure_count")),
+        "groove_measure_count": _int_or_none(value.get("groove_measure_count")),
+        "repeat_measure_count": _int_or_none(value.get("repeat_measure_count")),
+        "fill_measure_count": _int_or_none(value.get("fill_measure_count")),
+        "accent_measure_count": _int_or_none(value.get("accent_measure_count")),
+        "preserved_counts": _safe_int_dict(value.get("preserved_counts")),
+        "dropped_counts": _safe_int_dict(value.get("dropped_counts")),
+        "dense_measures_before": _int_or_none(value.get("dense_measures_before")),
+        "dense_measures_after": _int_or_none(value.get("dense_measures_after")),
+        "warnings": [item for item in _string_list(value.get("warnings")) if _is_public_safe_text(item)],
+    }
+    for key in (
+        "anchor_measure_count",
+        "literal_measure_count",
+        "break_measure_count",
+        "stable_groove_section_count",
+        "complete_core_groove_measure_count",
+        "incomplete_core_groove_measure_count",
+        "hihat_rendered_measure_count",
+        "measures_with_complete_core_groove",
+        "groove_eighth_note_count",
+        "groove_sixteenth_note_count",
+        "fill_sixteenth_note_count",
+        "off_grid_events_snapped",
+        "off_grid_events_dropped",
+        "measures_with_fragmented_rests",
+        "hihat_eighth_pulse_measure_count",
+        "hihat_quarter_pulse_measure_count",
+    ):
+        number = _int_or_none(value.get(key))
+        if number is not None:
+            sanitized[key] = number
+    rhythm_mode = _safe_code(value.get("rhythm_mode"))
+    if rhythm_mode:
+        sanitized["rhythm_mode"] = rhythm_mode
+    return sanitized
 
 
 def _unknown_quality_verdict(validation: dict | None) -> dict:
@@ -384,6 +527,18 @@ def _int_dict(value: object) -> dict[str, int]:
         parsed = _int_or_none(item)
         if parsed is not None:
             result[str(key)] = parsed
+    return dict(sorted(result.items()))
+
+
+def _safe_int_dict(value: object) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, int] = {}
+    for key, item in value.items():
+        safe_key = _safe_code(key)
+        parsed = _int_or_none(item)
+        if safe_key is not None and parsed is not None:
+            result[safe_key] = parsed
     return dict(sorted(result.items()))
 
 

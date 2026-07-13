@@ -129,6 +129,25 @@ export interface TranscriptionResultResponse {
     checksum: string | null;
     download_url: string | null;
   }>;
+  review_timeline?: {
+    schema_version: string;
+    timing_source: string;
+    tempo_bpm: number | null;
+    audio_sources: Array<{
+      kind: 'original' | 'drums_stem' | string;
+      label: string;
+      available: boolean;
+      playback_url: string | null;
+    }>;
+    measures: Array<{
+      measure_index: number;
+      start_seconds: number | null;
+      end_seconds: number | null;
+      render_kind: string;
+      drum_counts: Record<string, number>;
+      warnings: string[];
+    }>;
+  };
   pipeline?: {
     mode: 'mock' | 'true_ai' | 'unknown' | string;
     status: string | null;
@@ -153,7 +172,61 @@ export interface TranscriptionResultResponse {
       processed_drum_counts: Record<string, number>;
       duration_seconds: number | null;
       tempo_bpm: number | null;
+      tempo_source?: string | null;
       estimated_measure_count: number | null;
+      musicxml_parseable?: boolean | null;
+      visual_qa_status?: string | null;
+      visual_qa_reason_code?: string | null;
+      notation_readability: {
+        schema_version?: string;
+        layout_profile?: string;
+        voice_count?: number | null;
+        has_hand_voice?: boolean;
+        has_foot_voice?: boolean;
+        hand_event_count?: number | null;
+        foot_event_count?: number | null;
+        generic_tom_count?: number | null;
+        measure_count?: number | null;
+        dense_measure_count?: number | null;
+        dense_measure_threshold?: number | null;
+        warnings?: string[];
+      };
+      notation_chart: {
+        schema_version?: string;
+        mode?: string;
+        readability_verdict?: string;
+        original_event_count?: number | null;
+        chart_event_count?: number | null;
+        max_events_per_measure?: number | null;
+        max_visible_notes_per_measure?: number | null;
+        measure_count?: number | null;
+        groove_measure_count?: number | null;
+        repeat_measure_count?: number | null;
+        fill_measure_count?: number | null;
+        accent_measure_count?: number | null;
+        anchor_measure_count?: number | null;
+        literal_measure_count?: number | null;
+        break_measure_count?: number | null;
+        stable_groove_section_count?: number | null;
+        complete_core_groove_measure_count?: number | null;
+        incomplete_core_groove_measure_count?: number | null;
+        hihat_rendered_measure_count?: number | null;
+        measures_with_complete_core_groove?: number | null;
+        rhythm_mode?: string;
+        groove_eighth_note_count?: number | null;
+        groove_sixteenth_note_count?: number | null;
+        fill_sixteenth_note_count?: number | null;
+        off_grid_events_snapped?: number | null;
+        off_grid_events_dropped?: number | null;
+        measures_with_fragmented_rests?: number | null;
+        hihat_eighth_pulse_measure_count?: number | null;
+        hihat_quarter_pulse_measure_count?: number | null;
+        preserved_counts?: Record<string, number>;
+        dropped_counts?: Record<string, number>;
+        dense_measures_before?: number | null;
+        dense_measures_after?: number | null;
+        warnings?: string[];
+      };
       quality_flags: string[];
       warnings: string[];
       postprocess_filters: Record<string, Record<string, string | number | boolean | null>>;
@@ -190,6 +263,12 @@ export interface TranscriptionResultResponse {
         openable: boolean | null;
         error_code: string | null;
         warnings: string[];
+      };
+      visual_qa?: {
+        status: string;
+        reason_code: string | null;
+        pdf_available: boolean;
+        first_page_png_available: boolean;
       };
     } | null;
     pipeline_log_available: boolean;
@@ -236,5 +315,6 @@ export interface ReviewPacketResponse {
     : unknown;
   review_checklist: Array<{ code: string; label: string; detail: string }>;
   manual_eval_seed: Record<string, unknown>;
+  audio_review?: TranscriptionResultResponse['review_timeline'];
   redaction: { status: string; unsafe_token_count: number };
 }

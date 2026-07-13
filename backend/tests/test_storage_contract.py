@@ -8,6 +8,8 @@ def test_build_job_artifact_key_matches_storage_contract() -> None:
     assert build_job_artifact_key("job-1", ArtifactType.RAW_MIDI) == "jobs/job-1/midi/raw_drum.mid"
     assert build_job_artifact_key("job-1", ArtifactType.PROCESSED_MIDI) == "jobs/job-1/midi/processed_drum.mid"
     assert build_job_artifact_key("job-1", ArtifactType.DRUM_EVENTS) == "jobs/job-1/midi/drum_events.json"
+    assert build_job_artifact_key("job-1", ArtifactType.CHART_EVENTS) == "jobs/job-1/notation/chart_events.json"
+    assert build_job_artifact_key("job-1", ArtifactType.VISUAL_PREVIEW) == "jobs/job-1/notation/score_preview.png"
     assert build_job_artifact_key("job-1", ArtifactType.MUSICXML) == "jobs/job-1/notation/score.musicxml"
     assert build_job_artifact_key("job-1", ArtifactType.PDF) == "jobs/job-1/exports/score.pdf"
     assert build_job_artifact_key("job-1", ArtifactType.PIPELINE_LOG) == "jobs/job-1/logs/pipeline.json"

@@ -821,6 +821,7 @@ export function ResultCard({
       <PipelineReview pipeline={result.pipeline} exports={result.exports} />
       <ReviewPacketPanel result={result} />
       <QualityStatusPanel pipeline={result.pipeline} />
+      <ReviewWorkflowPanel jobId={result.job_id} timeline={result.review_timeline} />
       <MusicXmlPreview url={result.preview.musicxml_url} validation={validation} />
 
       {result.drum_track?.warnings.length ? (
@@ -854,6 +855,92 @@ export function ResultCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+type MeasureReviewStatus = 'unreviewed' | 'correct' | 'needs_correction' | 'uncertain';
+type MeasureReviewRecord = { status: MeasureReviewStatus; note: string };
+
+function ReviewWorkflowPanel({
+  jobId,
+  timeline,
+}: {
+  jobId: string;
+  timeline: TranscriptionResultResponse['review_timeline'];
+}) {
+  const storageKey = `groovescribe.measureReview.${jobId}`;
+  const [records, setRecords] = useState<Record<string, MeasureReviewRecord>>({});
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(storageKey);
+      setRecords(stored ? (JSON.parse(stored) as Record<string, MeasureReviewRecord>) : {});
+    } catch {
+      setRecords({});
+    }
+  }, [storageKey]);
+
+  if (!timeline || !timeline.measures.length) return null;
+  const updateRecord = (measureIndex: number, patch: Partial<MeasureReviewRecord>) => {
+    setRecords((current) => {
+      const next = {
+        ...current,
+        [String(measureIndex)]: {
+          status: current[String(measureIndex)]?.status ?? 'unreviewed',
+          note: current[String(measureIndex)]?.note ?? '',
+          ...patch,
+        },
+      };
+      window.localStorage.setItem(storageKey, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  return (
+    <section className="reviewWorkflowPanel">
+      <div className="reviewHeader">
+        <strong>音訊對照修譜</strong>
+        <span>{timeline.timing_source === 'score_tempo' ? `依 ${formatNumber(timeline.tempo_bpm)} BPM 估算小節時間` : '小節時間未提供'}</span>
+      </div>
+      <div className="reviewAudioSources">
+        {timeline.audio_sources.map((source) => (
+          <div key={source.kind} className="reviewAudioSource">
+            <span>{source.label}</span>
+            {source.available && source.playback_url ? <audio controls preload="metadata" src={source.playback_url} /> : <em>未提供</em>}
+          </div>
+        ))}
+      </div>
+      <div className="measureReviewTable" role="region" aria-label="小節音訊對照表">
+        {timeline.measures.map((measure) => {
+          const record = records[String(measure.measure_index)] ?? { status: 'unreviewed', note: '' };
+          return (
+            <div className="measureReviewRow" key={measure.measure_index}>
+              <strong>#{measure.measure_index}</strong>
+              <span>{formatReviewRange(measure.start_seconds, measure.end_seconds)}</span>
+              <span>{formatDrumSummary(measure.drum_counts)}</span>
+              <span>{measure.render_kind}</span>
+              <select
+                aria-label={`第 ${measure.measure_index} 小節判讀`}
+                value={record.status}
+                onChange={(event) => updateRecord(measure.measure_index, { status: event.target.value as MeasureReviewStatus })}
+              >
+                <option value="unreviewed">未檢查</option>
+                <option value="correct">正確</option>
+                <option value="needs_correction">需修正</option>
+                <option value="uncertain">無法判斷</option>
+              </select>
+              <input
+                aria-label={`第 ${measure.measure_index} 小節備註`}
+                value={record.note}
+                placeholder={measure.warnings.length ? measure.warnings.join(', ') : '備註'}
+                onChange={(event) => updateRecord(measure.measure_index, { note: event.target.value })}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <p className="reviewWorkflowNote">判讀結果只儲存在這台瀏覽器；請用 review packet 作為交接與正式人工評估的起點。</p>
+    </section>
   );
 }
 
@@ -931,9 +1018,13 @@ function QualityStatusPanel({ pipeline }: { pipeline: TranscriptionResultRespons
   const verdict = pipeline?.quality?.quality_verdict ?? unknownQualityVerdict(pipeline?.validation ?? null);
   const gate = verdict.candidate_gate;
   const limitations = verdict.limitations ?? [];
-  const suggestions = qualitySuggestionList(limitations, verdict.musicxml_parseable);
   const tomFilter = pipeline?.quality?.postprocess_filters?.tom_false_positive ?? null;
   const tomFilterLabel = tomFilter ? qualityTomFilterLabel(String(tomFilter.status ?? 'unknown')) : null;
+  const notationReadability = pipeline?.quality?.notation_readability ?? {};
+  const notationChart = pipeline?.quality?.notation_chart ?? {};
+  const suggestions = qualitySuggestionList(limitations, verdict.musicxml_parseable, notationReadability, notationChart);
+  const notationLabel = notationReadabilityLabel(notationReadability);
+  const chartLabel = notationChartLabel(notationChart);
   const tone = qualityVerdictTone(verdict.verdict);
 
   return (
@@ -950,7 +1041,21 @@ function QualityStatusPanel({ pipeline }: { pipeline: TranscriptionResultRespons
       <div className="qualityStatusGrid">
         <Metric label="Candidate gate" value={gate.status === 'passed' ? 'passed' : gate.status || 'unknown'} />
         <Metric label="MusicXML" value={verdict.musicxml_parseable ? '可讀取' : verdict.musicxml_available ? '需檢查' : '未提供'} />
+        <Metric label="譜面可讀性" value={notationLabel} />
+        <Metric label="譜面模式" value={chartLabel} />
       </div>
+      {notationChart.mode === 'readable_drum_chart_v3' ? (
+        <div className="qualityChartStats">
+          <span>每小節實寫簡化鼓譜</span>
+          <span>完整 core groove：{formatNumber(notationChart.complete_core_groove_measure_count)}</span>
+          <span>Hi-hat 小節：{formatNumber(notationChart.hihat_rendered_measure_count)}</span>
+          <span>Hi-hat 八分 / 四分：{formatNumber(notationChart.hihat_eighth_pulse_measure_count)} / {formatNumber(notationChart.hihat_quarter_pulse_measure_count)}</span>
+          <span>Fill：{formatNumber(notationChart.fill_measure_count)}</span>
+          <span>Groove 八分音符：{formatNumber(notationChart.groove_eighth_note_count)}</span>
+          <span>Fill 十六分音符：{formatNumber(notationChart.fill_sixteenth_note_count)}</span>
+          <span>需人工整理：{formatNumber(notationChart.incomplete_core_groove_measure_count)}</span>
+        </div>
+      ) : null}
       {limitations.length ? (
         <div className="limitationList">
           {limitations.map((limitation) => (
@@ -1093,10 +1198,77 @@ function qualityTomFilterLabel(status: string): string {
   return labels[status] ?? 'Tom filter 狀態未知';
 }
 
-function qualitySuggestionList(limitations: string[], musicxmlParseable: boolean): string[] {
+function notationReadabilityLabel(readability: Record<string, unknown>): string {
+  if (!readability || Object.keys(readability).length === 0) return '未回報';
+  const warnings = Array.isArray(readability.warnings) ? readability.warnings : [];
+  if (warnings.includes('notation_dense_full_mix_likely')) return '譜面偏密，需人工整理';
+  if (readability.has_hand_voice && readability.has_foot_voice) return '雙聲部鼓譜';
+  if (readability.has_hand_voice || readability.has_foot_voice) return '單聲部鼓譜';
+  return '需檢查';
+}
+
+function notationChartLabel(chart: Record<string, unknown>): string {
+  if (!chart || Object.keys(chart).length === 0) return '未回報';
+  const mode =
+    chart.mode === 'readable_drum_chart_v3'
+      ? '逐小節可讀鼓譜'
+      : chart.mode === 'readable_drum_chart_v2'
+      ? '可讀鼓譜'
+      : chart.mode === 'simplified_chart_v1'
+        ? '簡化鼓譜'
+        : '完整轉錄';
+  const chartCount = typeof chart.chart_event_count === 'number' ? chart.chart_event_count : null;
+  const originalCount = typeof chart.original_event_count === 'number' ? chart.original_event_count : null;
+  if (chartCount !== null && originalCount !== null) return `${mode} ${chartCount}/${originalCount}`;
+  return mode;
+}
+
+function formatReviewRange(startSeconds: number | null, endSeconds: number | null): string {
+  if (startSeconds === null || endSeconds === null) return '時間未提供';
+  return `${startSeconds.toFixed(1)}-${endSeconds.toFixed(1)}s`;
+}
+
+function formatDrumSummary(counts: Record<string, number>): string {
+  const entries = Object.entries(counts).filter(([, count]) => count > 0);
+  return entries.length ? entries.map(([drum, count]) => `${drum} ${count}`).join(' · ') : '休止';
+}
+
+function qualitySuggestionList(
+  limitations: string[],
+  musicxmlParseable: boolean,
+  notationReadability: Record<string, unknown> = {},
+  notationChart: Record<string, unknown> = {},
+): string[] {
   const suggestions = new Set<string>();
   if (!musicxmlParseable) {
     suggestions.add('先確認 MusicXML 能否在預覽或 MuseScore 中開啟。');
+  }
+  const readabilityWarnings = Array.isArray(notationReadability.warnings) ? notationReadability.warnings : [];
+  if (readabilityWarnings.includes('notation_dense_full_mix_likely')) {
+    suggestions.add('這份 full-mix 草稿譜面偏密，請先整理重複或過密小節，再進行細修。');
+  }
+  if (readabilityWarnings.includes('generic_tom_position_used')) {
+    suggestions.add('Tom 目前使用單一通用位置；需要時請人工區分高 tom、floor tom。');
+  }
+  const chartWarnings = Array.isArray(notationChart.warnings) ? notationChart.warnings : [];
+  if (notationChart.mode === 'readable_drum_chart_v3') {
+    suggestions.add('MusicXML 已使用逐小節可讀鼓譜；完整 processed events 仍保留於 MIDI。');
+  } else if (notationChart.mode === 'readable_drum_chart_v2') {
+    suggestions.add('MusicXML 已使用可讀鼓譜模式；MIDI 仍保留完整 processed events。');
+  } else if (notationChart.mode === 'simplified_chart_v1') {
+    suggestions.add('MusicXML 已使用簡化鼓譜模式；MIDI 仍保留完整 processed events。');
+  }
+  if (chartWarnings.includes('no_stable_groove_detected')) {
+    suggestions.add('未偵測到可穩定重複的 groove；此段保留簡化小節，建議人工標記段落。');
+  }
+  if (chartWarnings.includes('notation_fill_density_needs_review')) {
+    suggestions.add('Tom fill 小節仍偏多，請優先聽辨段落尾端並刪除非必要 fill。');
+  }
+  if (chartWarnings.includes('notation_chart_still_dense')) {
+    suggestions.add('簡化後仍有過密小節，請優先整理標示為 dense 的段落。');
+  }
+  if (chartWarnings.includes('notation_fragmented_groove_rhythm')) {
+    suggestions.add('部分 groove 節奏仍過於零碎，請優先將短音符整理成八分或四分節奏。');
   }
   for (const limitation of limitations) {
     if (limitation === 'tom_false_positive_likely') {
@@ -1177,6 +1349,8 @@ function MusicXmlPreview({
         : 'needs review'
       : 'optional unavailable'
     : 'not reported';
+  const visualQa = validation?.visual_qa;
+  const visualQaStatus = visualQa ? visualQaLabel(visualQa.status) : 'not reported';
 
   return (
     <div className="musicXmlPreview">
@@ -1195,7 +1369,11 @@ function MusicXmlPreview({
           status={pdfStatus}
           warnings={pdf?.warnings ?? []}
         />
+        <ValidationStatus label="Visual QA" status={visualQaStatus} warnings={[]} />
       </div>
+      {visualQa?.status === 'musescore_gui_session_unavailable' ? (
+        <p className="previewFallback">已產生 MusicXML；本機視覺預覽需在 MuseScore app 開啟。</p>
+      ) : null}
       <div className="musicXmlCanvas">
         <div className="musicXmlRenderTarget" ref={renderTargetRef} />
       </div>
@@ -1206,6 +1384,14 @@ function MusicXmlPreview({
       ) : null}
     </div>
   );
+}
+
+function visualQaLabel(status: string): string {
+  if (status === 'completed') return 'rendered';
+  if (status === 'musescore_gui_session_unavailable') return '需在 MuseScore app 開啟';
+  if (status === 'renderer_unavailable') return 'renderer unavailable';
+  if (status === 'render_failed') return 'needs review';
+  return 'not requested';
 }
 
 function ValidationStatus({ label, status, warnings }: { label: string; status: string; warnings: string[] }) {

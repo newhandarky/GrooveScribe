@@ -13,9 +13,8 @@ from ai_pipeline.midi.simple_midi import write_drum_midi
 from ai_pipeline.midi.types import MidiPostProcessConfig, ProcessedDrumEvent
 from ai_pipeline.notation import (
     MusicXmlGenerator,
-    MuseScorePdfExporter,
+    MuseScoreVisualQaRenderer,
     NotationConfig,
-    NotationError,
     validate_score_artifacts,
 )
 from ai_pipeline.preprocessing import FfmpegAudioNormalizer
@@ -29,6 +28,7 @@ class LocalPipelineConfig:
     mock_ai: bool = False
     export_pdf: bool = False
     require_pdf: bool = False
+    visual_qa: bool = False
     title: str = "GrooveScribe Drum Draft"
     demucs_model_name: str = "htdemucs"
     demucs_device: str = "auto"
@@ -41,6 +41,7 @@ class LocalPipelineConfig:
     adtof_threshold_preset: str | None = None
     adtof_timeout_seconds: int = 1_800
     tom_filter_preset: str | None = None
+    tempo_bpm: float | None = None
     pdf_renderer: str | None = None
 
 
@@ -257,38 +258,58 @@ class LocalPipelineRunner:
         artifacts: dict[str, Path],
         output_dir: Path,
     ) -> tuple[dict[str, Path], dict]:
-        musicxml = MusicXmlGenerator(NotationConfig(title=self.config.title)).generate(
+        musicxml = MusicXmlGenerator(
+            NotationConfig(
+                title=self.config.title,
+                tempo_bpm_override=self.config.tempo_bpm,
+            )
+        ).generate(
             artifacts["drum_events"],
             output_dir / "notation",
         )
-        stage_artifacts = {"musicxml": musicxml.musicxml_path}
+        stage_artifacts = {"musicxml": musicxml.musicxml_path, "chart_events": musicxml.chart_events_path}
         pdf_path: Path | None = None
+        visual_qa_report = {
+            "status": "not_requested",
+            "reason_code": "visual_qa_not_requested",
+            "pdf_available": False,
+            "first_page_png_available": False,
+        }
         report = {
             "event_count": musicxml.event_count,
+            "chart_event_count": musicxml.chart_event_count,
             "measure_count": musicxml.measure_count,
             "title": musicxml.title,
+            "tempo_bpm": musicxml.tempo_bpm,
+            "tempo_source": musicxml.tempo_source,
+            "readability": musicxml.readability_summary,
+            "chart": musicxml.chart_summary,
             "pdf": {"status": "skipped"},
+            "visual_qa": visual_qa_report,
         }
 
-        if self.config.export_pdf or self.config.require_pdf:
-            try:
-                pdf = MuseScorePdfExporter(renderer_binary=self.config.pdf_renderer).export(
-                    musicxml.musicxml_path,
-                    output_dir / "exports",
-                )
-                stage_artifacts["pdf"] = pdf.pdf_path
-                pdf_path = pdf.pdf_path
-                report["pdf"] = {
-                    "status": "completed_with_warning" if pdf.warnings else "completed",
-                    "renderer": pdf.renderer,
-                    "warnings": list(pdf.warnings),
-                }
-            except NotationError as exc:
-                report["pdf"] = {"status": "failed", "error": _serialize_error(exc)}
-                if self.config.require_pdf:
-                    raise
+        if self.config.export_pdf or self.config.require_pdf or self.config.visual_qa:
+            visual_qa = MuseScoreVisualQaRenderer(renderer_binary=self.config.pdf_renderer).render(
+                musicxml.musicxml_path,
+                output_dir / "exports",
+            )
+            visual_qa_report = visual_qa.report()
+            report["visual_qa"] = visual_qa_report
+            if visual_qa.pdf_path is not None:
+                stage_artifacts["pdf"] = visual_qa.pdf_path
+                pdf_path = visual_qa.pdf_path
+            if visual_qa.first_page_png_path is not None:
+                stage_artifacts["visual_preview"] = visual_qa.first_page_png_path
+            report["pdf"] = {
+                "status": "completed" if pdf_path is not None else "unavailable",
+                "reason_code": visual_qa.reason_code,
+            }
 
-        report["validation"] = validate_score_artifacts(musicxml.musicxml_path, pdf_path)
+        report["validation"] = validate_score_artifacts(
+            musicxml.musicxml_path,
+            pdf_path,
+            visual_qa=visual_qa_report,
+        )
         return stage_artifacts, report
 
     def _write_log(
@@ -335,6 +356,7 @@ def _build_quality_summary(stage_logs: list[StageLog]) -> dict | None:
     warnings = [str(warning) for warning in midi_report.get("warnings", []) if isinstance(warning, str)]
     validation = _build_validation_summary(stage_logs) or {}
     musicxml = validation.get("musicxml") if isinstance(validation.get("musicxml"), dict) else {}
+    visual_qa = validation.get("visual_qa") if isinstance(validation.get("visual_qa"), dict) else {}
     processed_counts = _string_int_dict(midi_report.get("processed_drum_counts"))
     quality_flags = midi_report.get("quality_flags") or quality_flag_subset(warnings)
     verdict = evaluate_drum_draft_quality(
@@ -351,8 +373,14 @@ def _build_quality_summary(stage_logs: list[StageLog]) -> dict | None:
         "raw_note_histogram": _string_int_dict(midi_report.get("raw_note_histogram")),
         "processed_drum_counts": processed_counts,
         "duration_seconds": _first_number(stage_logs, "audio_preprocessing", "duration_seconds"),
-        "tempo_bpm": midi_report.get("estimated_bpm"),
+        "tempo_bpm": notation_report.get("tempo_bpm") or midi_report.get("estimated_bpm"),
+        "tempo_source": notation_report.get("tempo_source") or "estimated",
         "estimated_measure_count": notation_report.get("measure_count"),
+        "musicxml_parseable": bool(musicxml.get("parseable")),
+        "visual_qa_status": visual_qa.get("status") or "not_reported",
+        "visual_qa_reason_code": visual_qa.get("reason_code"),
+        "notation_readability": notation_report.get("readability") or {},
+        "notation_chart": notation_report.get("chart") or {},
         "quality_flags": quality_flags,
         "warnings": sorted(set(warnings)),
         "postprocess_filters": midi_report.get("postprocess_filters") or {},

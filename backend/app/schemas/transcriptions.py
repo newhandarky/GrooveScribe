@@ -138,7 +138,13 @@ class PipelineQualitySummary(BaseModel):
     processed_drum_counts: dict[str, int] = Field(default_factory=dict)
     duration_seconds: float | None = None
     tempo_bpm: float | None = None
+    tempo_source: str | None = None
     estimated_measure_count: int | None = None
+    musicxml_parseable: bool | None = None
+    visual_qa_status: str | None = None
+    visual_qa_reason_code: str | None = None
+    notation_readability: dict = Field(default_factory=dict)
+    notation_chart: dict = Field(default_factory=dict)
     quality_flags: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     postprocess_filters: dict[str, dict] = Field(default_factory=dict)
@@ -154,9 +160,17 @@ class PipelineArtifactValidation(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class PipelineVisualQaSummary(BaseModel):
+    status: str
+    reason_code: str | None = None
+    pdf_available: bool = False
+    first_page_png_available: bool = False
+
+
 class PipelineValidationSummary(BaseModel):
     musicxml: PipelineArtifactValidation
     pdf: PipelineArtifactValidation
+    visual_qa: PipelineVisualQaSummary | None = None
 
 
 class PipelineSummaryResult(BaseModel):
@@ -184,6 +198,7 @@ class TranscriptionResultResponse(BaseModel):
     preview: PreviewResult
     exports: list[ExportFileResult]
     pipeline: PipelineSummaryResult | None = None
+    review_timeline: dict = Field(default_factory=dict)
     source_result_summary: dict | None = None
 
 
@@ -198,4 +213,5 @@ class ReviewPacketResponse(BaseModel):
     validation: dict | None = None
     review_checklist: list[dict] = Field(default_factory=list)
     manual_eval_seed: dict = Field(default_factory=dict)
+    audio_review: dict = Field(default_factory=dict)
     redaction: dict

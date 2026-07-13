@@ -41,6 +41,8 @@ _PIPELINE_ARTIFACT_TYPES: dict[str, ArtifactType] = {
     "raw_midi": ArtifactType.RAW_MIDI,
     "processed_midi": ArtifactType.PROCESSED_MIDI,
     "drum_events": ArtifactType.DRUM_EVENTS,
+    "chart_events": ArtifactType.CHART_EVENTS,
+    "visual_preview": ArtifactType.VISUAL_PREVIEW,
     "musicxml": ArtifactType.MUSICXML,
     "pdf": ArtifactType.PDF,
 }
@@ -60,6 +62,8 @@ _ARTIFACT_TO_BACKEND_STAGE: dict[str, str] = {
     "raw_midi": PipelineStage.DRUM_TRANSCRIPTION.value,
     "processed_midi": PipelineStage.MIDI_POST_PROCESSING.value,
     "drum_events": PipelineStage.MIDI_POST_PROCESSING.value,
+    "chart_events": PipelineStage.NOTATION_GENERATION.value,
+    "visual_preview": PipelineStage.NOTATION_GENERATION.value,
     "musicxml": PipelineStage.NOTATION_GENERATION.value,
     "pdf": PipelineStage.NOTATION_GENERATION.value,
 }

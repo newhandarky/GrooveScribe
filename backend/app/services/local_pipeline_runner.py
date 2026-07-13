@@ -185,7 +185,18 @@ class LocalMockPipelineRunner:
                     job.id,
                     ArtifactType.MUSICXML,
                     '<?xml version="1.0" encoding="UTF-8"?><score-partwise version="4.0"></score-partwise>\n',
-                )
+                ),
+                ArtifactType.CHART_EVENTS: self._put_json(
+                    job.id,
+                    ArtifactType.CHART_EVENTS,
+                    {
+                        "schema_version": "1.0",
+                        "source": "demo_mock",
+                        "chart_summary": {"mode": "readable_drum_chart_v3"},
+                        "measures": [{"measure_index": 0, "render_kind": "groove_anchor"}],
+                        "events": [],
+                    },
+                ),
             }
         if stage == PipelineStage.PDF_EXPORT:
             return {ArtifactType.PDF: self._put_bytes(job.id, ArtifactType.PDF, b"%PDF-1.4\n% mock score\n")}
@@ -277,6 +288,18 @@ class LocalMockPipelineRunner:
             "duration_seconds": 1.5,
             "tempo_bpm": 120.0,
             "estimated_measure_count": 1,
+            "notation_chart": {
+                "schema_version": "1.0",
+                "mode": "readable_drum_chart_v3",
+                "readability_verdict": "needs_manual_arrangement",
+                "original_event_count": 4,
+                "chart_event_count": 0,
+                "measure_count": 1,
+                "anchor_measure_count": 1,
+                "literal_measure_count": 1,
+                "stable_groove_section_count": 0,
+                "warnings": ["no_stable_groove_detected"],
+            },
             "quality_flags": ["sparse_transcription"],
             "warnings": ["sparse_transcription"],
         }

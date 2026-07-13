@@ -7,6 +7,63 @@
   text-rendering: optimizeLegibility;
 }
 
+.reviewWorkflowPanel {
+  border-top: 1px solid var(--border);
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+.reviewAudioSources {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 12px 0;
+}
+
+.reviewAudioSource {
+  align-items: center;
+  border: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 88px minmax(0, 1fr);
+  padding: 8px;
+}
+
+.reviewAudioSource audio {
+  max-width: 100%;
+  width: 100%;
+}
+
+.measureReviewTable {
+  border: 1px solid var(--border);
+  max-height: 360px;
+  overflow: auto;
+}
+
+.measureReviewRow {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 42px 96px minmax(160px, 1fr) 72px 110px minmax(180px, 1fr);
+  padding: 8px;
+}
+
+.measureReviewRow:last-child {
+  border-bottom: 0;
+}
+
+.measureReviewRow input,
+.measureReviewRow select {
+  min-width: 0;
+}
+
+.reviewWorkflowNote {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin: 10px 0 0;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -826,6 +883,21 @@ input {
   display: grid;
   gap: 8px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.qualityChartStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.qualityChartStats span {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted-text);
+  font-size: 12px;
+  padding: 4px 7px;
 }
 
 .limitationList {

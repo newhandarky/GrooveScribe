@@ -13,7 +13,7 @@ from app.models.enums import ExportFileStatus, ExportFileType, JobStatus, Pipeli
 from app.schemas.transcriptions import PipelineSummaryResult, TranscriptionResultResponse
 from app.services.download_service import DownloadService
 from app.services.job_query_service import JobQueryService
-from app.services.result_service import ResultService
+from app.services.result_service import ResultService, _sanitize_validation_summary
 from app.services.review_packet_service import ReviewPacketService
 from app.storage.keys import build_job_artifact_key
 from app.storage.local import LocalStorageAdapter
@@ -30,6 +30,32 @@ UNSAFE_TOKENS = (
     "raw command",
     "command_template",
 )
+
+
+def test_visual_qa_validation_is_public_safe_and_does_not_change_musicxml_status() -> None:
+    summary = _sanitize_validation_summary(
+        {
+            "musicxml": {"available": True, "parseable": True, "warnings": []},
+            "pdf": {"available": False, "optional": True, "openable": None, "warnings": []},
+            "visual_qa": {
+                "status": "musescore_gui_session_unavailable",
+                "reason_code": "musescore_gui_session_unavailable",
+                "pdf_available": False,
+                "first_page_png_available": False,
+                "stderr": "/Users/private /tmp/command_template",
+            },
+        }
+    )
+
+    assert summary is not None
+    assert summary["musicxml"]["parseable"] is True
+    assert summary["visual_qa"] == {
+        "status": "musescore_gui_session_unavailable",
+        "reason_code": "musescore_gui_session_unavailable",
+        "pdf_available": False,
+        "first_page_png_available": False,
+    }
+    assert not any(token.lower() in json.dumps(summary).lower() for token in UNSAFE_TOKENS)
 
 
 def _session():
@@ -175,6 +201,39 @@ def test_result_service_builds_redacted_pipeline_summary(tmp_path) -> None:
             "duration_seconds": 12.5,
             "tempo_bpm": 118.2,
             "estimated_measure_count": 6,
+            "notation_readability": {
+              "schema_version": "1.0",
+              "layout_profile": "standard_drum_v1",
+              "voice_count": 2,
+              "has_hand_voice": true,
+              "has_foot_voice": true,
+              "hand_event_count": 5,
+              "foot_event_count": 2,
+              "generic_tom_count": 6,
+              "measure_count": 6,
+              "dense_measure_count": 1,
+              "dense_measure_threshold": 24,
+              "warnings": ["notation_dense_full_mix_likely", "/tmp/private"]
+            },
+            "notation_chart": {
+              "schema_version": "1.0",
+              "mode": "readable_drum_chart_v2",
+              "readability_verdict": "readable_chart_candidate",
+              "original_event_count": 80,
+              "chart_event_count": 24,
+              "max_events_per_measure": 8,
+              "max_visible_notes_per_measure": 8,
+              "measure_count": 8,
+              "groove_measure_count": 5,
+              "repeat_measure_count": 2,
+              "fill_measure_count": 1,
+              "accent_measure_count": 1,
+              "preserved_counts": {"kick": 8, "snare": 8, "closed_hat": 8, "/tmp/private": 1},
+              "dropped_counts": {"tom": 20, "cymbal": 12},
+              "dense_measures_before": 4,
+              "dense_measures_after": 0,
+              "warnings": ["notation_tom_reduced_for_readability", "/tmp/private"]
+            },
             "quality_flags": ["hihat_missing_likely", "mostly_tom_output", "/tmp/private"],
             "warnings": ["hihat_missing_likely", "stderr leaked"],
             "postprocess_filters": {
@@ -266,6 +325,39 @@ def test_result_service_builds_redacted_pipeline_summary(tmp_path) -> None:
             "duration_seconds": 12.5,
             "tempo_bpm": 118.2,
             "estimated_measure_count": 6,
+            "notation_readability": {
+                "schema_version": "1.0",
+                "layout_profile": "standard_drum_v1",
+                "voice_count": 2,
+                "has_hand_voice": True,
+                "has_foot_voice": True,
+                "hand_event_count": 5,
+                "foot_event_count": 2,
+                "generic_tom_count": 6,
+                "measure_count": 6,
+                "dense_measure_count": 1,
+                "dense_measure_threshold": 24,
+                "warnings": ["notation_dense_full_mix_likely"],
+            },
+            "notation_chart": {
+                "schema_version": "1.0",
+                "mode": "readable_drum_chart_v2",
+                "readability_verdict": "readable_chart_candidate",
+                "original_event_count": 80,
+                "chart_event_count": 24,
+                "max_events_per_measure": 8,
+                "max_visible_notes_per_measure": 8,
+                "measure_count": 8,
+                "groove_measure_count": 5,
+                "repeat_measure_count": 2,
+                "fill_measure_count": 1,
+                "accent_measure_count": 1,
+                "preserved_counts": {"closed_hat": 8, "kick": 8, "snare": 8},
+                "dropped_counts": {"cymbal": 12, "tom": 20},
+                "dense_measures_before": 4,
+                "dense_measures_after": 0,
+                "warnings": ["notation_tom_reduced_for_readability"],
+            },
             "quality_flags": ["hihat_missing_likely", "mostly_tom_output"],
             "warnings": ["hihat_missing_likely"],
             "postprocess_filters": {
@@ -541,6 +633,12 @@ def test_review_packet_service_builds_public_safe_packet_and_zip(tmp_path) -> No
     storage.put_bytes(b"midi", "jobs/job-1/midi/processed_drum.mid", "audio/midi")
     storage.put_bytes(b"<score-partwise />", "jobs/job-1/notation/score.musicxml", "application/vnd.recordare.musicxml+xml")
     storage.put_bytes(
+        b'{"schema_version":"1.0","measures":[{"render_kind":"groove_anchor"}]}',
+        "jobs/job-1/notation/chart_events.json",
+        "application/json",
+    )
+    storage.put_bytes(b"\x89PNG\r\n\x1a\n", "jobs/job-1/notation/score_preview.png", "image/png")
+    storage.put_bytes(
         b"""
         {
           "status": "completed",
@@ -554,7 +652,8 @@ def test_review_packet_service_builds_public_safe_packet_and_zip(tmp_path) -> No
           },
           "validation": {
             "musicxml": {"available": true, "parseable": true, "error_code": null, "warnings": []},
-            "pdf": {"available": false, "optional": true, "openable": null, "error_code": "pdf_unavailable", "warnings": ["pdf_optional_unavailable"]}
+            "pdf": {"available": false, "optional": true, "openable": null, "error_code": "pdf_unavailable", "warnings": ["pdf_optional_unavailable"]},
+            "visual_qa": {"status": "musescore_gui_session_unavailable", "reason_code": "musescore_gui_session_unavailable", "pdf_available": false, "first_page_png_available": false}
           }
         }
         """,
@@ -608,11 +707,20 @@ def test_review_packet_service_builds_public_safe_packet_and_zip(tmp_path) -> No
     }
     assert packet["manual_eval_seed"]["processed_event_count"] == 4
     assert packet["validation"]["pdf"]["status"] == "optional_unavailable"
+    assert packet["validation"]["visual_qa"]["status"] == "musescore_gui_session_unavailable"
     assert any(item["code"] == "pdf_optional" for item in packet["review_checklist"])
     assert packet["redaction"] == {"status": "passed", "unsafe_token_count": 0}
     assert "/Users/" not in json.dumps(packet)
     with zipfile.ZipFile(BytesIO(packet_zip.content)) as archive:
-        assert sorted(archive.namelist()) == ["drums.mid", "review_notes.md", "review_packet.json", "score.musicxml"]
+        assert sorted(archive.namelist()) == [
+            "chart_events.json",
+            "drums.mid",
+            "review_notes.md",
+            "review_packet.json",
+            "score.musicxml",
+            "score_preview.png",
+        ]
+        assert b"groove_anchor" in archive.read("chart_events.json")
         assert archive.read("drums.mid") == b"midi"
         assert b"review:job-1" in archive.read("review_packet.json")
 

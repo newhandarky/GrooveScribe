@@ -125,12 +125,27 @@ def _write_fake_pipeline_output(output_dir: Path) -> None:
         "raw_midi": output_dir / "midi" / "raw_drum.mid",
         "processed_midi": output_dir / "midi" / "processed_drum.mid",
         "drum_events": output_dir / "midi" / "drum_events.json",
+        "chart_events": output_dir / "notation" / "chart_events.json",
         "musicxml": output_dir / "notation" / "score.musicxml",
         "pdf": output_dir / "exports" / "score.pdf",
     }
     for name, path in artifact_paths.items():
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"%PDF-1.4\n%%EOF\n" if name == "pdf" else f"{name}\n".encode("utf-8"))
+        if name == "chart_events":
+            path.write_text(
+                json.dumps(
+                    {
+                        "ticks_per_beat": 480,
+                        "tempo_bpm": 120,
+                        "time_signature": "4/4",
+                        "chart_summary": {"measure_count": 2, "chart_measures": [{"measure_index": 0, "render_kind": "groove"}]},
+                        "events": [{"tick": 0, "drum": "kick"}, {"tick": 480, "drum": "snare"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+        else:
+            path.write_bytes(b"%PDF-1.4\n%%EOF\n" if name == "pdf" else f"{name}\n".encode("utf-8"))
     log_payload = {
         "schema_version": "1.0",
         "status": "completed",
@@ -361,6 +376,8 @@ def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path)
     pdf_response = client.get(f"/api/v1/transcriptions/{job_id}/download/pdf")
     packet_response = client.get(f"/api/v1/transcriptions/{job_id}/review-packet")
     packet_zip_response = client.get(f"/api/v1/transcriptions/{job_id}/download/review-packet")
+    original_audio_response = client.get(f"/api/v1/transcriptions/{job_id}/review-audio/original")
+    drums_stem_response = client.get(f"/api/v1/transcriptions/{job_id}/review-audio/drums_stem")
 
     assert status_response.status_code == 200
     assert status_response.json()["status"] == "completed"
@@ -378,9 +395,14 @@ def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path)
     assert result_body["pipeline"]["validation"]["musicxml"]["parseable"] is True
     assert result_body["pipeline"]["validation"]["pdf"]["openable"] is True
     assert "/tmp/" not in str(result_body["pipeline"])
+    assert result_body["review_timeline"]["measures"][0]["drum_counts"] == {"kick": 1, "snare": 1}
+    assert result_body["review_timeline"]["audio_sources"][0]["playback_url"].endswith("/review-audio/original")
+    assert "/tmp/" not in str(result_body["review_timeline"])
     assert midi_response.status_code == 200
     assert musicxml_response.status_code == 200
     assert pdf_response.status_code == 200
+    assert original_audio_response.status_code == 200
+    assert drums_stem_response.status_code == 200
     assert packet_response.status_code == 200
     packet_body = packet_response.json()
     assert packet_body["schema_version"] == "1.0"
@@ -391,6 +413,7 @@ def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path)
     assert packet_body["quality"]["postprocess_filters"]["tom_false_positive"]["preset"] == "tom_guard_v1"
     assert packet_body["validation"]["musicxml"]["status"] == "parseable"
     assert packet_body["redaction"]["status"] == "passed"
+    assert packet_body["audio_review"]["measures"][0]["measure_index"] == 1
     assert "/tmp/" not in str(packet_body)
     assert "storage_key" not in str(packet_body)
     assert packet_zip_response.status_code == 200
