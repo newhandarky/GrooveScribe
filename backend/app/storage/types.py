@@ -11,6 +11,8 @@ class ArtifactType(StrEnum):
     RAW_MIDI = "raw_midi"
     PROCESSED_MIDI = "processed_midi"
     DRUM_EVENTS = "drum_events"
+    CHART_EVENTS = "chart_events"
+    VISUAL_PREVIEW = "visual_preview"
     MUSICXML = "musicxml"
     PDF = "pdf"
     PIPELINE_LOG = "pipeline_log"
@@ -23,6 +25,8 @@ CONTENT_TYPE_BY_ARTIFACT_TYPE: dict[ArtifactType, str] = {
     ArtifactType.RAW_MIDI: "audio/midi",
     ArtifactType.PROCESSED_MIDI: "audio/midi",
     ArtifactType.DRUM_EVENTS: "application/json",
+    ArtifactType.CHART_EVENTS: "application/json",
+    ArtifactType.VISUAL_PREVIEW: "image/png",
     ArtifactType.MUSICXML: "application/vnd.recordare.musicxml+xml",
     ArtifactType.PDF: "application/pdf",
     ArtifactType.PIPELINE_LOG: "application/json",

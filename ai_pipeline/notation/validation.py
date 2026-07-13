@@ -82,9 +82,21 @@ def validate_pdf_artifact(pdf_path: Path | None) -> dict:
     }
 
 
-def validate_score_artifacts(musicxml_path: Path, pdf_path: Path | None = None) -> dict:
+def validate_score_artifacts(
+    musicxml_path: Path,
+    pdf_path: Path | None = None,
+    *,
+    visual_qa: dict | None = None,
+) -> dict:
+    visual_qa_summary = visual_qa or {
+        "status": "not_requested",
+        "reason_code": "visual_qa_not_requested",
+        "pdf_available": False,
+        "first_page_png_available": False,
+    }
     return {
         "schema_version": "1.0",
         "musicxml": validate_musicxml_artifact(musicxml_path),
         "pdf": validate_pdf_artifact(pdf_path),
+        "visual_qa": visual_qa_summary,
     }

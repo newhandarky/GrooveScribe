@@ -14,6 +14,7 @@ from app.core.errors import ApiErrorException, ErrorCode
 from app.models import ExportFile, TranscriptionJob
 from app.models.enums import ExportFileStatus, ExportFileType
 from app.services.result_service import ResultService
+from app.storage import ArtifactType, build_job_artifact_key
 from app.storage.base import StorageAdapter
 from app.storage.errors import ArtifactInvalidError, ArtifactNotFoundError, StorageReadFailedError
 
@@ -89,6 +90,7 @@ class ReviewPacketService:
                 "",
                 f"- MusicXML: `{(validation.get('musicxml') or {}).get('status', 'not_reported')}`",
                 f"- PDF: `{(validation.get('pdf') or {}).get('status', 'not_reported')}`",
+                f"- Visual QA: `{(validation.get('visual_qa') or {}).get('status', 'not_reported')}`",
                 "",
                 "## Checklist",
                 "",
@@ -127,6 +129,18 @@ class ReviewPacketService:
                         archive.writestr(filename, reader.read())
                 except (ArtifactInvalidError, ArtifactNotFoundError, StorageReadFailedError):
                     continue
+            chart_events_key = build_job_artifact_key(job.id, ArtifactType.CHART_EVENTS)
+            try:
+                with self.storage.open_reader(chart_events_key) as reader:
+                    archive.writestr("chart_events.json", reader.read())
+            except (ArtifactInvalidError, ArtifactNotFoundError, StorageReadFailedError):
+                pass
+            preview_key = build_job_artifact_key(job.id, ArtifactType.VISUAL_PREVIEW)
+            try:
+                with self.storage.open_reader(preview_key) as reader:
+                    archive.writestr("score_preview.png", reader.read())
+            except (ArtifactInvalidError, ArtifactNotFoundError, StorageReadFailedError):
+                pass
         return ReviewPacketZip(content=buffer.getvalue())
 
     def _build_packet_from_job(self, job: TranscriptionJob) -> dict:
@@ -159,6 +173,7 @@ class ReviewPacketService:
             "pipeline_config": pipeline.get("config"),
             "quality": quality,
             "validation": validation,
+            "audio_review": self.result_service.review_timeline(job),
             "review_checklist": _review_checklist(flags, warnings, validation, exports),
             "manual_eval_seed": _manual_eval_seed(job, pipeline, quality, warnings),
             "redaction": {"status": "not_checked", "unsafe_token_count": 0},
@@ -215,7 +230,7 @@ def _validation_statuses(validation: dict | None) -> dict | None:
         return None
     musicxml = validation.get("musicxml") or {}
     pdf = validation.get("pdf") or {}
-    return {
+    result = {
         "musicxml": {
             **musicxml,
             "status": "parseable" if musicxml.get("parseable") else "unavailable" if not musicxml.get("available") else "needs_review",
@@ -225,6 +240,24 @@ def _validation_statuses(validation: dict | None) -> dict | None:
             "status": "openable" if pdf.get("openable") else "optional_unavailable" if pdf.get("optional") else "unavailable",
         },
     }
+    visual_qa = validation.get("visual_qa")
+    if isinstance(visual_qa, dict):
+        status = str(visual_qa.get("status") or "not_requested")
+        if status not in {
+            "completed",
+            "musescore_gui_session_unavailable",
+            "renderer_unavailable",
+            "render_failed",
+            "not_requested",
+        }:
+            status = "not_requested"
+        result["visual_qa"] = {
+            "status": status,
+            "reason_code": str(visual_qa.get("reason_code") or "") or None,
+            "pdf_available": bool(visual_qa.get("pdf_available")),
+            "first_page_png_available": bool(visual_qa.get("first_page_png_available")),
+        }
+    return result
 
 
 def _manual_eval_seed(job: TranscriptionJob, pipeline: dict, quality: dict | None, warnings: list[str]) -> dict:

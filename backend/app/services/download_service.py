@@ -10,6 +10,7 @@ from app.models import ExportFile, TranscriptionJob
 from app.models.enums import ExportFileStatus, ExportFileType, JobStatus
 from app.storage.base import StorageAdapter
 from app.storage.errors import ArtifactNotFoundError
+from app.storage.keys import sanitize_filename
 
 _FILENAME_BY_EXPORT_TYPE: dict[ExportFileType, str] = {
     ExportFileType.MIDI: "processed_drum.mid",
@@ -66,6 +67,33 @@ class DownloadService:
             content_type=export_file.content_type,
             filename=_FILENAME_BY_EXPORT_TYPE[normalized_type],
         )
+
+    def open_review_audio(self, db: Session, *, job_id: str, audio_kind: str) -> DownloadArtifact:
+        job = (
+            db.query(TranscriptionJob)
+            .options(selectinload(TranscriptionJob.audio_file), selectinload(TranscriptionJob.drum_track))
+            .filter(TranscriptionJob.id == job_id)
+            .one_or_none()
+        )
+        if job is None:
+            raise ApiErrorException(ErrorCode.JOB_NOT_FOUND, details={"job_id": job_id})
+        if job.status != JobStatus.COMPLETED:
+            raise ApiErrorException(ErrorCode.JOB_NOT_COMPLETED, details={"job_id": job_id, "status": job.status.value})
+        if audio_kind == "original":
+            storage_key = job.audio_file.original_storage_key
+            content_type = job.audio_file.content_type
+            filename = sanitize_filename(job.audio_file.original_filename)
+        elif audio_kind == "drums_stem" and job.drum_track and job.drum_track.drums_stem_storage_key:
+            storage_key = job.drum_track.drums_stem_storage_key
+            content_type = "audio/wav"
+            filename = "drums_stem.wav"
+        else:
+            raise ApiErrorException(ErrorCode.EXPORT_NOT_FOUND, details={"job_id": job_id, "type": audio_kind})
+        try:
+            reader = self.storage.open_reader(storage_key)
+        except ArtifactNotFoundError as exc:
+            raise ApiErrorException(ErrorCode.EXPORT_NOT_FOUND, details={"job_id": job_id, "type": audio_kind}) from exc
+        return DownloadArtifact(reader=reader, content_type=content_type, filename=filename)
 
     def _parse_export_type(self, export_type: str) -> ExportFileType:
         try:

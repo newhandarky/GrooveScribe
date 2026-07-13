@@ -107,6 +107,25 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
         download_url: null,
       },
     ],
+    review_timeline: {
+      schema_version: '1.0',
+      timing_source: 'score_tempo',
+      tempo_bpm: 120,
+      audio_sources: [
+        { kind: 'original', label: '原始音訊', available: true, playback_url: '/api/v1/transcriptions/job-1/review-audio/original' },
+        { kind: 'drums_stem', label: '分離鼓聲', available: true, playback_url: '/api/v1/transcriptions/job-1/review-audio/drums_stem' },
+      ],
+      measures: [
+        {
+          measure_index: 1,
+          start_seconds: 0,
+          end_seconds: 2,
+          render_kind: 'groove',
+          drum_counts: { closed_hat: 8, kick: 2, snare: 2 },
+          warnings: [],
+        },
+      ],
+    },
     pipeline: {
       mode: 'mock',
       status: 'completed',
@@ -139,6 +158,37 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
         duration_seconds: 12,
         tempo_bpm: 120,
         estimated_measure_count: 4,
+        notation_readability: {
+          layout_profile: 'standard_drum_v1',
+          voice_count: 2,
+          has_hand_voice: true,
+          has_foot_voice: true,
+          hand_event_count: 3,
+          foot_event_count: 2,
+          generic_tom_count: 0,
+          measure_count: 4,
+          dense_measure_count: 0,
+          dense_measure_threshold: 24,
+          warnings: [],
+        },
+        notation_chart: {
+          mode: 'readable_drum_chart_v2',
+          readability_verdict: 'readable_chart_candidate',
+          original_event_count: 7,
+          chart_event_count: 5,
+          max_events_per_measure: 8,
+          max_visible_notes_per_measure: 5,
+          measure_count: 4,
+          groove_measure_count: 4,
+          repeat_measure_count: 0,
+          fill_measure_count: 0,
+          accent_measure_count: 0,
+          preserved_counts: { closed_hat: 2, kick: 2, snare: 1 },
+          dropped_counts: {},
+          dense_measures_before: 0,
+          dense_measures_after: 0,
+          warnings: [],
+        },
         quality_flags: ['sparse_transcription'],
         warnings: ['sparse_transcription'],
         postprocess_filters: {},
@@ -354,6 +404,12 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('Pipeline config');
     expect(html).toContain('Demo / mock');
     expect(html).toContain('Review packet');
+    expect(html).toContain('音訊對照修譜');
+    expect(html).toContain('原始音訊');
+    expect(html).toContain('分離鼓聲');
+    expect(html).toContain('closed_hat 8 · kick 2 · snare 2');
+    expect(html).toContain('/api/v1/transcriptions/job-1/review-audio/original');
+    expect(html).not.toContain('/tmp/');
     expect(html).toContain('/api/v1/transcriptions/job-1/review-packet');
     expect(html).toContain('/api/v1/transcriptions/job-1/download/review-packet');
     expect(html).toContain('manual eval seed');
@@ -366,6 +422,8 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('MusicXML preview');
     expect(html).toContain('品質狀態未知');
     expect(html).toContain('尚未產生品質判斷');
+    expect(html).toContain('雙聲部鼓譜');
+    expect(html).toContain('可讀鼓譜 5/7');
     expect(html).toContain('MusicXML validation');
     expect(html).toContain('parseable');
     expect(html).toContain('PDF validation');
@@ -423,6 +481,44 @@ describe('local app smoke rendering', () => {
               duration_seconds: 30,
               tempo_bpm: 118,
               estimated_measure_count: 8,
+              notation_readability: {
+                layout_profile: 'standard_drum_v1',
+                voice_count: 2,
+                has_hand_voice: true,
+                has_foot_voice: true,
+                hand_event_count: 6,
+                foot_event_count: 1,
+                generic_tom_count: 6,
+                measure_count: 8,
+                dense_measure_count: 2,
+                dense_measure_threshold: 24,
+                warnings: ['notation_dense_full_mix_likely', 'generic_tom_position_used'],
+              },
+              notation_chart: {
+                mode: 'readable_drum_chart_v3',
+                readability_verdict: 'readable_chart_candidate',
+                original_event_count: 80,
+                chart_event_count: 24,
+                max_events_per_measure: 8,
+                max_visible_notes_per_measure: 8,
+                measure_count: 12,
+                groove_measure_count: 8,
+                repeat_measure_count: 3,
+                fill_measure_count: 1,
+                accent_measure_count: 1,
+                anchor_measure_count: 2,
+                literal_measure_count: 3,
+                break_measure_count: 0,
+                stable_groove_section_count: 1,
+                complete_core_groove_measure_count: 6,
+                incomplete_core_groove_measure_count: 2,
+                hihat_rendered_measure_count: 6,
+                preserved_counts: { closed_hat: 8, kick: 8, snare: 8 },
+                dropped_counts: { tom: 20, cymbal: 12 },
+                dense_measures_before: 4,
+                dense_measures_after: 0,
+                warnings: ['notation_tom_reduced_for_readability'],
+              },
               quality_flags: ['hihat_missing_likely', 'mostly_tom_output'],
               warnings: ['hihat_missing_likely', 'mostly_tom_output'],
               postprocess_filters: {
@@ -472,6 +568,12 @@ describe('local app smoke rendering', () => {
                 error_code: null,
                 warnings: [],
               },
+              visual_qa: {
+                status: 'musescore_gui_session_unavailable',
+                reason_code: 'musescore_gui_session_unavailable',
+                pdf_available: false,
+                first_page_png_available: false,
+              },
             },
             pipeline_log_available: true,
           },
@@ -486,7 +588,16 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('3/5');
     expect(html).toContain('Tom 誤判偏多');
     expect(html).toContain('已套用 tom filter');
+    expect(html).toContain('譜面偏密，需人工整理');
+    expect(html).toContain('這份 full-mix 草稿譜面偏密，請先整理重複或過密小節，再進行細修。');
+    expect(html).toContain('Tom 目前使用單一通用位置；需要時請人工區分高 tom、floor tom。');
+    expect(html).toContain('逐小節可讀鼓譜 24/80');
+    expect(html).toContain('MusicXML 已使用逐小節可讀鼓譜；完整 processed events 仍保留於 MIDI。');
+    expect(html).toContain('每小節實寫簡化鼓譜');
+    expect(html).toContain('完整 core groove：6');
+    expect(html).toContain('Hi-hat 小節：6');
     expect(html).toContain('需檢查');
+    expect(html).toContain('已產生 MusicXML；本機視覺預覽需在 MuseScore app 開啟。');
     expect(html).toContain('Drum Transcription');
     expect(html).toContain('hihat_missing_likely');
     expect(html).toContain('tom: 6');

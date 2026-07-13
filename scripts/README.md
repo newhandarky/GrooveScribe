@@ -10,6 +10,9 @@
 - `run_adtof_transcription.py`：透過可配置 ADTOF command 將 `drums.wav` 轉成 `raw_drum.mid`。
 - `run_midi_postprocess.py`：將 `raw_drum.mid` 後處理為 `processed_drum.mid` 與 `drum_events.json`。
 - `generate_score.py`：從 `drum_events.json` 產生 `score.musicxml`，可選用 MuseScore CLI 轉出 PDF。
+- `run_musescore_visual_qa.py`：從 MusicXML 產生 PDF 與第一頁 PNG。Linux headless CI 可執行：
+  `python scripts/run_musescore_visual_qa.py --musicxml /path/to/score.musicxml --output-dir /tmp/score-visual-qa --renderer musescore`。
+  macOS agent 若無 GUI session，會回報 `musescore_gui_session_unavailable`，不代表 MusicXML 失敗。
 - `generate_test_fixtures.py`：產生 Phase 1 pipeline smoke test 用的合成音檔與 manifest。
 - `check_ai_runtime.py`：輸出本機 ffmpeg、Demucs、ADTOF command/template、MuseScore、Python package 可用性，並列出真 AI local pipeline 缺口。
 - `prepare_adtof_verify_input.py`：用 full mix fixture 執行 normalize + Demucs，產生 ADTOF verification 所需的 `drums.wav`；支援 `--dry-run`。

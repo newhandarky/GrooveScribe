@@ -23,6 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mock-ai", action="store_true", help="Use mock Demucs/ADTOF outputs for local smoke tests")
     parser.add_argument("--title", default="GrooveScribe Drum Draft")
     parser.add_argument("--export-pdf", action="store_true", help="Attempt PDF export if MuseScore CLI is available")
+    parser.add_argument("--visual-qa", action="store_true", help="Attempt MuseScore PDF and first-page PNG visual QA")
     parser.add_argument("--require-pdf", action="store_true", help="Fail the pipeline if PDF export fails")
     parser.add_argument("--pdf-renderer", default=None)
     parser.add_argument("--demucs-model-name", default="htdemucs")
@@ -43,6 +44,7 @@ def parse_args() -> argparse.Namespace:
         help="Optional opt-in ADTOF threshold preset, e.g. separated_v1",
     )
     parser.add_argument("--adtof-timeout-seconds", type=int, default=1_800)
+    parser.add_argument("--tempo-bpm", type=float, default=None, help="Optional MusicXML tempo override for manual evaluation")
     parser.add_argument(
         "--tom-filter-preset",
         default=None,
@@ -89,6 +91,7 @@ def main() -> int:
         mock_ai=args.mock_ai,
         export_pdf=args.export_pdf,
         require_pdf=args.require_pdf,
+        visual_qa=args.visual_qa,
         title=args.title,
         demucs_model_name=args.demucs_model_name,
         demucs_device=args.demucs_device,
@@ -104,6 +107,7 @@ def main() -> int:
         adtof_threshold_preset=args.adtof_threshold_preset,
         adtof_timeout_seconds=args.adtof_timeout_seconds,
         tom_filter_preset=args.tom_filter_preset,
+        tempo_bpm=args.tempo_bpm,
         pdf_renderer=args.pdf_renderer,
     )
     result = LocalPipelineRunner(config).run(args.input, args.output_dir)

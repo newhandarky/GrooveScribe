@@ -201,6 +201,22 @@ def download_transcription_review_packet(
     )
 
 
+@router.get("/{job_id}/review-audio/{audio_kind}")
+def download_transcription_review_audio(
+    job_id: str,
+    audio_kind: str,
+    db: Annotated[Session, Depends(get_db_session)],
+    download_service: Annotated[DownloadService, Depends(get_download_service)],
+) -> StreamingResponse:
+    artifact = download_service.open_review_audio(db, job_id=job_id, audio_kind=audio_kind)
+    return StreamingResponse(
+        artifact.reader,
+        media_type=artifact.content_type,
+        headers={"Content-Disposition": f'inline; filename="{artifact.filename}"'},
+        background=BackgroundTask(artifact.reader.close),
+    )
+
+
 @router.get("/{job_id}/download/{export_type}")
 def download_transcription_export(
     job_id: str,
@@ -281,6 +297,7 @@ def _build_result_response(
             for export in sorted(job.export_files, key=lambda item: item.type.value)
         ],
         pipeline=result_service.pipeline_summary(job),
+        review_timeline=result_service.review_timeline(job),
         source_result_summary=_source_result_summary(db, job, result_service),
     )
 

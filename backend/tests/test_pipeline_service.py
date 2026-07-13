@@ -76,6 +76,7 @@ def _write_completed_pipeline_output(output_dir: Path, *, include_pdf: bool = Tr
         "raw_midi": output_dir / "midi" / "raw_drum.mid",
         "processed_midi": output_dir / "midi" / "processed_drum.mid",
         "drum_events": output_dir / "midi" / "drum_events.json",
+        "chart_events": output_dir / "notation" / "chart_events.json",
         "musicxml": output_dir / "notation" / "score.musicxml",
     }
     if include_pdf:
