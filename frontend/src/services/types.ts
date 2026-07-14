@@ -147,6 +147,11 @@ export interface TranscriptionResultResponse {
       drum_counts: Record<string, number>;
       warnings: string[];
     }>;
+    performance_playback?: {
+      available: boolean;
+      event_count: number;
+      events: Array<{ time_seconds: number; drum: string; velocity: number }>;
+    };
   };
   pipeline?: {
     mode: 'mock' | 'true_ai' | 'unknown' | string;
@@ -248,6 +253,18 @@ export interface TranscriptionResultResponse {
         };
         musicxml_available: boolean;
         musicxml_parseable: boolean;
+      };
+      performance_gate?: {
+        schema_version: string;
+        verdict: 'performance_ready' | 'playable_but_low_confidence' | 'not_ready' | string;
+        delivery_allowed: boolean;
+        ground_truth_verified: boolean;
+        blocking_issues: string[];
+        midi: Record<string, string | number | boolean | null>;
+        musicxml: Record<string, string | number | boolean | null>;
+        rhythm: Record<string, string | number | boolean | null>;
+        playability: Record<string, string | number | boolean | null>;
+        audio_alignment: Record<string, string | number | boolean | null>;
       };
     } | null;
     validation?: {

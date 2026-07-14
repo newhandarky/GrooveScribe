@@ -149,6 +149,7 @@ class PipelineQualitySummary(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     postprocess_filters: dict[str, dict] = Field(default_factory=dict)
     quality_verdict: PipelineQualityVerdict = Field(default_factory=PipelineQualityVerdict)
+    performance_gate: dict = Field(default_factory=dict)
 
 
 class PipelineArtifactValidation(BaseModel):

@@ -56,6 +56,8 @@ def build_job_artifact_key(
         key = f"jobs/{safe_job_id}/midi/raw_drum.mid"
     elif artifact_type == ArtifactType.PROCESSED_MIDI:
         key = f"jobs/{safe_job_id}/midi/processed_drum.mid"
+    elif artifact_type == ArtifactType.PERFORMANCE_MIDI:
+        key = f"jobs/{safe_job_id}/notation/performance_score.mid"
     elif artifact_type == ArtifactType.DRUM_EVENTS:
         key = f"jobs/{safe_job_id}/midi/drum_events.json"
     elif artifact_type == ArtifactType.CHART_EVENTS:

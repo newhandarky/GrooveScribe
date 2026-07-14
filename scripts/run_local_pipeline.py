@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from ai_pipeline.local_runner import LocalPipelineConfig, LocalPipelineRunner
@@ -26,6 +27,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--visual-qa", action="store_true", help="Attempt MuseScore PDF and first-page PNG visual QA")
     parser.add_argument("--require-pdf", action="store_true", help="Fail the pipeline if PDF export fails")
     parser.add_argument("--pdf-renderer", default=None)
+    parser.add_argument(
+        "--performance-gate-calibration",
+        type=Path,
+        default=_optional_path(os.environ.get("GROOVESCRIBE_PERFORMANCE_GATE_CALIBRATION")),
+        help="Optional redacted gate_calibration.json; without it performance_ready fails closed.",
+    )
     parser.add_argument("--demucs-model-name", default="htdemucs")
     parser.add_argument("--demucs-device", default="auto")
     parser.add_argument("--demucs-timeout-seconds", type=int, default=1_800)
@@ -109,6 +116,7 @@ def main() -> int:
         tom_filter_preset=args.tom_filter_preset,
         tempo_bpm=args.tempo_bpm,
         pdf_renderer=args.pdf_renderer,
+        performance_gate_calibration=_load_json(args.performance_gate_calibration),
     )
     result = LocalPipelineRunner(config).run(args.input, args.output_dir)
     print(
@@ -125,6 +133,20 @@ def main() -> int:
         )
     )
     return 0 if result.status == "completed" else 1
+
+
+def _optional_path(value: str | None) -> Path | None:
+    return Path(value) if value else None
+
+
+def _load_json(path: Path | None) -> dict | None:
+    if path is None:
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 if __name__ == "__main__":

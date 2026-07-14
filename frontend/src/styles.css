@@ -813,6 +813,25 @@ input {
   padding: 12px;
 }
 
+.performanceDeliveryPanel {
+  border: 1px solid var(--border);
+  border-left: 4px solid #64748b;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.performanceDeliveryPanel.performance_ready {
+  border-left-color: #15803d;
+}
+
+.performanceDeliveryPanel.playable_but_low_confidence {
+  border-left-color: #b45309;
+}
+
+.performanceDeliveryPanel.not_ready {
+  border-left-color: #b91c1c;
+}
+
 .qualityStatusPanel.ready {
   background: #edf7f0;
   border-color: #a9d2b7;

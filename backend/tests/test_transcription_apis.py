@@ -13,7 +13,7 @@ from app.models.enums import ExportFileStatus, ExportFileType, JobStatus, Pipeli
 from app.schemas.transcriptions import PipelineSummaryResult, TranscriptionResultResponse
 from app.services.download_service import DownloadService
 from app.services.job_query_service import JobQueryService
-from app.services.result_service import ResultService, _sanitize_validation_summary
+from app.services.result_service import ResultService, _sanitize_performance_gate, _sanitize_validation_summary
 from app.services.review_packet_service import ReviewPacketService
 from app.storage.keys import build_job_artifact_key
 from app.storage.local import LocalStorageAdapter
@@ -56,6 +56,31 @@ def test_visual_qa_validation_is_public_safe_and_does_not_change_musicxml_status
         "first_page_png_available": False,
     }
     assert not any(token.lower() in json.dumps(summary).lower() for token in UNSAFE_TOKENS)
+
+
+def test_performance_gate_is_public_safe_and_keeps_not_ready_state() -> None:
+    gate = _sanitize_performance_gate(
+        {
+            "verdict": "performance_ready",
+            "delivery_allowed": True,
+            "blocking_issues": ["/tmp/leaked", "audio_onset_alignment_low"],
+            "midi": {"parseable": True, "debug_path": "/Users/private"},
+            "audio_alignment": {"status": "measured", "onset_alignment_rate": 0.72, "command_template": "secret"},
+        }
+    )
+
+    assert gate == {
+        "schema_version": "1.0",
+        "verdict": "performance_ready",
+        "delivery_allowed": True,
+        "ground_truth_verified": False,
+        "blocking_issues": ["audio_onset_alignment_low"],
+        "midi": {"parseable": True},
+        "musicxml": {},
+        "rhythm": {},
+        "playability": {},
+        "audio_alignment": {"status": "measured", "onset_alignment_rate": 0.72},
+    }
 
 
 def _session():

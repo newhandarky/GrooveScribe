@@ -374,6 +374,8 @@ def _sanitize_quality_summary(raw: dict) -> dict:
     raw_verdict = raw.get("quality_verdict")
     if isinstance(raw_verdict, dict):
         quality["quality_verdict"] = _sanitize_quality_verdict(raw_verdict)
+    if isinstance(raw.get("performance_gate"), dict):
+        quality["performance_gate"] = _sanitize_performance_gate(raw.get("performance_gate"))
     return quality
 
 
@@ -408,6 +410,37 @@ def _sanitize_quality_verdict(raw: dict) -> dict:
         },
         "musicxml_available": musicxml_available,
         "musicxml_parseable": musicxml_parseable,
+    }
+
+
+def _sanitize_performance_gate(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    verdict = _safe_code(value.get("verdict")) or "not_ready"
+    if verdict not in {"performance_ready", "playable_but_low_confidence", "not_ready"}:
+        verdict = "not_ready"
+    def safe_section(name: str) -> dict:
+        section = value.get(name)
+        if not isinstance(section, dict):
+            return {}
+        return {
+            str(key): item
+            for key, item in section.items()
+            if isinstance(item, (str, int, float, bool, type(None)))
+            and _is_public_safe_text(str(item))
+            and not any(token in str(key).lower() for token in ("path", "command", "template", "stderr", "stdout"))
+        }
+    return {
+        "schema_version": _safe_code(value.get("schema_version")) or "1.0",
+        "verdict": verdict,
+        "delivery_allowed": bool(value.get("delivery_allowed")),
+        "ground_truth_verified": bool(value.get("ground_truth_verified")),
+        "blocking_issues": [item for item in _string_list(value.get("blocking_issues")) if _is_public_safe_text(item)],
+        "midi": safe_section("midi"),
+        "musicxml": safe_section("musicxml"),
+        "rhythm": safe_section("rhythm"),
+        "playability": safe_section("playability"),
+        "audio_alignment": safe_section("audio_alignment"),
     }
 
 

@@ -17,6 +17,7 @@ from ai_pipeline.notation import (
     NotationConfig,
     validate_score_artifacts,
 )
+from ai_pipeline.notation.performance_gate import evaluate_performance_score
 from ai_pipeline.preprocessing import FfmpegAudioNormalizer
 from ai_pipeline.source_separation import DemucsSourceSeparator
 from ai_pipeline.transcription import AdtofDrumTranscriber
@@ -43,6 +44,7 @@ class LocalPipelineConfig:
     tom_filter_preset: str | None = None
     tempo_bpm: float | None = None
     pdf_renderer: str | None = None
+    performance_gate_calibration: dict | None = None
 
 
 @dataclass
@@ -267,7 +269,11 @@ class LocalPipelineRunner:
             artifacts["drum_events"],
             output_dir / "notation",
         )
-        stage_artifacts = {"musicxml": musicxml.musicxml_path, "chart_events": musicxml.chart_events_path}
+        stage_artifacts = {
+            "musicxml": musicxml.performance_musicxml_path,
+            "performance_midi": musicxml.performance_midi_path,
+            "chart_events": musicxml.chart_events_path,
+        }
         pdf_path: Path | None = None
         visual_qa_report = {
             "status": "not_requested",
@@ -290,7 +296,7 @@ class LocalPipelineRunner:
 
         if self.config.export_pdf or self.config.require_pdf or self.config.visual_qa:
             visual_qa = MuseScoreVisualQaRenderer(renderer_binary=self.config.pdf_renderer).render(
-                musicxml.musicxml_path,
+                musicxml.performance_musicxml_path,
                 output_dir / "exports",
             )
             visual_qa_report = visual_qa.report()
@@ -306,9 +312,16 @@ class LocalPipelineRunner:
             }
 
         report["validation"] = validate_score_artifacts(
-            musicxml.musicxml_path,
+            musicxml.performance_musicxml_path,
             pdf_path,
             visual_qa=visual_qa_report,
+        )
+        report["performance_gate"] = evaluate_performance_score(
+            chart_events_path=musicxml.chart_events_path,
+            performance_midi_path=musicxml.performance_midi_path,
+            performance_musicxml_path=musicxml.performance_musicxml_path,
+            drums_stem_path=artifacts.get("drums_stem"),
+            gate_calibration=self.config.performance_gate_calibration,
         )
         return stage_artifacts, report
 
@@ -366,6 +379,7 @@ def _build_quality_summary(stage_logs: list[StageLog]) -> dict | None:
         musicxml_available=bool(musicxml.get("available")),
         musicxml_parseable=bool(musicxml.get("parseable")),
     )
+    performance_gate = notation_report.get("performance_gate") if isinstance(notation_report.get("performance_gate"), dict) else {}
     return {
         "schema_version": "1.0",
         "raw_event_count": midi_report.get("input_event_count"),
@@ -385,6 +399,7 @@ def _build_quality_summary(stage_logs: list[StageLog]) -> dict | None:
         "warnings": sorted(set(warnings)),
         "postprocess_filters": midi_report.get("postprocess_filters") or {},
         "quality_verdict": verdict,
+        "performance_gate": performance_gate,
     }
 
 

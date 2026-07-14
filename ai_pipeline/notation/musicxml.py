@@ -9,6 +9,8 @@ from pathlib import Path
 
 from ai_pipeline.notation.errors import MusicXmlInvalidError, NotationGenerationFailedError
 from ai_pipeline.notation.types import MusicXmlResult, NotationConfig
+from ai_pipeline.midi.simple_midi import write_drum_midi
+from ai_pipeline.midi.types import ProcessedDrumEvent
 
 HAND_VOICE = "1"
 FOOT_VOICE = "2"
@@ -102,10 +104,30 @@ class MusicXmlGenerator:
         ET.indent(tree, space="  ")
         tree.write(musicxml_path, encoding="utf-8", xml_declaration=True)
         self._validate_musicxml(musicxml_path)
+        performance_musicxml_path = output_dir / "performance_score.musicxml"
+        performance_musicxml_path.write_bytes(musicxml_path.read_bytes())
+        performance_midi_path = output_dir / "performance_score.mid"
+        write_drum_midi(
+            performance_midi_path,
+            tuple(
+                ProcessedDrumEvent(
+                    tick=int(event["tick"]),
+                    note=_midi_note_for_drum(str(event["drum"])),
+                    drum=str(event["drum"]),
+                    velocity=int(event.get("velocity", 80)),
+                )
+                for event in chart_events
+            ),
+            ticks_per_beat=ticks_per_beat,
+            tempo_bpm=tempo_bpm,
+            time_signature=time_signature,
+        )
 
         measure_count = len(root.findall("./part/measure"))
         return MusicXmlResult(
             musicxml_path=musicxml_path,
+            performance_musicxml_path=performance_musicxml_path,
+            performance_midi_path=performance_midi_path,
             chart_events_path=chart_events_path,
             event_count=len(events),
             chart_event_count=len(chart_events),

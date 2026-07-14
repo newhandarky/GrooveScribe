@@ -821,7 +821,8 @@ export function ResultCard({
       <PipelineReview pipeline={result.pipeline} exports={result.exports} />
       <ReviewPacketPanel result={result} />
       <QualityStatusPanel pipeline={result.pipeline} />
-      <ReviewWorkflowPanel jobId={result.job_id} timeline={result.review_timeline} />
+      <PerformanceDeliveryPanel pipeline={result.pipeline} />
+      <PerformancePlaybackPanel playback={result.review_timeline?.performance_playback} />
       <MusicXmlPreview url={result.preview.musicxml_url} validation={validation} />
 
       {result.drum_track?.warnings.length ? (
@@ -855,92 +856,6 @@ export function ResultCard({
         </div>
       ) : null}
     </div>
-  );
-}
-
-type MeasureReviewStatus = 'unreviewed' | 'correct' | 'needs_correction' | 'uncertain';
-type MeasureReviewRecord = { status: MeasureReviewStatus; note: string };
-
-function ReviewWorkflowPanel({
-  jobId,
-  timeline,
-}: {
-  jobId: string;
-  timeline: TranscriptionResultResponse['review_timeline'];
-}) {
-  const storageKey = `groovescribe.measureReview.${jobId}`;
-  const [records, setRecords] = useState<Record<string, MeasureReviewRecord>>({});
-
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(storageKey);
-      setRecords(stored ? (JSON.parse(stored) as Record<string, MeasureReviewRecord>) : {});
-    } catch {
-      setRecords({});
-    }
-  }, [storageKey]);
-
-  if (!timeline || !timeline.measures.length) return null;
-  const updateRecord = (measureIndex: number, patch: Partial<MeasureReviewRecord>) => {
-    setRecords((current) => {
-      const next = {
-        ...current,
-        [String(measureIndex)]: {
-          status: current[String(measureIndex)]?.status ?? 'unreviewed',
-          note: current[String(measureIndex)]?.note ?? '',
-          ...patch,
-        },
-      };
-      window.localStorage.setItem(storageKey, JSON.stringify(next));
-      return next;
-    });
-  };
-
-  return (
-    <section className="reviewWorkflowPanel">
-      <div className="reviewHeader">
-        <strong>音訊對照修譜</strong>
-        <span>{timeline.timing_source === 'score_tempo' ? `依 ${formatNumber(timeline.tempo_bpm)} BPM 估算小節時間` : '小節時間未提供'}</span>
-      </div>
-      <div className="reviewAudioSources">
-        {timeline.audio_sources.map((source) => (
-          <div key={source.kind} className="reviewAudioSource">
-            <span>{source.label}</span>
-            {source.available && source.playback_url ? <audio controls preload="metadata" src={source.playback_url} /> : <em>未提供</em>}
-          </div>
-        ))}
-      </div>
-      <div className="measureReviewTable" role="region" aria-label="小節音訊對照表">
-        {timeline.measures.map((measure) => {
-          const record = records[String(measure.measure_index)] ?? { status: 'unreviewed', note: '' };
-          return (
-            <div className="measureReviewRow" key={measure.measure_index}>
-              <strong>#{measure.measure_index}</strong>
-              <span>{formatReviewRange(measure.start_seconds, measure.end_seconds)}</span>
-              <span>{formatDrumSummary(measure.drum_counts)}</span>
-              <span>{measure.render_kind}</span>
-              <select
-                aria-label={`第 ${measure.measure_index} 小節判讀`}
-                value={record.status}
-                onChange={(event) => updateRecord(measure.measure_index, { status: event.target.value as MeasureReviewStatus })}
-              >
-                <option value="unreviewed">未檢查</option>
-                <option value="correct">正確</option>
-                <option value="needs_correction">需修正</option>
-                <option value="uncertain">無法判斷</option>
-              </select>
-              <input
-                aria-label={`第 ${measure.measure_index} 小節備註`}
-                value={record.note}
-                placeholder={measure.warnings.length ? measure.warnings.join(', ') : '備註'}
-                onChange={(event) => updateRecord(measure.measure_index, { note: event.target.value })}
-              />
-            </div>
-          );
-        })}
-      </div>
-      <p className="reviewWorkflowNote">判讀結果只儲存在這台瀏覽器；請用 review packet 作為交接與正式人工評估的起點。</p>
-    </section>
   );
 }
 
@@ -1085,34 +1000,110 @@ function QualityStatusPanel({ pipeline }: { pipeline: TranscriptionResultRespons
   );
 }
 
+function PerformanceDeliveryPanel({ pipeline }: { pipeline: TranscriptionResultResponse['pipeline'] }) {
+  const gate = pipeline?.quality?.performance_gate;
+  if (!gate) return null;
+  const labels: Record<string, string> = {
+    performance_ready: '可直接演奏',
+    playable_but_low_confidence: '可播放，但系統信心不足',
+    not_ready: '系統未能可靠完成',
+  };
+  const alignment = gate.audio_alignment?.onset_alignment_rate;
+  return (
+    <section className={`performanceDeliveryPanel ${gate.verdict}`}>
+      <div className="qualityStatusHeader">
+        <div>
+          <strong>{labels[gate.verdict] ?? '系統未能可靠完成'}</strong>
+          <span>自動演奏交付判定</span>
+        </div>
+        <span>{gate.ground_truth_verified ? '已由對照 MIDI 驗證' : gate.delivery_allowed ? '已通過校準後自動 gate' : '不宣稱完成品'}</span>
+      </div>
+      <div className="qualityStatusGrid">
+        <Metric label="Performance MIDI" value={gate.midi?.playback_ready === true ? '可播放' : '未驗證'} />
+        <Metric label="MusicXML" value={gate.musicxml?.parseable === true ? '可讀取' : '未驗證'} />
+        <Metric label="音訊 onset 對齊" value={typeof alignment === 'number' ? `${Math.round(alignment * 100)}%` : '未取得'} />
+        <Metric label="核心 groove" value={gate.playability?.core_groove_stable === true ? '穩定' : '未確認'} />
+      </div>
+      {gate.blocking_issues.length ? (
+        <p className="qualityStatusNote">系統限制：{gate.blocking_issues.map(qualityLimitationLabel).join('、')}</p>
+      ) : (
+        <p className="qualityStatusNote">系統已完成節奏、可演奏性與音訊對齊檢查。</p>
+      )}
+    </section>
+  );
+}
+
+function PerformancePlaybackPanel({
+  playback,
+}: {
+  playback: NonNullable<TranscriptionResultResponse['review_timeline']>['performance_playback'];
+}) {
+  const [playing, setPlaying] = useState(false);
+  const timers = useRef<number[]>([]);
+  if (!playback?.available || !playback.events.length) return null;
+  const stop = () => {
+    timers.current.forEach((timer) => window.clearTimeout(timer));
+    timers.current = [];
+    setPlaying(false);
+  };
+  const play = () => {
+    stop();
+    const context = new AudioContext();
+    const start = context.currentTime + 0.05;
+    playback.events.forEach((event) => {
+      const timer = window.setTimeout(() => playDrumPreview(context, start + event.time_seconds, event.drum, event.velocity), Math.max(0, event.time_seconds * 1000));
+      timers.current.push(timer);
+    });
+    const last = playback.events[playback.events.length - 1];
+    timers.current.push(window.setTimeout(stop, last.time_seconds * 1000 + 700));
+    setPlaying(true);
+  };
+  return (
+    <section className="performanceDeliveryPanel">
+      <div className="qualityStatusHeader">
+        <div>
+          <strong>瀏覽器內試聽</strong>
+          <span>使用 simplified performance chart，而非完整偵測事件</span>
+        </div>
+        <button type="button" className="secondaryButton compactButton" onClick={playing ? stop : play}>
+          {playing ? '停止' : '播放鼓譜'}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function playDrumPreview(context: AudioContext, when: number, drum: string, velocity: number) {
+  const gain = context.createGain();
+  gain.gain.setValueAtTime(Math.max(0.03, velocity / 500), when);
+  gain.gain.exponentialRampToValueAtTime(0.001, when + (drum === 'closed_hat' || drum === 'open_hat' || drum === 'cymbal' ? 0.06 : 0.16));
+  const oscillator = context.createOscillator();
+  oscillator.type = drum === 'kick' ? 'sine' : drum === 'snare' ? 'triangle' : 'square';
+  oscillator.frequency.setValueAtTime(drum === 'kick' ? 95 : drum === 'snare' ? 220 : drum === 'tom' ? 145 : 1700, when);
+  oscillator.connect(gain).connect(context.destination);
+  oscillator.start(when);
+  oscillator.stop(when + 0.18);
+}
+
 function ReviewPacketPanel({ result }: { result: TranscriptionResultResponse }) {
-  const qualityFlags = result.pipeline?.quality?.quality_flags ?? [];
-  const warnings = [...new Set([...(result.pipeline?.warnings ?? []), ...(result.pipeline?.quality?.warnings ?? [])])];
-  const pdf = result.exports.find((item) => item.type === 'pdf');
-  const reviewItems = [
-    '對照原音檢查 kick / snare / hihat 位置。',
-    '開啟 MusicXML 確認小節、拍號與可讀性。',
-    ...(qualityFlags.length ? [`優先檢查 quality flags：${qualityFlags.join(', ')}`] : []),
-    ...(warnings.length ? [`確認 warnings：${warnings.join(', ')}`] : []),
-    ...(pdf?.status === 'available' ? [] : ['PDF 是 optional；不可用時使用 MusicXML 交接修譜。']),
-  ];
+  const performance = result.pipeline?.quality?.performance_gate;
   const jsonUrl = `/api/v1/transcriptions/${encodeURIComponent(result.job_id)}/review-packet`;
   const zipUrl = `/api/v1/transcriptions/${encodeURIComponent(result.job_id)}/download/review-packet`;
 
   return (
     <div className="reviewPacketPanel">
       <div className="reviewHeader">
-        <strong>Review packet</strong>
-        <span>correction handoff</span>
+        <strong>自動交付包</strong>
+        <span>performance artifacts + verification</span>
       </div>
       <div className="downloadGrid compactDownloads">
         <a className="downloadButton" href={jsonUrl}>
           JSON
-          <span>manual eval seed</span>
+          <span>quality summary</span>
         </a>
         <a className="downloadButton" href={zipUrl}>
           ZIP
-          <span>artifacts + notes</span>
+          <span>performance artifacts</span>
         </a>
       </div>
       <div className="exportList compact">
@@ -1123,11 +1114,11 @@ function ReviewPacketPanel({ result }: { result: TranscriptionResultResponse }) 
           </div>
         ))}
       </div>
-      <ul className="handoffChecklist">
-        {reviewItems.map((item) => (
-          <li key={item}>{item}</li>
-        ))}
-      </ul>
+      <p className="qualityStatusNote">
+        {performance?.delivery_allowed
+          ? '此交付包已通過自動播放、節奏、可演奏性與音訊對齊檢查。'
+          : '此交付包保留自動品質結果；系統未通過時不將譜面包裝成可直接演奏。'}
+      </p>
     </div>
   );
 }
@@ -1182,6 +1173,17 @@ function qualityLimitationLabel(limitation: string): string {
     quality_verdict_unavailable: '尚未產生品質判斷',
     snare_missing: 'Snare 缺失',
     tom_false_positive_likely: 'Tom 誤判偏多',
+    audio_onset_alignment_low: '與分離鼓聲的 onset 對齊不足',
+    audio_onset_alignment_unavailable: '無法取得分離鼓聲 onset 對齊結果',
+    core_drum_missing: '缺少可演奏的 kick、snare 或 hi-hat',
+    core_groove_unstable: '主 groove 不夠穩定',
+    measure_duration_incomplete: '小節節奏時值不完整',
+    notation_fragmented_groove_rhythm: '節奏仍有零碎片段',
+    notation_chart_still_dense: '譜面仍過於密集',
+    performance_midi_unparseable: 'Performance MIDI 無法播放驗證',
+    performance_musicxml_unparseable: 'Performance MusicXML 無法讀取',
+    tom_outside_fill: 'Tom 出現在非 fill 的主 groove',
+    unplayable_hand_conflict: '偵測到不合理的手部衝突',
   };
   return labels[limitation] ?? limitation.replaceAll('_', ' ');
 }
@@ -1221,16 +1223,6 @@ function notationChartLabel(chart: Record<string, unknown>): string {
   const originalCount = typeof chart.original_event_count === 'number' ? chart.original_event_count : null;
   if (chartCount !== null && originalCount !== null) return `${mode} ${chartCount}/${originalCount}`;
   return mode;
-}
-
-function formatReviewRange(startSeconds: number | null, endSeconds: number | null): string {
-  if (startSeconds === null || endSeconds === null) return '時間未提供';
-  return `${startSeconds.toFixed(1)}-${endSeconds.toFixed(1)}s`;
-}
-
-function formatDrumSummary(counts: Record<string, number>): string {
-  const entries = Object.entries(counts).filter(([, count]) => count > 0);
-  return entries.length ? entries.map(([drum, count]) => `${drum} ${count}`).join(' · ') : '休止';
 }
 
 function qualitySuggestionList(

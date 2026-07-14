@@ -10,6 +10,7 @@ class ArtifactType(StrEnum):
     DRUMS_STEM = "drums_stem"
     RAW_MIDI = "raw_midi"
     PROCESSED_MIDI = "processed_midi"
+    PERFORMANCE_MIDI = "performance_midi"
     DRUM_EVENTS = "drum_events"
     CHART_EVENTS = "chart_events"
     VISUAL_PREVIEW = "visual_preview"
@@ -24,6 +25,7 @@ CONTENT_TYPE_BY_ARTIFACT_TYPE: dict[ArtifactType, str] = {
     ArtifactType.DRUMS_STEM: "audio/wav",
     ArtifactType.RAW_MIDI: "audio/midi",
     ArtifactType.PROCESSED_MIDI: "audio/midi",
+    ArtifactType.PERFORMANCE_MIDI: "audio/midi",
     ArtifactType.DRUM_EVENTS: "application/json",
     ArtifactType.CHART_EVENTS: "application/json",
     ArtifactType.VISUAL_PREVIEW: "image/png",

@@ -33,6 +33,10 @@ def test_local_runner_completes_with_mock_ai(tmp_path) -> None:
     assert (tmp_path / "job" / "midi" / "processed_drum.mid").exists()
     assert (tmp_path / "job" / "midi" / "drum_events.json").exists()
     assert (tmp_path / "job" / "notation" / "score.musicxml").exists()
+    assert (tmp_path / "job" / "notation" / "performance_score.musicxml").exists()
+    assert (tmp_path / "job" / "notation" / "performance_score.mid").exists()
+    payload = json.loads((tmp_path / "job" / "logs" / "pipeline.json").read_text(encoding="utf-8"))
+    assert payload["quality"]["performance_gate"]["verdict"] in {"playable_but_low_confidence", "not_ready"}
 
     log_payload = json.loads(result.log_path.read_text(encoding="utf-8"))
     assert log_payload["status"] == "completed"

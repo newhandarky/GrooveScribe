@@ -24,6 +24,7 @@ class ReviewTimelineService:
         measure_ticks = ticks_per_beat * beats
         measure_count = _positive_int(summary.get("measure_count"), 0)
         events_by_measure: dict[int, Counter[str]] = defaultdict(Counter)
+        playback_events: list[dict[str, object]] = []
         for event in chart_payload.get("events", []) if isinstance(chart_payload, dict) else []:
             if not isinstance(event, dict):
                 continue
@@ -31,6 +32,14 @@ class ReviewTimelineService:
             drum = event.get("drum")
             if isinstance(tick, int) and isinstance(drum, str) and drum in {"kick", "snare", "closed_hat", "open_hat", "tom", "cymbal"}:
                 events_by_measure[tick // measure_ticks][drum] += 1
+                if tempo_bpm is not None and len(playback_events) < 2048:
+                    playback_events.append(
+                        {
+                            "time_seconds": round(tick * 60 / (ticks_per_beat * tempo_bpm), 4),
+                            "drum": drum,
+                            "velocity": max(1, min(127, int(event.get("velocity", 80)))),
+                        }
+                    )
         render_kinds = {
             item.get("measure_index"): item.get("render_kind")
             for item in summary.get("chart_measures", [])
@@ -68,6 +77,11 @@ class ReviewTimelineService:
                 },
             ],
             "measures": measures,
+            "performance_playback": {
+                "available": bool(playback_events),
+                "event_count": len(playback_events),
+                "events": playback_events,
+            },
         }
 
     def _chart_payload(self, job_id: str) -> dict:
