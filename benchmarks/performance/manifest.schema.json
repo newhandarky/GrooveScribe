@@ -1,0 +1,7 @@
+{
+  "schema_version": "1.0",
+  "description": "External authorized performance benchmark manifest. Audio and MIDI paths are local-only and are never copied into reports.",
+  "required_item_fields": ["id", "audio_path", "ground_truth_midi_path", "tempo_bpm", "time_signature", "input_type", "license", "source", "acceptance"],
+  "input_type_values": ["drum_only", "full_mix"],
+  "acceptance_fields": ["minimum_f1", "maximum_mean_timing_error_ticks"]
+}

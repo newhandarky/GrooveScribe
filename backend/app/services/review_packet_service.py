@@ -92,7 +92,7 @@ class ReviewPacketService:
                 f"- PDF: `{(validation.get('pdf') or {}).get('status', 'not_reported')}`",
                 f"- Visual QA: `{(validation.get('visual_qa') or {}).get('status', 'not_reported')}`",
                 "",
-                "## Checklist",
+                "## Automated delivery checks",
                 "",
             ]
         )
@@ -101,9 +101,9 @@ class ReviewPacketService:
         lines.extend(
             [
                 "",
-                "## Manual Eval",
+                "## Delivery status",
                 "",
-                "Use `manual_eval_seed` from `review_packet.json` as the starting point. Reviewer scores must be filled manually.",
+                "`quality.performance_gate` is the authoritative automated delivery decision. Only `performance_ready` is marked as directly playable.",
             ]
         )
         rendered = "\n".join(lines)
@@ -285,8 +285,8 @@ def _manual_eval_seed(job: TranscriptionJob, pipeline: dict, quality: dict | Non
 
 def _review_checklist(flags: list[str], warnings: list[str], validation: dict | None, exports: list[dict]) -> list[dict]:
     items = [
-        {"code": "listen_audio_alignment", "label": "音訊對齊", "detail": "對照原音檢查 kick/snare/hihat 位置。"},
-        {"code": "review_musicxml", "label": "MusicXML", "detail": "開啟 MusicXML 並確認小節、拍號與可讀性。"},
+        {"code": "automated_quality_gate", "label": "自動品質 gate", "detail": "只在節奏、可演奏性與音訊對齊驗證通過時交付可直接演奏版本。"},
+        {"code": "musicxml_validation", "label": "MusicXML", "detail": "系統已驗證 MusicXML 與 Performance MIDI 的可讀取性。"},
     ]
     if flags:
         items.append({"code": "review_quality_flags", "label": "Quality flags", "detail": ", ".join(flags)})
@@ -294,9 +294,9 @@ def _review_checklist(flags: list[str], warnings: list[str], validation: dict | 
         items.append({"code": "review_warnings", "label": "Warnings", "detail": ", ".join(warnings)})
     pdf = next((item for item in exports if item.get("type") == "pdf"), None)
     if pdf is None or pdf.get("status") != "available":
-        items.append({"code": "pdf_optional", "label": "PDF optional", "detail": "PDF 不可用時請使用 MusicXML 進行人工修譜。"})
+        items.append({"code": "pdf_optional", "label": "PDF optional", "detail": "PDF 不影響 MIDI / MusicXML 的自動演奏交付。"})
     if validation is None:
-        items.append({"code": "validation_missing", "label": "Validation", "detail": "舊資料缺少 validation summary，需人工開啟 artifact。"})
+        items.append({"code": "validation_missing", "label": "Validation", "detail": "舊資料缺少自動驗證摘要，因此不可標示為可直接演奏。"})
     return items
 
 

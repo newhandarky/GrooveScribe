@@ -20,6 +20,8 @@ class NotationConfig:
 @dataclass(frozen=True)
 class MusicXmlResult:
     musicxml_path: Path
+    performance_musicxml_path: Path
+    performance_midi_path: Path
     chart_events_path: Path
     event_count: int
     chart_event_count: int

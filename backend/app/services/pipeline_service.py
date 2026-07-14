@@ -40,6 +40,7 @@ _PIPELINE_ARTIFACT_TYPES: dict[str, ArtifactType] = {
     "drums_stem": ArtifactType.DRUMS_STEM,
     "raw_midi": ArtifactType.RAW_MIDI,
     "processed_midi": ArtifactType.PROCESSED_MIDI,
+    "performance_midi": ArtifactType.PERFORMANCE_MIDI,
     "drum_events": ArtifactType.DRUM_EVENTS,
     "chart_events": ArtifactType.CHART_EVENTS,
     "visual_preview": ArtifactType.VISUAL_PREVIEW,
@@ -61,6 +62,7 @@ _ARTIFACT_TO_BACKEND_STAGE: dict[str, str] = {
     "drums_stem": PipelineStage.SOURCE_SEPARATION.value,
     "raw_midi": PipelineStage.DRUM_TRANSCRIPTION.value,
     "processed_midi": PipelineStage.MIDI_POST_PROCESSING.value,
+    "performance_midi": PipelineStage.NOTATION_GENERATION.value,
     "drum_events": PipelineStage.MIDI_POST_PROCESSING.value,
     "chart_events": PipelineStage.NOTATION_GENERATION.value,
     "visual_preview": PipelineStage.NOTATION_GENERATION.value,
@@ -648,7 +650,14 @@ class PipelineServiceRunner:
         payload: dict[str, Any],
         artifact_refs: dict[ArtifactType, ArtifactRef],
     ) -> None:
-        self._upsert_export_file(db, job, ExportFileType.MIDI, ArtifactType.PROCESSED_MIDI, artifact_refs)
+        # Legacy runners only produce processed MIDI. New true-AI runs publish a
+        # chart-derived performance MIDI as the user-facing export.
+        midi_artifact = (
+            ArtifactType.PERFORMANCE_MIDI
+            if ArtifactType.PERFORMANCE_MIDI in artifact_refs
+            else ArtifactType.PROCESSED_MIDI
+        )
+        self._upsert_export_file(db, job, ExportFileType.MIDI, midi_artifact, artifact_refs)
         self._upsert_export_file(db, job, ExportFileType.MUSICXML, ArtifactType.MUSICXML, artifact_refs)
         if ArtifactType.PDF in artifact_refs:
             self._upsert_export_file(db, job, ExportFileType.PDF, ArtifactType.PDF, artifact_refs)
