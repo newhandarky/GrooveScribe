@@ -5,6 +5,9 @@ import json
 import sys
 from pathlib import Path
 
+from ai_pipeline.midi.simple_midi import write_drum_midi
+from ai_pipeline.midi.types import ProcessedDrumEvent
+from ai_pipeline.benchmark.provenance import sha256
 
 def _load_script(name: str):
     root = Path(__file__).resolve().parents[2]
@@ -27,6 +30,98 @@ def test_benchmark_is_skipped_without_external_manifest(tmp_path: Path) -> None:
     assert not any(token in (tmp_path / "performance_benchmark_report.json").read_text(encoding="utf-8") for token in ("/tmp/", "/Users/", "command_template"))
 
 
+def test_external_bootstrap_blocks_cleanly_when_roots_are_missing(tmp_path: Path) -> None:
+    script = _load_script("bootstrap_external_performance_benchmarks")
+    config = type(
+        "Config",
+        (),
+        {
+            "gmd_root": tmp_path / "missing-gmd",
+            "slakh_root": tmp_path / "missing-slakh",
+            "output_manifest": tmp_path / "private_manifest.json",
+            "gmd_limit": 1,
+            "slakh_limit": 1,
+        },
+    )()
+
+    report = script.bootstrap(config)
+
+    assert report["status"] == "blocked"
+    assert report["gmd_reason"] == "gmd_info_csv_missing"
+    assert report["slakh_reason"] in {"slakh_insufficient_valid_pairs", "slakh_yaml_parser_unavailable"}
+    assert "/tmp/" not in json.dumps(report)
+    assert not config.output_manifest.exists()
+
+
+def test_external_bootstrap_writes_private_licensed_manifest_with_checksum_metadata(tmp_path: Path) -> None:
+    script = _load_script("bootstrap_external_performance_benchmarks")
+    gmd_root = tmp_path / "gmd"
+    slakh_track = tmp_path / "slakh" / "Track00001"
+    gmd_root.mkdir(parents=True)
+    (gmd_root / "audio.wav").write_bytes(b"gmd-audio")
+    write_drum_midi(
+        gmd_root / "drums.mid",
+        (ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),),
+        ticks_per_beat=480,
+    )
+    (gmd_root / "info.csv").write_text(
+        "id,audio_filename,midi_filename,bpm,time_signature,style,drummer,session\n"
+        "gmd-one,audio.wav,drums.mid,120,4/4,funk,drummer1,session1\n",
+        encoding="utf-8",
+    )
+    (slakh_track / "MIDI").mkdir(parents=True)
+    (slakh_track / "mix.wav").write_bytes(b"slakh-mix")
+    write_drum_midi(
+        slakh_track / "MIDI" / "S00.mid",
+        (ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),),
+        ticks_per_beat=480,
+    )
+    (slakh_track / "metadata.yaml").write_text(
+        "stems:\n  S00:\n    is_drum: true\n    midi_saved: false\n",
+        encoding="utf-8",
+    )
+    config = type(
+        "Config",
+        (),
+        {
+            "gmd_root": gmd_root,
+            "slakh_root": tmp_path / "slakh",
+            "output_manifest": tmp_path / "private_manifest.json",
+            "gmd_limit": 1,
+            "slakh_limit": 1,
+        },
+    )()
+
+    report = script.bootstrap(config)
+    manifest = json.loads(config.output_manifest.read_text(encoding="utf-8"))
+
+    assert report["status"] == "completed"
+    assert "/tmp/" not in json.dumps(report)
+    assert {item["input_type"] for item in manifest["items"]} == {"drum_only", "full_mix"}
+    for item in manifest["items"]:
+        assert item["license"] == "CC BY 4.0"
+        assert item["license_url"].startswith("https://")
+        assert item["source_release"]
+        assert set(item["sha256"]) == {"audio", "ground_truth_midi"}
+        assert len(item["sha256"]["audio"]) == 64
+        assert item["usage_scope"]
+        assert item["ground_truth_verified"] is True
+    slakh = next(item for item in manifest["items"] if item["input_type"] == "full_mix")
+    assert slakh["synthetic_full_mix"] is True
+    assert slakh["real_audio_verified"] is False
+    gmd = next(item for item in manifest["items"] if item["input_type"] == "drum_only")
+    assert gmd["time_signature"] == "4/4"
+
+
+def test_public_benchmark_item_marks_synthetic_full_mix_as_not_real_audio_verified() -> None:
+    script = _load_script("run_performance_benchmark")
+
+    public = script._public_item("slakh-track", {"input_type": "full_mix", "synthetic_full_mix": True})
+
+    assert public["synthetic_full_mix"] is True
+    assert public["real_audio_verified"] is False
+
+
 def test_benchmark_parser_uses_configured_adtof_template(monkeypatch, tmp_path: Path) -> None:
     script = _load_script("run_performance_benchmark")
     monkeypatch.setenv("GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE", "adtof --audio {input} --out {output}")
@@ -35,6 +130,59 @@ def test_benchmark_parser_uses_configured_adtof_template(monkeypatch, tmp_path: 
     args = script.parse_args()
 
     assert args.adtof_command_template == "adtof --audio {input} --out {output}"
+
+
+def test_benchmark_provenance_requires_license_ground_truth_and_matching_checksums(tmp_path: Path) -> None:
+    script = _load_script("run_performance_benchmark")
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"audio")
+    midi = tmp_path / "truth.mid"
+    write_drum_midi(midi, (ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),), ticks_per_beat=480)
+    item = {
+        "id": "licensed-item",
+        "audio_path": str(audio),
+        "ground_truth_midi_path": str(midi),
+        "tempo_bpm": 120.0,
+        "time_signature": "4/4",
+        "input_type": "drum_only",
+        "license": "CC BY 4.0",
+        "license_url": "https://creativecommons.org/licenses/by/4.0/",
+        "source": "official",
+        "source_release": "v1",
+        "renderer": "dataset_recording",
+        "usage_scope": "licensed_ground_truth_drum_only",
+        "calibration_eligible": True,
+        "ground_truth_verified": True,
+        "synthetic_full_mix": False,
+        "real_audio_verified": True,
+        "sha256": {"audio": sha256(audio), "ground_truth_midi": sha256(midi)},
+        "acceptance": {
+            "minimum_f1": 0.75,
+            "minimum_per_drum_f1": {"kick": 0.7},
+            "minimum_core_groove_accuracy": 0.7,
+            "maximum_mean_timing_error_ticks": 72,
+        },
+    }
+
+    assert script.validate_item_provenance(item, audio, midi) is None
+    item["sha256"]["audio"] = "0" * 64
+    assert script.validate_item_provenance(item, audio, midi) == "benchmark_checksum_mismatch"
+
+
+def test_benchmark_cli_manifest_overrides_environment_manifest(monkeypatch, tmp_path: Path) -> None:
+    script = _load_script("run_performance_benchmark")
+    environment_manifest = tmp_path / "environment.json"
+    explicit_manifest = tmp_path / "explicit.json"
+    monkeypatch.setenv("GROOVESCRIBE_PERFORMANCE_BENCHMARK_MANIFEST", str(environment_manifest))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["benchmark", "--output-dir", str(tmp_path), "--manifest", str(explicit_manifest)],
+    )
+
+    args = script.parse_args()
+
+    assert args.manifest == explicit_manifest
 
 
 def test_benchmark_parser_accepts_product_preset_and_filter(monkeypatch, tmp_path: Path) -> None:
@@ -67,3 +215,125 @@ def test_synthetic_generator_writes_external_manifest(monkeypatch, tmp_path: Pat
     manifest = json.loads((tmp_path / "performance_benchmark_manifest.json").read_text(encoding="utf-8"))
     assert {item["input_type"] for item in manifest["items"]} == {"drum_only", "full_mix"}
     assert all(Path(item["audio_path"]).exists() and Path(item["ground_truth_midi_path"]).exists() for item in manifest["items"])
+    assert all(item["calibration_eligible"] is False for item in manifest["items"])
+
+
+def test_realistic_generator_reports_soundfont_blocker_without_paths(tmp_path: Path) -> None:
+    script = _load_script("generate_realistic_performance_benchmark")
+    config = type("Config", (), {"output_dir": tmp_path, "soundfont": None, "fluidsynth": "fluidsynth", "ffmpeg": "ffmpeg"})()
+
+    report = script.generate(config, which=lambda _binary: None)
+
+    assert report == {"schema_version": "1.0", "status": "blocked", "reason": "soundfont_not_configured", "manifest_name": None}
+    assert "/tmp/" not in (tmp_path / "realistic_benchmark_status.json").read_text(encoding="utf-8")
+
+
+def test_realistic_generator_manifest_declares_core_groove_acceptance(tmp_path: Path) -> None:
+    script = _load_script("generate_realistic_performance_benchmark")
+    config = type("Config", (), {"output_dir": tmp_path, "soundfont": tmp_path / "kit.sf2", "fluidsynth": "fluidsynth", "ffmpeg": "ffmpeg"})()
+    config.soundfont.write_bytes(b"placeholder")
+
+    commands = []
+
+    def runner(command, **_kwargs):
+        commands.append(command)
+        output = Path(command[command.index("-F") + 1]) if "-F" in command else Path(command[-1])
+        output.write_bytes(b"audio")
+        return type("Result", (), {"returncode": 0})()
+
+    report = script.generate(config, run=runner, which=lambda _binary: "/usr/bin/tool")
+
+    assert report["status"] == "completed"
+    manifest = json.loads((tmp_path / "realistic_performance_benchmark_manifest.json").read_text(encoding="utf-8"))
+    assert all(item["acceptance"]["minimum_core_groove_accuracy"] == 0.75 for item in manifest["items"])
+    assert (tmp_path / "full_mix_backbeat.backing.mid").exists()
+    render_commands = [command for command in commands if command[0] == "fluidsynth"]
+    assert render_commands
+    for command in render_commands:
+        output = command[3]
+        assert command == [
+            "fluidsynth",
+            "-ni",
+            "-F",
+            output,
+            "-r",
+            "44100",
+            str(config.soundfont),
+            command[-1],
+        ]
+        assert command[-1].endswith(".mid")
+
+
+def test_reference_acceptance_requires_core_groove_accuracy() -> None:
+    script = _load_script("run_performance_benchmark")
+    comparison = {
+        "status": "measured",
+        "f1": 0.95,
+        "mean_timing_error_ticks": 2,
+        "per_drum": {"kick": {"f1": 0.95}, "snare": {"f1": 0.95}},
+    }
+    acceptance = {
+        "minimum_f1": 0.9,
+        "minimum_per_drum_f1": {"kick": 0.9, "snare": 0.9},
+        "minimum_core_groove_accuracy": 0.8,
+        "maximum_mean_timing_error_ticks": 8,
+    }
+
+    assert script._reference_passed(comparison, {"status": "measured", "accuracy": 0.5}, acceptance) is False
+    assert script._reference_passed(comparison, {"status": "unavailable", "accuracy": None}, acceptance) is False
+    assert script._reference_passed(comparison, {"status": "measured", "accuracy": 0.9}, acceptance) is True
+
+
+def test_core_groove_accuracy_checks_onset_slots_not_only_drum_presence(tmp_path: Path) -> None:
+    script = _load_script("run_performance_benchmark")
+    ground_truth = tmp_path / "ground_truth.mid"
+    write_drum_midi(
+        ground_truth,
+        (
+            ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),
+            ProcessedDrumEvent(tick=480, note=38, drum="snare", velocity=100),
+            ProcessedDrumEvent(tick=0, note=42, drum="closed_hat", velocity=80),
+            ProcessedDrumEvent(tick=480, note=42, drum="closed_hat", velocity=80),
+        ),
+        ticks_per_beat=480,
+    )
+    chart = {
+        "ticks_per_beat": 480,
+        "time_signature": "4/4",
+        "events": [
+            {"tick": 0, "drum": "kick"},
+            {"tick": 720, "drum": "snare"},
+            {"tick": 0, "drum": "closed_hat"},
+            {"tick": 480, "drum": "closed_hat"},
+        ],
+    }
+    chart_path = tmp_path / "chart_events.json"
+    chart_path.write_text(json.dumps(chart), encoding="utf-8")
+
+    score = script._core_groove_accuracy(chart_path, ground_truth)
+
+    assert score["metric"] == "macro_measure_core_onset_f1_eighth_grid"
+    assert score["accuracy"] < 1.0
+
+
+def test_core_groove_accuracy_respects_non_four_four_measure_length(tmp_path: Path) -> None:
+    script = _load_script("run_performance_benchmark")
+    ground_truth = tmp_path / "ground_truth.mid"
+    write_drum_midi(
+        ground_truth,
+        (
+            ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),
+            ProcessedDrumEvent(tick=960, note=38, drum="snare", velocity=100),
+        ),
+        ticks_per_beat=480,
+        time_signature="6/8",
+    )
+    chart_path = tmp_path / "chart_events.json"
+    chart_path.write_text(
+        json.dumps({"ticks_per_beat": 480, "time_signature": "6/8", "events": [{"tick": 0, "drum": "kick"}, {"tick": 960, "drum": "snare"}]}),
+        encoding="utf-8",
+    )
+
+    score = script._core_groove_accuracy(chart_path, ground_truth)
+
+    assert score["accuracy"] == 1.0

@@ -83,6 +83,22 @@ def test_performance_gate_is_public_safe_and_keeps_not_ready_state() -> None:
     }
 
 
+def test_performance_gate_keeps_needs_better_source_without_leaking_runtime_details() -> None:
+    gate = _sanitize_performance_gate(
+        {
+            "verdict": "needs_better_source",
+            "delivery_allowed": False,
+            "blocking_issues": ["source_signal_insufficient", "/Users/private/input.wav"],
+            "audio_alignment": {"status": "unavailable", "stderr": "private runtime detail"},
+        }
+    )
+
+    assert gate["verdict"] == "needs_better_source"
+    assert gate["delivery_allowed"] is False
+    assert gate["blocking_issues"] == ["source_signal_insufficient"]
+    assert gate["audio_alignment"] == {"status": "unavailable"}
+
+
 def _session():
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)

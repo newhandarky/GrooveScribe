@@ -36,10 +36,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--demucs-model-name", default="htdemucs")
     parser.add_argument("--demucs-device", default="auto")
     parser.add_argument("--demucs-timeout-seconds", type=int, default=1_800)
-    parser.add_argument("--adtof-command-template", default=None)
-    parser.add_argument("--adtof-checkpoint", type=Path, default=None)
-    parser.add_argument("--adtof-device", default="cpu")
-    parser.add_argument("--adtof-threshold", type=float, default=0.5)
+    parser.add_argument(
+        "--adtof-command-template",
+        default=os.environ.get("GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE"),
+    )
+    parser.add_argument(
+        "--adtof-checkpoint",
+        type=Path,
+        default=_optional_path(os.environ.get("GROOVESCRIBE_ADTOF_CHECKPOINT")),
+    )
+    parser.add_argument("--adtof-device", default=os.environ.get("GROOVESCRIBE_ADTOF_DEVICE", "cpu"))
+    parser.add_argument(
+        "--adtof-threshold",
+        type=float,
+        default=float(os.environ.get("GROOVESCRIBE_ADTOF_THRESHOLD", "0.5")),
+    )
     parser.add_argument(
         "--adtof-class-thresholds",
         default=None,

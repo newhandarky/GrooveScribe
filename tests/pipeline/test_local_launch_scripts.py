@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 from scripts import check_v1_local_setup as local_setup
+from scripts import run_local_pipeline
 from scripts.run_v1_local_dev import build_process_specs, format_setup_failure, setup_failure_issues
 
 
@@ -114,6 +116,19 @@ def test_local_dev_launcher_builds_backend_and_frontend_commands() -> None:
         "5174",
     ]
     assert specs[1].env == {"VITE_API_PROXY_TARGET": "http://127.0.0.1:9000"}
+
+
+def test_local_pipeline_reads_private_adtof_runtime_environment(monkeypatch) -> None:
+    monkeypatch.setenv("GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE", "adtof --audio {input} --out {output}")
+    monkeypatch.setenv("GROOVESCRIBE_ADTOF_DEVICE", "cpu")
+    monkeypatch.setenv("GROOVESCRIBE_ADTOF_THRESHOLD", "0.06")
+    monkeypatch.setattr(sys, "argv", ["pipeline", "--dry-run"])
+
+    args = run_local_pipeline.parse_args()
+
+    assert args.adtof_command_template == "adtof --audio {input} --out {output}"
+    assert args.adtof_device == "cpu"
+    assert args.adtof_threshold == 0.06
 
 
 def test_local_dev_launcher_formats_blocked_port_failure_without_raw_diagnostics() -> None:

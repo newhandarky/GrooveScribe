@@ -256,7 +256,7 @@ export interface TranscriptionResultResponse {
       };
       performance_gate?: {
         schema_version: string;
-        verdict: 'performance_ready' | 'playable_but_low_confidence' | 'not_ready' | string;
+        verdict: 'performance_ready' | 'playable_but_low_confidence' | 'needs_better_source' | 'not_ready' | string;
         delivery_allowed: boolean;
         ground_truth_verified: boolean;
         blocking_issues: string[];

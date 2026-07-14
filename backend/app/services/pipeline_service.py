@@ -264,6 +264,10 @@ class PipelineServiceRunner:
             command.extend(["--adtof-command-template", self.settings.pipeline_adtof_command_template])
         if self.settings.pipeline_adtof_checkpoint_path:
             command.extend(["--adtof-checkpoint", self.settings.pipeline_adtof_checkpoint_path])
+        if self.settings.pipeline_performance_gate_calibration_path:
+            command.extend(
+                ["--performance-gate-calibration", self.settings.pipeline_performance_gate_calibration_path]
+            )
         if self.settings.pipeline_pdf_renderer:
             command.extend(["--pdf-renderer", self.settings.pipeline_pdf_renderer])
         if self.settings.pipeline_export_pdf:

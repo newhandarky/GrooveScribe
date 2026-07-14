@@ -1006,6 +1006,7 @@ function PerformanceDeliveryPanel({ pipeline }: { pipeline: TranscriptionResultR
   const labels: Record<string, string> = {
     performance_ready: '可直接演奏',
     playable_but_low_confidence: '可播放，但系統信心不足',
+    needs_better_source: '需要更好的來源音檔',
     not_ready: '系統未能可靠完成',
   };
   const alignment = gate.audio_alignment?.onset_alignment_rate;

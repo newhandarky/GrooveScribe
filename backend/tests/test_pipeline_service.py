@@ -158,6 +158,7 @@ def test_pipeline_service_builds_subprocess_command(tmp_path: Path) -> None:
         tmp_path,
         pipeline_adtof_command_template="adtof --audio {input} --out {output}",
         pipeline_adtof_checkpoint_path="/models/adtof.ckpt",
+        pipeline_performance_gate_calibration_path="/private/calibration/gate_calibration.json",
         pipeline_pdf_renderer="/opt/homebrew/bin/mscore",
     )
     runner = PipelineServiceRunner(settings=settings, pipeline_script_path=Path("/repo/scripts/run_local_pipeline.py"))
@@ -194,6 +195,8 @@ def test_pipeline_service_builds_subprocess_command(tmp_path: Path) -> None:
         "adtof --audio {input} --out {output}",
         "--adtof-checkpoint",
         "/models/adtof.ckpt",
+        "--performance-gate-calibration",
+        "/private/calibration/gate_calibration.json",
         "--pdf-renderer",
         "/opt/homebrew/bin/mscore",
         "--export-pdf",
@@ -220,6 +223,23 @@ def test_pipeline_service_builds_true_ai_command_from_job_config(tmp_path: Path)
     assert "--mock-ai" not in command
     assert command[command.index("--adtof-threshold-preset") + 1] == "separated_v1"
     assert command[command.index("--tom-filter-preset") + 1] == "tom_guard_v1"
+
+
+def test_pipeline_service_passes_private_calibration_only_to_subprocess(tmp_path: Path) -> None:
+    settings = _settings(
+        tmp_path,
+        pipeline_performance_gate_calibration_path="/private/calibration/gate_calibration.json",
+    )
+    runner = PipelineServiceRunner(settings=settings, pipeline_script_path=Path("/repo/scripts/run_local_pipeline.py"))
+
+    command = runner.build_command(
+        input_path=Path("/tmp/input.wav"),
+        output_dir=Path("/tmp/output"),
+        title="Demo",
+        job=TranscriptionJob(id="job-true-ai", pipeline_mode="true_ai"),
+    )
+
+    assert command[command.index("--performance-gate-calibration") + 1] == "/private/calibration/gate_calibration.json"
 
 
 def test_pipeline_service_builds_demo_mock_command_from_job_config(tmp_path: Path) -> None:
