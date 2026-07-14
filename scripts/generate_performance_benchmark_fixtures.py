@@ -37,6 +37,8 @@ def main() -> int:
                 "input_type": input_type,
                 "license": "generated_synthetic",
                 "source": "GrooveScribe synthetic generator",
+                "renderer": "synthetic_signal",
+                "calibration_eligible": False,
                 "acceptance": {"minimum_f1": 0.9, "maximum_mean_timing_error_ticks": 60},
             }
         )

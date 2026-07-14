@@ -31,6 +31,7 @@ def test_settings_default_to_local_first_backend(monkeypatch) -> None:
     assert settings.pipeline_adtof_threshold == 0.5
     assert settings.pipeline_adtof_verify_input_path is None
     assert settings.pipeline_adtof_verify_output_dir is None
+    assert settings.pipeline_performance_gate_calibration_path is None
     assert settings.runtime_preflight_timeout_seconds == 30
 
 
@@ -46,6 +47,7 @@ def test_settings_env_override_preserves_server_mode_options(monkeypatch) -> Non
     monkeypatch.setenv("GROOVESCRIBE_ADTOF_THRESHOLD", "0.42")
     monkeypatch.setenv("GROOVESCRIBE_ADTOF_VERIFY_INPUT", "/tmp/groovescribe-stems/drums.wav")
     monkeypatch.setenv("GROOVESCRIBE_ADTOF_VERIFY_OUTPUT_DIR", "/tmp/groovescribe-adtof-check")
+    monkeypatch.setenv("GROOVESCRIBE_PERFORMANCE_GATE_CALIBRATION", "/private/calibration/gate_calibration.json")
 
     settings = Settings()
 
@@ -58,6 +60,7 @@ def test_settings_env_override_preserves_server_mode_options(monkeypatch) -> Non
     assert settings.pipeline_adtof_threshold == 0.42
     assert settings.pipeline_adtof_verify_input_path == "/tmp/groovescribe-stems/drums.wav"
     assert settings.pipeline_adtof_verify_output_dir == "/tmp/groovescribe-adtof-check"
+    assert settings.pipeline_performance_gate_calibration_path == "/private/calibration/gate_calibration.json"
 
 
 def test_ensure_local_app_data_creates_storage_and_sqlite_parent(tmp_path: Path) -> None:

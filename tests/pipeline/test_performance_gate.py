@@ -44,7 +44,7 @@ def test_performance_gate_does_not_claim_ready_without_alignment(tmp_path: Path)
         drums_stem_path=None,
     )
 
-    assert gate["verdict"] == "playable_but_low_confidence"
+    assert gate["verdict"] == "needs_better_source"
     assert "audio_onset_alignment_unavailable" in gate["blocking_issues"]
 
 
@@ -63,6 +63,98 @@ def test_performance_gate_fails_closed_without_calibration(tmp_path: Path) -> No
 
     assert gate["verdict"] == "playable_but_low_confidence"
     assert "gate_calibration_unavailable" in gate["blocking_issues"]
+
+
+def test_performance_gate_uses_valid_calibrated_alignment_threshold(tmp_path: Path) -> None:
+    events_path = tmp_path / "drum_events.json"
+    events_path.write_text(json.dumps(_two_measure_groove()), encoding="utf-8")
+    result = MusicXmlGenerator().generate(events_path, tmp_path / "notation")
+    # The generated chart has eight eighth-note onsets. Supplying six aligned
+    # clicks produces an alignment below the uncalibrated 0.70 default, but it
+    # remains above this authorized benchmark-derived threshold.
+    _write_click_stem(tmp_path / "drums.wav", [index * 0.25 for index in range(6)])
+
+    uncalibrated = evaluate_performance_score(
+        chart_events_path=result.chart_events_path,
+        performance_midi_path=result.performance_midi_path,
+        performance_musicxml_path=result.performance_musicxml_path,
+        drums_stem_path=tmp_path / "drums.wav",
+    )
+    alignment = float(uncalibrated["audio_alignment"]["onset_alignment_rate"])
+    assert alignment < 0.70
+
+    gate = evaluate_performance_score(
+        chart_events_path=result.chart_events_path,
+        performance_midi_path=result.performance_midi_path,
+        performance_musicxml_path=result.performance_musicxml_path,
+        drums_stem_path=tmp_path / "drums.wav",
+        gate_calibration={
+            "status": "calibrated",
+            "allow_performance_ready": True,
+            "min_auto_onset_alignment": max(0.0, alignment - 0.01),
+        },
+    )
+
+    assert gate["required_onset_alignment"] < 0.70
+    assert gate["verdict"] == "performance_ready"
+    assert gate["delivery_allowed"] is True
+
+
+def test_performance_gate_does_not_trust_invalid_calibration_threshold(tmp_path: Path) -> None:
+    events_path = tmp_path / "drum_events.json"
+    events_path.write_text(json.dumps(_two_measure_groove()), encoding="utf-8")
+    result = MusicXmlGenerator().generate(events_path, tmp_path / "notation")
+    _write_click_stem(tmp_path / "drums.wav", [index * 0.25 for index in range(6)])
+
+    gate = evaluate_performance_score(
+        chart_events_path=result.chart_events_path,
+        performance_midi_path=result.performance_midi_path,
+        performance_musicxml_path=result.performance_musicxml_path,
+        drums_stem_path=tmp_path / "drums.wav",
+        gate_calibration={"status": "insufficient_evidence", "allow_performance_ready": False, "min_auto_onset_alignment": 0.60},
+    )
+
+    assert gate["required_onset_alignment"] == 0.70
+    assert gate["verdict"] == "needs_better_source"
+    assert gate["delivery_allowed"] is False
+    assert "gate_calibration_not_ready" in gate["blocking_issues"]
+
+
+def test_performance_gate_failed_closed_calibration_cannot_upgrade_verdict(tmp_path: Path) -> None:
+    events_path = tmp_path / "drum_events.json"
+    events_path.write_text(json.dumps(_two_measure_groove()), encoding="utf-8")
+    result = MusicXmlGenerator().generate(events_path, tmp_path / "notation")
+    _write_click_stem(tmp_path / "drums.wav", [index * 0.25 for index in range(16)])
+
+    gate = evaluate_performance_score(
+        chart_events_path=result.chart_events_path,
+        performance_midi_path=result.performance_midi_path,
+        performance_musicxml_path=result.performance_musicxml_path,
+        drums_stem_path=tmp_path / "drums.wav",
+        gate_calibration={"status": "failed_closed", "allow_performance_ready": False, "min_auto_onset_alignment": 0.0},
+    )
+
+    assert gate["verdict"] == "playable_but_low_confidence"
+    assert gate["delivery_allowed"] is False
+
+
+def test_performance_gate_uses_default_threshold_for_invalid_calibration_value(tmp_path: Path) -> None:
+    events_path = tmp_path / "drum_events.json"
+    events_path.write_text(json.dumps(_two_measure_groove()), encoding="utf-8")
+    result = MusicXmlGenerator().generate(events_path, tmp_path / "notation")
+    _write_click_stem(tmp_path / "drums.wav", [index * 0.25 for index in range(6)])
+
+    gate = evaluate_performance_score(
+        chart_events_path=result.chart_events_path,
+        performance_midi_path=result.performance_midi_path,
+        performance_musicxml_path=result.performance_musicxml_path,
+        drums_stem_path=tmp_path / "drums.wav",
+        gate_calibration={"status": "calibrated", "allow_performance_ready": True, "min_auto_onset_alignment": -1.0},
+    )
+
+    assert gate["required_onset_alignment"] == 0.70
+    assert gate["delivery_allowed"] is False
+    assert "calibrated_onset_threshold_not_met" in gate["blocking_issues"]
 
 
 def test_performance_gate_rejects_tom_outside_fill(tmp_path: Path) -> None:
@@ -84,6 +176,28 @@ def test_performance_gate_rejects_tom_outside_fill(tmp_path: Path) -> None:
 
     assert gate["verdict"] == "not_ready"
     assert "tom_outside_fill" in gate["blocking_issues"]
+
+
+def test_structural_issue_stays_not_ready_with_valid_calibration(tmp_path: Path) -> None:
+    payload = _two_measure_groove()
+    payload["events"].append({"tick": 240, "drum": "tom", "velocity": 100})
+    events_path = tmp_path / "drum_events.json"
+    events_path.write_text(json.dumps(payload), encoding="utf-8")
+    result = MusicXmlGenerator().generate(events_path, tmp_path / "notation")
+    chart = json.loads(result.chart_events_path.read_text(encoding="utf-8"))
+    chart["events"].append({"tick": 240, "drum": "tom", "velocity": 100})
+    result.chart_events_path.write_text(json.dumps(chart), encoding="utf-8")
+    _write_click_stem(tmp_path / "drums.wav", [index * 0.25 for index in range(16)])
+
+    gate = evaluate_performance_score(
+        chart_events_path=result.chart_events_path,
+        performance_midi_path=result.performance_midi_path,
+        performance_musicxml_path=result.performance_musicxml_path,
+        drums_stem_path=tmp_path / "drums.wav",
+        gate_calibration={"status": "calibrated", "allow_performance_ready": True, "min_auto_onset_alignment": 0.0},
+    )
+
+    assert gate["verdict"] == "not_ready"
 
 
 def test_ground_truth_comparison_is_opt_in_and_reports_onset_metrics(tmp_path: Path) -> None:

@@ -61,6 +61,13 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("PIPELINE_ADTOF_VERIFY_OUTPUT_DIR", "GROOVESCRIBE_ADTOF_VERIFY_OUTPUT_DIR"),
     )
     pipeline_adtof_timeout_seconds: int = 1800
+    pipeline_performance_gate_calibration_path: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "PIPELINE_PERFORMANCE_GATE_CALIBRATION",
+            "GROOVESCRIBE_PERFORMANCE_GATE_CALIBRATION",
+        ),
+    )
     pipeline_pdf_renderer: str | None = Field(
         default=None,
         validation_alias=AliasChoices("PIPELINE_PDF_RENDERER", "GROOVESCRIBE_PDF_RENDERER"),

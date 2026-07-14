@@ -417,7 +417,7 @@ def _sanitize_performance_gate(value: object) -> dict:
     if not isinstance(value, dict):
         return {}
     verdict = _safe_code(value.get("verdict")) or "not_ready"
-    if verdict not in {"performance_ready", "playable_but_low_confidence", "not_ready"}:
+    if verdict not in {"performance_ready", "playable_but_low_confidence", "needs_better_source", "not_ready"}:
         verdict = "not_ready"
     def safe_section(name: str) -> dict:
         section = value.get(name)

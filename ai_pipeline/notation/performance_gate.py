@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ai_pipeline.midi.simple_midi import parse_midi
 from ai_pipeline.midi.mapping import map_to_general_midi_drum
+from ai_pipeline.notation.gate_calibration import is_valid_onset_alignment
 
 
 _CORE_DRUMS = {"kick", "snare", "closed_hat", "open_hat"}
@@ -71,8 +72,9 @@ def evaluate_performance_score(
     if warnings & _BLOCKING_CHART_WARNINGS:
         issues.extend(sorted(warnings & _BLOCKING_CHART_WARNINGS))
 
+    required_onset_alignment = _required_onset_alignment(gate_calibration)
     alignment_status = str(alignment["status"])
-    if alignment_status == "measured" and float(alignment["onset_alignment_rate"]) < 0.70:
+    if alignment_status == "measured" and float(alignment["onset_alignment_rate"]) < required_onset_alignment:
         issues.append("audio_onset_alignment_low")
     elif alignment_status != "measured":
         issues.append("audio_onset_alignment_unavailable")
@@ -88,7 +90,16 @@ def evaluate_performance_score(
         "tom_outside_fill",
         "notation_chart_still_dense",
     }
-    if not issues:
+    source_quality_issues = {
+        "audio_onset_alignment_low",
+        "audio_onset_alignment_unavailable",
+        "core_drum_missing",
+        "core_groove_unstable",
+    }
+    structural_issues = hard_failures - {"core_drum_missing"}
+    if set(issues) & source_quality_issues and not (set(issues) & structural_issues):
+        verdict = "needs_better_source"
+    elif not issues:
         verdict = "performance_ready"
     elif not (set(issues) & hard_failures) and playability["core_groove_stable"]:
         verdict = "playable_but_low_confidence"
@@ -105,12 +116,26 @@ def evaluate_performance_score(
         "rhythm": rhythm,
         "playability": playability,
         "audio_alignment": alignment,
+        "required_onset_alignment": required_onset_alignment,
         "ground_truth_verified": False,
         "uncalibrated_verdict": verdict,
     }
     from ai_pipeline.notation.gate_calibration import apply_gate_calibration
 
     return apply_gate_calibration(result, gate_calibration)
+
+
+def _required_onset_alignment(gate_calibration: dict | None) -> float:
+    """Use a measured threshold only when the calibration itself is valid."""
+
+    if not isinstance(gate_calibration, dict):
+        return 0.70
+    if gate_calibration.get("status") != "calibrated" or not gate_calibration.get("allow_performance_ready"):
+        return 0.70
+    threshold = gate_calibration.get("min_auto_onset_alignment")
+    if is_valid_onset_alignment(threshold):
+        return float(threshold)
+    return 0.70
 
 
 def compare_performance_midi_to_ground_truth(
