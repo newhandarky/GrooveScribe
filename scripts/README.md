@@ -290,6 +290,22 @@ true-AI 仍是 opt-in：
 
 RC outputs 必須在 repo 外；不得提交 `rc_manifest.json`、`rc_handoff.md`、release evidence、review packet、`frontend/dist`、`storage/`、SQLite/DB、tmp 或 Playwright reports。true-AI 仍只有 `--include-true-ai` 時 opt-in，PDF renderer 仍不是一般 gate blocker。
 
+## V1 product pilot
+
+Product pilot 是功能可用性檢查，不是 tag 或發布流程。它聚焦使用者實際路徑：上傳、完成結果、下載 MIDI/MusicXML、review packet、job history、completed rerun、failed/interrupted retry 與 local data dry-run 狀態。
+
+```bash
+.venv-ai/bin/python scripts/run_v1_product_pilot.py \
+  --output-dir /tmp/groovescribe-v1-product-pilot
+```
+
+輸出：
+
+- `product_pilot_report.json`
+- `product_pilot_handoff.md`
+
+Product pilot 預設會跑 browser e2e，因此需要本機 localhost bind 與 Playwright Chromium。true-AI 仍是 opt-in 之外的手動流程；PDF renderer 仍不是 blocker。輸出必須在 repo 外，不得提交 generated pilot reports。
+
 ## V1 final release notes / tag prep
 
 Final release candidate 文件入口：
