@@ -435,6 +435,8 @@ def _sanitize_performance_gate(value: object) -> dict:
         "verdict": verdict,
         "delivery_allowed": bool(value.get("delivery_allowed")),
         "ground_truth_verified": bool(value.get("ground_truth_verified")),
+        "real_audio_verified": bool(value.get("real_audio_verified")),
+        "delivery_status": _safe_code(value.get("delivery_status")) or "technical_artifacts_only",
         "blocking_issues": [item for item in _string_list(value.get("blocking_issues")) if _is_public_safe_text(item)],
         "midi": safe_section("midi"),
         "musicxml": safe_section("musicxml"),

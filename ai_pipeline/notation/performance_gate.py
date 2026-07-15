@@ -118,11 +118,28 @@ def evaluate_performance_score(
         "audio_alignment": alignment,
         "required_onset_alignment": required_onset_alignment,
         "ground_truth_verified": False,
+        # A user upload is never a ground-truth reference.  This remains false
+        # even when a future calibration allows a verified delivery verdict.
+        "real_audio_verified": False,
         "uncalibrated_verdict": verdict,
     }
     from ai_pipeline.notation.gate_calibration import apply_gate_calibration
 
-    return apply_gate_calibration(result, gate_calibration)
+    result = apply_gate_calibration(result, gate_calibration)
+    result["delivery_status"] = _delivery_status(str(result.get("verdict")))
+    return result
+
+
+def _delivery_status(verdict: str) -> str:
+    """Keep the user-facing delivery state conservative and explicit."""
+
+    if verdict == "performance_ready":
+        return "verified_performance_score"
+    if verdict == "playable_but_low_confidence":
+        return "playable_draft_unverified"
+    if verdict == "needs_better_source":
+        return "needs_better_source"
+    return "technical_artifacts_only"
 
 
 def _required_onset_alignment(gate_calibration: dict | None) -> float:

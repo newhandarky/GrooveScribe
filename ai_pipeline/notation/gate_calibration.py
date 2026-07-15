@@ -8,8 +8,9 @@ from typing import Iterable
 def calibrate_gate(benchmark_runs: Iterable[dict]) -> dict[str, object]:
     """Calibrate the auto-onset threshold from authorized MIDI references.
 
-    A calibration is valid only when it contains drum-only and full-mix evidence
-    and none of the auto-ready candidates violates its manifest acceptance policy.
+    A calibration is valid only when it contains drum-only evidence plus at
+    least one real-audio full-mix reference. Synthetic full-mix regression data
+    remains useful for model comparison, but cannot authorize product delivery.
     """
 
     measured = [
@@ -30,6 +31,8 @@ def calibrate_gate(benchmark_runs: Iterable[dict]) -> dict[str, object]:
         )
     ]
     accepted_input_types = {str(run.get("input_type")) for run in accepted}
+    accepted_real_audio = [run for run in accepted if run.get("real_audio_verified") is True]
+    accepted_real_audio_input_types = {str(run.get("input_type")) for run in accepted_real_audio}
     alignment_values = [
         float((run.get("performance_gate") or {}).get("audio_alignment", {}).get("onset_alignment_rate"))
         for run in accepted
@@ -44,6 +47,7 @@ def calibrate_gate(benchmark_runs: Iterable[dict]) -> dict[str, object]:
         len(measured) >= 3
         and {"drum_only", "full_mix"}.issubset(input_types)
         and {"drum_only", "full_mix"}.issubset(accepted_input_types)
+        and "full_mix" in accepted_real_audio_input_types
     )
     if false_positives:
         status = "failed_closed"
@@ -57,6 +61,8 @@ def calibrate_gate(benchmark_runs: Iterable[dict]) -> dict[str, object]:
         "benchmark_item_count": len(measured),
         "input_types": sorted(input_types),
         "accepted_input_types": sorted(accepted_input_types),
+        "accepted_real_audio_reference_count": len(accepted_real_audio),
+        "accepted_real_audio_input_types": sorted(accepted_real_audio_input_types),
         "false_positive_count": len(false_positives),
         "false_positive_ids": [str(run.get("id")) for run in false_positives],
         "accepted_reference_count": len(accepted),
@@ -73,7 +79,7 @@ def apply_gate_calibration(gate: dict, calibration: dict | None) -> dict:
     issues = _non_calibration_issues(result.get("blocking_issues"))
     if calibration is None:
         return _downgrade(result, issues, "gate_calibration_unavailable")
-    if calibration.get("status") != "calibrated" or not calibration.get("allow_performance_ready"):
+    if not _is_authorized_product_calibration(calibration):
         return _downgrade(result, issues, "gate_calibration_not_ready")
     threshold = calibration.get("min_auto_onset_alignment")
     alignment = (result.get("audio_alignment") or {}).get("onset_alignment_rate")
@@ -89,6 +95,21 @@ def apply_gate_calibration(gate: dict, calibration: dict | None) -> dict:
     result["blocking_issues"] = sorted(set(issues))
     result["calibration_status"] = "applied"
     return result
+
+
+def _is_authorized_product_calibration(calibration: dict) -> bool:
+    """Require explicit real full-mix evidence at the point of delivery.
+
+    ``status=calibrated`` alone is not a public-delivery authorization. This
+    protects production jobs from legacy or hand-authored calibration files
+    that were derived from synthetic-only benchmark data.
+    """
+
+    if calibration.get("status") != "calibrated" or not calibration.get("allow_performance_ready"):
+        return False
+    count = calibration.get("accepted_real_audio_reference_count")
+    input_types = calibration.get("accepted_real_audio_input_types")
+    return isinstance(count, int) and not isinstance(count, bool) and count > 0 and isinstance(input_types, list) and "full_mix" in input_types
 
 
 def _simulated_calibrated_ready(run: dict, threshold: float | None) -> bool:

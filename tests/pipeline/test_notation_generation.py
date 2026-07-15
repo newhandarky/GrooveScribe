@@ -471,6 +471,41 @@ def test_readable_chart_v3_marks_insufficient_hihat_evidence_as_needing_manual_a
         assert {event["drum"] for event in measure_events} >= {"kick", "snare", "closed_hat"}
 
 
+def test_readable_chart_v3_preserves_off_backbeat_core_evidence_without_inventing_events(tmp_path) -> None:
+    events_path = tmp_path / "drum_events.json"
+    events_path.write_text(
+        json.dumps(
+            {
+                "ticks_per_beat": 480,
+                "estimated_bpm": 120.0,
+                "time_signature": "4/4",
+                "events": [
+                    {"tick": 120, "drum": "kick", "velocity": 92},
+                    {"tick": 1080, "drum": "kick", "velocity": 88},
+                    {"tick": 80, "drum": "snare", "velocity": 95},
+                    {"tick": 1040, "drum": "snare", "velocity": 90},
+                    *[
+                        {"tick": tick, "drum": "closed_hat", "velocity": 80}
+                        for tick in range(0, 1920, 240)
+                    ],
+                    {"tick": 1500, "drum": "tom", "velocity": 100},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = MusicXmlGenerator().generate(events_path, tmp_path / "notation")
+    chart = json.loads(result.chart_events_path.read_text(encoding="utf-8"))
+    events = chart["events"]
+
+    assert {event["drum"] for event in events} >= {"kick", "snare", "closed_hat"}
+    assert len([event for event in events if event["drum"] == "kick"]) == 2
+    assert len([event for event in events if event["drum"] == "snare"]) == 2
+    assert all(event["tick"] % 240 == 0 for event in events if event["drum"] in {"kick", "snare"})
+    assert not any(event["drum"] == "tom" for event in events)
+
+
 def test_rhythm_normalization_writes_eighth_groove_chords_without_sixteenth_fragments(tmp_path) -> None:
     events_path = tmp_path / "drum_events.json"
     _write_readable_v3_section_events(events_path)

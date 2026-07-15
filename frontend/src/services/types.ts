@@ -259,6 +259,8 @@ export interface TranscriptionResultResponse {
         verdict: 'performance_ready' | 'playable_but_low_confidence' | 'needs_better_source' | 'not_ready' | string;
         delivery_allowed: boolean;
         ground_truth_verified: boolean;
+        real_audio_verified: boolean;
+        delivery_status: 'verified_performance_score' | 'playable_draft_unverified' | 'needs_better_source' | 'technical_artifacts_only' | string;
         blocking_issues: string[];
         midi: Record<string, string | number | boolean | null>;
         musicxml: Record<string, string | number | boolean | null>;

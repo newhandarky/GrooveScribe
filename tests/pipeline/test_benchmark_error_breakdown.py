@@ -1,12 +1,23 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
-from ai_pipeline.benchmark.metrics import compare_drum_midi, primary_failure_stage
+import numpy as np
+import pytest
+
+from ai_pipeline.benchmark.metrics import audit_drum_midi_contract, compare_drum_midi, primary_failure_stage
 from ai_pipeline.midi.simple_midi import write_drum_midi
 from ai_pipeline.midi.types import ProcessedDrumEvent
-from ai_pipeline.transcription.benchmark_backends import BackendAvailability, SpectralOnsetDrumBackend
+from ai_pipeline.transcription.benchmark_backends import (
+    BackendAvailability,
+    MagentaOnsetsFramesDrumBackend,
+    SelfTrainedMultilabelDrumBackend,
+    SelfTrainedMulticlassDrumBackend,
+    SelfTrainedPrototypeDrumBackend,
+    SpectralOnsetDrumBackend,
+)
 
 
 def _midi(path: Path, events: tuple[ProcessedDrumEvent, ...]) -> Path:
@@ -69,6 +80,42 @@ def test_macro_f1_excludes_mutually_empty_drum_classes_but_penalizes_extra_tom(t
     assert compare_drum_midi(extra_tom, truth)["f1"] < 1.0
 
 
+def test_benchmark_taxonomy_normalizes_pedal_hat_and_preserves_source_counts(tmp_path: Path) -> None:
+    truth = _midi(
+        tmp_path / "truth.mid",
+        (ProcessedDrumEvent(tick=0, note=44, drum="pedal_hat", velocity=100),),
+    )
+    predicted = _midi(
+        tmp_path / "predicted.mid",
+        (ProcessedDrumEvent(tick=0, note=42, drum="closed_hat", velocity=100),),
+    )
+
+    metrics = compare_drum_midi(predicted, truth)
+
+    assert metrics["per_drum"]["closed_hat"]["tp"] == 1
+    assert metrics["taxonomy"]["ground_truth_source_counts"] == {"pedal_hat": 1}
+    assert metrics["confusion_matrix"]["closed_hat"]["closed_hat"] == 1
+
+
+def test_contract_audit_reports_bounded_global_offset_without_changing_uncorrected_score(tmp_path: Path) -> None:
+    truth = _midi(
+        tmp_path / "truth.mid",
+        (ProcessedDrumEvent(tick=120, note=36, drum="kick", velocity=100),),
+    )
+    predicted = _midi(
+        tmp_path / "predicted.mid",
+        (ProcessedDrumEvent(tick=200, note=36, drum="kick", velocity=100),),
+    )
+
+    audit = audit_drum_midi_contract(predicted, truth)
+
+    assert audit["status"] == "measured"
+    assert audit["uncorrected"]["per_drum"]["kick"]["tp"] == 0
+    assert audit["offset_corrected"]["per_drum"]["kick"]["tp"] == 1
+    assert audit["global_timing_offset"]["best_offset_ticks"] == -80
+    assert audit["global_timing_offset"]["max_abs_offset_ticks"] == 120
+
+
 def test_alternative_backend_unknown_is_blocked_without_paths(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[2]
     spec = importlib.util.spec_from_file_location("alternative_spike", root / "scripts" / "run_alternative_drum_backend_spike.py")
@@ -92,6 +139,280 @@ def test_alternative_backend_runtime_unavailable_is_blocked(monkeypatch, tmp_pat
     assert result == {"status": "blocked", "backend": "spectral_onset_spike", "reason_code": "librosa_runtime_unavailable"}
 
 
+def test_pretrained_magenta_backend_is_blocked_without_private_runtime_template(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("GROOVESCRIBE_MAGENTA_DRUM_COMMAND_TEMPLATE", raising=False)
+    backend = MagentaOnsetsFramesDrumBackend()
+
+    assert backend.availability() == BackendAvailability(
+        "magenta_onsets_frames_drums",
+        False,
+        "magenta_onsets_frames_runtime_unavailable",
+    )
+    assert backend.transcribe(tmp_path / "drums.wav", tmp_path / "raw.mid", tempo_bpm=120.0) == {
+        "status": "blocked",
+        "backend": "magenta_onsets_frames_drums",
+        "reason_code": "magenta_onsets_frames_runtime_unavailable",
+    }
+
+
+@pytest.mark.parametrize(
+    ("template", "backend_type", "reason_code"),
+    [
+        ("/bin/echo --input {input} --output {output} --device {device}", MagentaOnsetsFramesDrumBackend, "magenta_onsets_frames_command_invalid"),
+        ("/bin/echo --output {output}", MagentaOnsetsFramesDrumBackend, "magenta_onsets_frames_command_invalid"),
+        ("/bin/echo --input {input}", MagentaOnsetsFramesDrumBackend, "magenta_onsets_frames_command_invalid"),
+        ("/bin/echo --input {input", MagentaOnsetsFramesDrumBackend, "magenta_onsets_frames_command_invalid"),
+        ("/bin/echo --input {input} --output {output} --device {device}", SelfTrainedPrototypeDrumBackend, "self_trained_prototype_command_invalid"),
+        ("/bin/echo --output {output}", SelfTrainedPrototypeDrumBackend, "self_trained_prototype_command_invalid"),
+        ("/bin/echo --input {input}", SelfTrainedPrototypeDrumBackend, "self_trained_prototype_command_invalid"),
+        ("/bin/echo --input {input", SelfTrainedPrototypeDrumBackend, "self_trained_prototype_command_invalid"),
+        ("/bin/echo --input {input} --output {output} --device {device}", SelfTrainedMulticlassDrumBackend, "self_trained_multiclass_command_invalid"),
+        ("/bin/echo --output {output}", SelfTrainedMulticlassDrumBackend, "self_trained_multiclass_command_invalid"),
+        ("/bin/echo --input {input}", SelfTrainedMulticlassDrumBackend, "self_trained_multiclass_command_invalid"),
+        ("/bin/echo --input {input", SelfTrainedMulticlassDrumBackend, "self_trained_multiclass_command_invalid"),
+        ("/bin/echo --input {input} --output {output} --device {device}", SelfTrainedMultilabelDrumBackend, "self_trained_multilabel_command_invalid"),
+        ("/bin/echo --output {output}", SelfTrainedMultilabelDrumBackend, "self_trained_multilabel_command_invalid"),
+        ("/bin/echo --input {input}", SelfTrainedMultilabelDrumBackend, "self_trained_multilabel_command_invalid"),
+        ("/bin/echo --input {input", SelfTrainedMultilabelDrumBackend, "self_trained_multilabel_command_invalid"),
+    ],
+)
+def test_template_backends_block_invalid_command_templates(template: str, backend_type, reason_code: str) -> None:
+    backend = backend_type(command_template=template)
+
+    assert backend.availability() == BackendAvailability(backend.name, False, reason_code)
+
+
+def test_magenta_backend_defensively_blocks_template_format_error_after_availability(monkeypatch, tmp_path: Path) -> None:
+    drums = tmp_path / "drums.wav"
+    drums.write_bytes(b"audio")
+    backend = MagentaOnsetsFramesDrumBackend(command_template="/bin/echo --input {input} --output {output} --device {device}")
+    monkeypatch.setattr(backend, "availability", lambda: BackendAvailability(backend.name, True))
+
+    result = backend.transcribe(drums, tmp_path / "raw.mid", tempo_bpm=120.0)
+
+    assert result == {
+        "status": "blocked",
+        "backend": "magenta_onsets_frames_drums",
+        "reason_code": "magenta_onsets_frames_command_invalid",
+    }
+
+
+@pytest.mark.parametrize(
+    ("backend_type", "reason_code"),
+    [
+        (SelfTrainedPrototypeDrumBackend, "self_trained_prototype_command_invalid"),
+        (SelfTrainedMulticlassDrumBackend, "self_trained_multiclass_command_invalid"),
+        (SelfTrainedMultilabelDrumBackend, "self_trained_multilabel_command_invalid"),
+    ],
+)
+def test_self_trained_backends_defensively_block_template_format_error_after_availability(
+    monkeypatch,
+    tmp_path: Path,
+    backend_type,
+    reason_code: str,
+) -> None:
+    drums = tmp_path / "drums.wav"
+    drums.write_bytes(b"audio")
+    backend = backend_type(command_template="/bin/echo --input {input} --output {output} --device {device}")
+    monkeypatch.setattr(backend, "availability", lambda: BackendAvailability(backend.name, True))
+
+    result = backend.transcribe(drums, tmp_path / "raw.mid", tempo_bpm=120.0)
+
+    assert result == {
+        "status": "blocked",
+        "backend": backend.name,
+        "reason_code": reason_code,
+    }
+
+
+def test_pretrained_backend_blocked_report_keeps_calibration_fail_closed(monkeypatch, tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("alternative_magenta", root / "scripts" / "run_alternative_drum_backend_spike.py")
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    monkeypatch.delenv("GROOVESCRIBE_MAGENTA_DRUM_COMMAND_TEMPLATE", raising=False)
+    (tmp_path / "gate_calibration.json").write_text('{"status":"insufficient_evidence","allow_performance_ready":false}', encoding="utf-8")
+    config = type("Config", (), {"backend": "magenta_onsets_frames_drums", "output_dir": tmp_path / "output", "manifest": tmp_path / "manifest.json", "adtof_benchmark_dir": tmp_path, "tom_filter_preset": None})()
+
+    report = script.run_spike(config)
+
+    assert report["status"] == "blocked"
+    assert report["integration_candidate"] is False
+    assert report["calibration_audit"]["allow_performance_ready"] is False
+    assert report["backend_provenance"] == {"model_source": "magenta_onsets_frames_e_gmd", "model_license": "Apache-2.0"}
+    assert report["redaction"] == {"status": "passed", "unsafe_token_count": 0}
+
+
+def test_pretrained_magenta_backend_requires_multiclass_standard_midi_output(tmp_path: Path) -> None:
+    drums = tmp_path / "drums.wav"
+    drums.write_bytes(b"audio")
+    output = tmp_path / "raw.mid"
+
+    def runner(command, **kwargs):
+        output_path = Path(command[command.index("--output") + 1])
+        write_drum_midi(
+            output_path,
+            (
+                ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),
+                ProcessedDrumEvent(tick=240, note=38, drum="snare", velocity=100),
+            ),
+            ticks_per_beat=480,
+        )
+        return type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    backend = MagentaOnsetsFramesDrumBackend(
+        command_template="/bin/echo --input {input} --output {output}",
+        runner=runner,
+    )
+    result = backend.transcribe(drums, output, tempo_bpm=120.0)
+
+    assert result["status"] == "completed"
+    assert result["observed_drum_classes"] == ["kick", "snare"]
+    assert "/tmp/" not in str(result)
+
+
+def test_self_trained_backend_is_blocked_without_private_runtime_template(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("GROOVESCRIBE_SELF_TRAINED_DRUM_COMMAND_TEMPLATE", raising=False)
+    backend = SelfTrainedPrototypeDrumBackend()
+
+    assert backend.availability() == BackendAvailability(
+        "self_trained_prototype_drums",
+        False,
+        "self_trained_prototype_runtime_unavailable",
+    )
+    assert backend.transcribe(tmp_path / "drums.wav", tmp_path / "raw.mid", tempo_bpm=120.0)["status"] == "blocked"
+
+
+def test_self_trained_multiclass_backend_is_blocked_without_private_runtime_template(monkeypatch) -> None:
+    monkeypatch.delenv("GROOVESCRIBE_SELF_TRAINED_MULTICLASS_COMMAND_TEMPLATE", raising=False)
+
+    assert SelfTrainedMulticlassDrumBackend().availability() == BackendAvailability(
+        "self_trained_multiclass_drums",
+        False,
+        "self_trained_multiclass_runtime_unavailable",
+    )
+
+
+def test_self_trained_multilabel_backend_is_blocked_without_private_runtime_template(monkeypatch) -> None:
+    monkeypatch.delenv("GROOVESCRIBE_SELF_TRAINED_MULTILABEL_COMMAND_TEMPLATE", raising=False)
+
+    assert SelfTrainedMultilabelDrumBackend().availability() == BackendAvailability(
+        "self_trained_multilabel_drums",
+        False,
+        "self_trained_multilabel_runtime_unavailable",
+    )
+
+
+def test_multilabel_training_rejects_augmentation_with_benchmark_source_drift() -> None:
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("multilabel_train", root / "scripts" / "train_self_trained_multilabel_drum_model.py")
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    source = {
+        "training_source_ids": ["train"],
+        "validation_source_ids": ["validation"],
+        "benchmark_source_ids": ["benchmark"],
+    }
+    invalid = {
+        "source_id_overlap_with_benchmark": False,
+        "training_source_ids": ["train"],
+        "validation_source_ids": ["validation"],
+        "benchmark_source_ids": ["changed"],
+        "items": [],
+    }
+
+    assert script._validate_augmentation(invalid, source) == "training_augmentation_source_id_isolation_invalid"
+
+
+def test_self_trained_backend_requires_kick_snare_and_third_drum_class(tmp_path: Path) -> None:
+    drums = tmp_path / "drums.wav"
+    drums.write_bytes(b"audio")
+    output = tmp_path / "raw.mid"
+
+    def runner(command, **kwargs):
+        output_path = Path(command[command.index("--output") + 1])
+        write_drum_midi(
+            output_path,
+            (
+                ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),
+                ProcessedDrumEvent(tick=240, note=38, drum="snare", velocity=100),
+                ProcessedDrumEvent(tick=480, note=42, drum="closed_hat", velocity=100),
+            ),
+            ticks_per_beat=480,
+        )
+        return type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    backend = SelfTrainedPrototypeDrumBackend(
+        command_template="/bin/echo --input {input} --output {output} --tempo-bpm {tempo_bpm}",
+        runner=runner,
+    )
+    result = backend.transcribe(drums, output, tempo_bpm=120.0)
+
+    assert result["status"] == "completed"
+    assert result["observed_drum_classes"] == ["closed_hat", "kick", "snare"]
+    assert "/tmp/" not in str(result)
+
+
+def test_self_trained_baseline_metadata_is_synthetic_and_source_isolated(monkeypatch, tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("self_trained_baseline", root / "scripts" / "train_self_trained_drum_baseline.py")
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    soundfont = tmp_path / "drums.sf2"
+    soundfont.write_bytes(b"soundfont")
+
+    def runner(command, **kwargs):
+        Path(command[command.index("-F") + 1]).write_bytes(b"wav")
+        return type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(script, "_feature", lambda path, onset_seconds: np.ones(64, dtype=np.float32))
+    config = type("Config", (), {"soundfont": soundfont, "output_dir": tmp_path / "runtime", "fluidsynth": Path("fluidsynth")})()
+
+    result = script.train(config, runner=runner)
+    metadata = (tmp_path / "runtime" / "training_metadata.json").read_text(encoding="utf-8")
+
+    assert result["status"] == "completed"
+    assert (tmp_path / "runtime" / "self_trained_drum_prototype_v1.npz").is_file()
+    assert '"training_kind": "synthetic_isolated_drum_hits"' in metadata
+    assert '"source_id_overlap_with_benchmark": false' in metadata
+    assert "/tmp/" not in metadata
+
+
+def test_gmd_training_manifest_excludes_all_benchmark_sources(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("gmd_manifest", root / "scripts" / "build_gmd_training_manifest.py")
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    gmd = tmp_path / "gmd"
+    gmd.mkdir()
+    (gmd / "info.csv").write_text(
+        "drummer,session,id,style,bpm,beat_type,time_signature,midi_filename,audio_filename,duration,split\n"
+        "drummer1,s,one,rock,120,beat,4-4,drummer1/a.mid,drummer1/a.wav,1,train\n"
+        "drummer2,s,two,rock,120,beat,4-4,drummer2/a.mid,drummer2/a.wav,1,train\n"
+        "drummer3,s,three,rock,120,beat,4-4,drummer3/a.mid,drummer3/a.wav,1,validation\n"
+        "drummer4,s,four,rock,120,beat,4-4,drummer4/a.mid,drummer4/a.wav,1,train\n",
+        encoding="utf-8",
+    )
+    for drummer in ("drummer1", "drummer2", "drummer3", "drummer4"):
+        (gmd / drummer).mkdir()
+        (gmd / drummer / "a.mid").write_bytes(b"midi")
+        (gmd / drummer / "a.wav").write_bytes(b"audio")
+    benchmark = tmp_path / "benchmark.json"
+    benchmark.write_text(json.dumps({"items": [{"audio_path": str(gmd / "drummer1" / "a.wav")}] }), encoding="utf-8")
+    output = tmp_path / "training.json"
+
+    result = script.build_manifest(type("Config", (), {"gmd_root": gmd, "benchmark_manifest": benchmark, "output_manifest": output, "max_train_items": 10, "max_validation_items": 10})())
+
+    assert result["status"] == "completed"
+    assert result["benchmark_source_ids"] == ["drummer1"]
+    assert set(result["training_source_ids"]).isdisjoint(result["benchmark_source_ids"])
+    assert set(result["validation_source_ids"]).isdisjoint(result["benchmark_source_ids"])
+
+
 def test_alternative_candidate_rejects_core_false_positive_or_gate_regression(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[2]
     spec = importlib.util.spec_from_file_location("alternative_candidate", root / "scripts" / "run_alternative_drum_backend_spike.py")
@@ -110,6 +431,33 @@ def test_alternative_candidate_rejects_core_false_positive_or_gate_regression(tm
     }
 
     assert script._is_integration_candidate([{"status": "completed"}], comparison) is False
+
+
+def test_comparison_exposes_raw_processed_and_chart_stage_metrics() -> None:
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("alternative_comparison", root / "scripts" / "run_alternative_drum_backend_spike.py")
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    metric = {"f1": 0.5, "mean_timing_error_ticks": 12.0, "per_drum": {drum: {"f1": 0.5, "fp": 0} for drum in ("kick", "snare", "closed_hat", "open_hat", "tom", "cymbal")}}
+    comparison = script._comparison(
+        [
+            {
+                "input_type": "drum_only",
+                "raw_metrics": metric,
+                "processed_metrics": metric,
+                "chart_metrics": metric,
+                "adtof_raw_metrics": metric,
+                "adtof_processed_metrics": metric,
+                "adtof_chart_metrics": metric,
+                "performance_gate": {"verdict": "not_ready"},
+                "adtof_performance_gate": {"verdict": "not_ready"},
+            }
+        ]
+    )
+
+    assert set(comparison["drum_only"]["stages"]) == {"raw", "processed", "chart"}
+    assert comparison["drum_only"]["stages"]["processed"]["per_drum"]["snare"]["delta"] == 0.0
 
 
 def test_error_breakdown_skips_unverified_provenance(tmp_path: Path) -> None:

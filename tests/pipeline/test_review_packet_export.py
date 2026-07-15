@@ -83,7 +83,12 @@ def test_export_review_packet_writes_redacted_json_markdown_and_zip(tmp_path: Pa
     packet_text = (output_dir / "review_packet.json").read_text(encoding="utf-8")
     notes_text = (output_dir / "review_notes.md").read_text(encoding="utf-8")
     with zipfile.ZipFile(output_dir / "review_packet.zip") as archive:
-        assert sorted(archive.namelist()) == ["drums.mid", "review_notes.md", "review_packet.json", "score.musicxml"]
+        assert sorted(archive.namelist()) == [
+            "drums.mid",
+            "review_notes.md",
+            "review_packet.json",
+            "score.musicxml",
+        ]
         zipped_packet_text = archive.read("review_packet.json").decode("utf-8")
     for payload in (result.stdout, packet_text, notes_text):
         for token in UNSAFE_TOKENS:

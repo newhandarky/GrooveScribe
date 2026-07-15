@@ -22,11 +22,14 @@ def test_performance_gate_accepts_complete_aligned_chart(tmp_path: Path) -> None
         performance_midi_path=result.performance_midi_path,
         performance_musicxml_path=result.performance_musicxml_path,
         drums_stem_path=tmp_path / "drums.wav",
-        gate_calibration={"status": "calibrated", "allow_performance_ready": True, "min_auto_onset_alignment": 0.7},
+        gate_calibration=_real_full_mix_calibration(0.7),
     )
 
     assert gate["verdict"] == "performance_ready"
     assert gate["delivery_allowed"] is True
+    assert gate["ground_truth_verified"] is False
+    assert gate["real_audio_verified"] is False
+    assert gate["delivery_status"] == "verified_performance_score"
     assert gate["midi"]["playback_ready"] is True
     assert gate["musicxml"]["parseable"] is True
     assert gate["rhythm"]["complete"] is True
@@ -62,6 +65,7 @@ def test_performance_gate_fails_closed_without_calibration(tmp_path: Path) -> No
     )
 
     assert gate["verdict"] == "playable_but_low_confidence"
+    assert gate["delivery_status"] == "playable_draft_unverified"
     assert "gate_calibration_unavailable" in gate["blocking_issues"]
 
 
@@ -88,11 +92,7 @@ def test_performance_gate_uses_valid_calibrated_alignment_threshold(tmp_path: Pa
         performance_midi_path=result.performance_midi_path,
         performance_musicxml_path=result.performance_musicxml_path,
         drums_stem_path=tmp_path / "drums.wav",
-        gate_calibration={
-            "status": "calibrated",
-            "allow_performance_ready": True,
-            "min_auto_onset_alignment": max(0.0, alignment - 0.01),
-        },
+        gate_calibration=_real_full_mix_calibration(max(0.0, alignment - 0.01)),
     )
 
     assert gate["required_onset_alignment"] < 0.70
@@ -138,6 +138,31 @@ def test_performance_gate_failed_closed_calibration_cannot_upgrade_verdict(tmp_p
     assert gate["delivery_allowed"] is False
 
 
+def test_performance_gate_rejects_synthetic_only_calibration_even_when_marked_calibrated(tmp_path: Path) -> None:
+    events_path = tmp_path / "drum_events.json"
+    events_path.write_text(json.dumps(_two_measure_groove()), encoding="utf-8")
+    result = MusicXmlGenerator().generate(events_path, tmp_path / "notation")
+    _write_click_stem(tmp_path / "drums.wav", [index * 0.25 for index in range(16)])
+
+    gate = evaluate_performance_score(
+        chart_events_path=result.chart_events_path,
+        performance_midi_path=result.performance_midi_path,
+        performance_musicxml_path=result.performance_musicxml_path,
+        drums_stem_path=tmp_path / "drums.wav",
+        gate_calibration={
+            "status": "calibrated",
+            "allow_performance_ready": True,
+            "min_auto_onset_alignment": 0.0,
+            "accepted_real_audio_reference_count": 0,
+            "accepted_real_audio_input_types": [],
+        },
+    )
+
+    assert gate["verdict"] == "playable_but_low_confidence"
+    assert gate["delivery_allowed"] is False
+    assert "gate_calibration_not_ready" in gate["blocking_issues"]
+
+
 def test_performance_gate_uses_default_threshold_for_invalid_calibration_value(tmp_path: Path) -> None:
     events_path = tmp_path / "drum_events.json"
     events_path.write_text(json.dumps(_two_measure_groove()), encoding="utf-8")
@@ -149,7 +174,7 @@ def test_performance_gate_uses_default_threshold_for_invalid_calibration_value(t
         performance_midi_path=result.performance_midi_path,
         performance_musicxml_path=result.performance_musicxml_path,
         drums_stem_path=tmp_path / "drums.wav",
-        gate_calibration={"status": "calibrated", "allow_performance_ready": True, "min_auto_onset_alignment": -1.0},
+        gate_calibration=_real_full_mix_calibration(-1.0),
     )
 
     assert gate["required_onset_alignment"] == 0.70
@@ -194,7 +219,7 @@ def test_structural_issue_stays_not_ready_with_valid_calibration(tmp_path: Path)
         performance_midi_path=result.performance_midi_path,
         performance_musicxml_path=result.performance_musicxml_path,
         drums_stem_path=tmp_path / "drums.wav",
-        gate_calibration={"status": "calibrated", "allow_performance_ready": True, "min_auto_onset_alignment": 0.0},
+        gate_calibration=_real_full_mix_calibration(0.0),
     )
 
     assert gate["verdict"] == "not_ready"
@@ -255,6 +280,16 @@ def _two_measure_groove() -> dict:
             ]
         )
     return {"ticks_per_beat": 480, "estimated_bpm": 120.0, "time_signature": "4/4", "events": events}
+
+
+def _real_full_mix_calibration(threshold: float) -> dict:
+    return {
+        "status": "calibrated",
+        "allow_performance_ready": True,
+        "min_auto_onset_alignment": threshold,
+        "accepted_real_audio_reference_count": 1,
+        "accepted_real_audio_input_types": ["full_mix"],
+    }
 
 
 def _write_click_stem(path: Path, onsets: list[float]) -> None:
