@@ -25,8 +25,8 @@ def test_calibration_enables_ready_only_with_two_input_types_and_clean_evidence(
     calibration = calibrate_gate(
         [
             _run("drum_only", 0.95, True, True),
-            _run("full_mix", 0.88, True, True),
-            _run("full_mix", 0.9, True, True),
+            _run("full_mix", 0.88, True, True, real_audio=True),
+            _run("full_mix", 0.9, True, True, real_audio=True),
         ]
     )
 
@@ -40,8 +40,8 @@ def test_calibration_restores_original_ready_verdict_after_initial_fail_closed_d
     calibration = calibrate_gate(
         [
             _run("drum_only", 0.95, True, True),
-            _run("full_mix", 0.88, True, True),
-            _run("full_mix", 0.9, True, True),
+            _run("full_mix", 0.88, True, True, real_audio=True),
+            _run("full_mix", 0.9, True, True, real_audio=True),
         ]
     )
     initially_downgraded = {
@@ -63,8 +63,8 @@ def test_calibration_reconsiders_only_provisional_alignment_failure() -> None:
     calibration = calibrate_gate(
         [
             _run("drum_only", 0.95, True, True),
-            _run("full_mix", 0.6458, True, True),
-            _run("full_mix", 0.9, True, True),
+            _run("full_mix", 0.6458, True, True, real_audio=True),
+            _run("full_mix", 0.9, True, True, real_audio=True),
         ]
     )
     provisional = {
@@ -99,6 +99,21 @@ def test_calibration_requires_accepted_drum_only_and_full_mix_evidence() -> None
     assert gate["delivery_allowed"] is False
 
 
+def test_synthetic_full_mix_cannot_enable_performance_ready_calibration() -> None:
+    calibration = calibrate_gate(
+        [
+            _run("drum_only", 0.95, True, True),
+            _run("full_mix", 0.88, True, True, real_audio=False),
+            _run("full_mix", 0.90, True, True, real_audio=False),
+        ]
+    )
+
+    assert calibration["status"] == "insufficient_evidence"
+    assert calibration["allow_performance_ready"] is False
+    assert calibration["accepted_real_audio_reference_count"] == 0
+    assert calibration["accepted_real_audio_input_types"] == []
+
+
 def test_ineligible_full_mix_cannot_complete_calibration_coverage() -> None:
     calibration = calibrate_gate(
         [
@@ -116,8 +131,8 @@ def test_ineligible_low_alignment_cannot_lower_calibrated_threshold() -> None:
     calibration = calibrate_gate(
         [
             _run("drum_only", 0.95, True, True),
-            _run("full_mix", 0.88, True, True),
-            _run("full_mix", 0.90, True, True),
+            _run("full_mix", 0.88, True, True, real_audio=True),
+            _run("full_mix", 0.90, True, True, real_audio=True),
             _run("full_mix", 0.10, True, True, eligible=False),
         ]
     )
@@ -130,8 +145,8 @@ def test_calibration_fails_closed_for_false_positive_enabled_only_by_candidate_t
     calibration = calibrate_gate(
         [
             _run("drum_only", 0.72, True, True),
-            _run("full_mix", 0.65, True, True),
-            _run("full_mix", 0.67, True, True),
+            _run("full_mix", 0.65, True, True, real_audio=True),
+            _run("full_mix", 0.67, True, True, real_audio=True),
             _run("drum_only", 0.66, False, False, issues=["audio_onset_alignment_low"]),
         ]
     )
@@ -145,8 +160,8 @@ def test_structural_issue_is_not_a_calibrated_ready_candidate() -> None:
     calibration = calibrate_gate(
         [
             _run("drum_only", 0.72, True, True),
-            _run("full_mix", 0.65, True, True),
-            _run("full_mix", 0.67, True, True),
+            _run("full_mix", 0.65, True, True, real_audio=True),
+            _run("full_mix", 0.67, True, True, real_audio=True),
             _run("drum_only", 0.66, False, False, issues=["audio_onset_alignment_low", "tom_outside_fill"]),
         ]
     )
@@ -163,6 +178,8 @@ def test_invalid_calibration_thresholds_fail_closed() -> None:
                 "status": "calibrated",
                 "allow_performance_ready": True,
                 "min_auto_onset_alignment": threshold,
+                "accepted_real_audio_reference_count": 1,
+                "accepted_real_audio_input_types": ["full_mix"],
             },
         )
 
@@ -188,8 +205,8 @@ def test_invalid_full_mix_alignment_cannot_complete_accepted_coverage() -> None:
 def test_invalid_full_mix_alignment_cannot_change_existing_calibration_threshold() -> None:
     baseline = [
         _run("drum_only", 0.90, True, True),
-        _run("full_mix", 0.80, True, True),
-        _run("full_mix", 0.85, True, True),
+        _run("full_mix", 0.80, True, True, real_audio=True),
+        _run("full_mix", 0.85, True, True, real_audio=True),
     ]
     expected = calibrate_gate(baseline)
 
@@ -215,6 +232,7 @@ def _run(
     *,
     eligible: bool = True,
     issues: list[str] | None = None,
+    real_audio: bool = False,
 ) -> dict:
     return {
         "id": input_type,
@@ -223,6 +241,7 @@ def _run(
         "ground_truth_passed": passed,
         "auto_gate_candidate": auto_candidate,
         "calibration_eligible": eligible,
+        "real_audio_verified": real_audio,
         "performance_gate": {
             "audio_alignment": {"onset_alignment_rate": alignment},
             "blocking_issues": issues or [],

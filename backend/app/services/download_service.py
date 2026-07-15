@@ -65,7 +65,7 @@ class DownloadService:
         return DownloadArtifact(
             reader=reader,
             content_type=export_file.content_type,
-            filename=_FILENAME_BY_EXPORT_TYPE[normalized_type],
+            filename=_download_filename(export_file),
         )
 
     def open_review_audio(self, db: Session, *, job_id: str, audio_kind: str) -> DownloadArtifact:
@@ -107,3 +107,12 @@ class DownloadService:
         export_type: ExportFileType,
     ) -> ExportFile | None:
         return next((export for export in export_files if export.type == export_type), None)
+
+
+def _download_filename(export_file: ExportFile) -> str:
+    stored_name = export_file.storage_key.rsplit("/", maxsplit=1)[-1]
+    if export_file.type == ExportFileType.MIDI and stored_name == "performance_score.mid":
+        return stored_name
+    if export_file.type == ExportFileType.MUSICXML and stored_name == "performance_score.musicxml":
+        return stored_name
+    return _FILENAME_BY_EXPORT_TYPE[export_file.type]

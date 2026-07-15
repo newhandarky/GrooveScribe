@@ -31,10 +31,10 @@ def parse_args() -> argparse.Namespace:
 def run_spike(config: argparse.Namespace) -> dict[str, Any]:
     backend = get_benchmark_backend(config.backend)
     if backend is None:
-        return _write(config.output_dir, {"schema_version": "1.0", "status": "blocked", "backend": config.backend, "reason_code": "backend_unknown"})
+        return _write(config.output_dir, _blocked_report(config, config.backend, "backend_unknown"))
     availability = backend.availability()
     if not availability.ready:
-        return _write(config.output_dir, {"schema_version": "1.0", "status": "blocked", "backend": config.backend, "reason_code": availability.reason_code})
+        return _write(config.output_dir, _blocked_report(config, config.backend, availability.reason_code, backend))
     manifest = _read(config.manifest)
     calibration_path = getattr(config, "gate_calibration", None) or config.adtof_benchmark_dir / "gate_calibration.json"
     calibration = _read(calibration_path)
@@ -44,17 +44,55 @@ def run_spike(config: argparse.Namespace) -> dict[str, Any]:
         "schema_version": "1.0",
         "status": "completed",
         "backend": config.backend,
+        "backend_provenance": _backend_provenance(backend),
         "comparison_scope": "post_demucs_transcription_only",
         "calibration_audit": _calibration_audit(calibration),
         "ground_truth_verified": any(run.get("status") == "completed" for run in runs),
         "real_audio_verified": any(run.get("real_audio_verified") is True for run in runs),
         "synthetic_full_mix_present": any(run.get("synthetic_full_mix") is True for run in runs),
         "runs": runs,
-        "by_input_type": aggregate_by_input_type([{"input_type": run["input_type"], "stages": {"raw": run.get("raw_metrics", {}), "processed": run.get("processed_metrics", {}), "chart": run.get("chart_metrics", {})}, "primary_failure_stage": "unknown"} for run in runs]),
+        "by_input_type": aggregate_by_input_type(
+            [
+                {
+                    "input_type": run["input_type"],
+                    "stages": {
+                        "raw": run.get("raw_metrics", {}),
+                        "processed": run.get("processed_metrics", {}),
+                        "chart": run.get("chart_metrics", {}),
+                    },
+                    "primary_failure_stage": "unknown",
+                }
+                for run in runs
+            ]
+        ),
         "comparison_to_adtof": _comparison(runs),
         "integration_candidate": _is_integration_candidate(runs, _comparison(runs)),
     }
     return _write(config.output_dir, report)
+
+
+def _blocked_report(config: argparse.Namespace, backend_name: str, reason_code: str | None, backend=None) -> dict[str, Any]:
+    calibration_path = getattr(config, "gate_calibration", None) or config.adtof_benchmark_dir / "gate_calibration.json"
+    calibration = _read(calibration_path)
+    return {
+        "schema_version": "1.0",
+        "status": "blocked",
+        "backend": backend_name,
+        "backend_provenance": _backend_provenance(backend),
+        "comparison_scope": "post_demucs_transcription_only",
+        "calibration_audit": _calibration_audit(calibration),
+        "reason_code": reason_code or "backend_runtime_unavailable",
+        "comparison_to_adtof": {},
+        "integration_candidate": False,
+    }
+
+
+def _backend_provenance(backend) -> dict[str, str] | None:
+    source = getattr(backend, "model_source", None)
+    license_name = getattr(backend, "model_license", None)
+    if not isinstance(source, str) or not isinstance(license_name, str):
+        return None
+    return {"model_source": source, "model_license": license_name}
 
 
 def _run_item(item: dict[str, Any], config: argparse.Namespace, backend, calibration: dict[str, Any]) -> dict[str, Any]:
@@ -85,6 +123,8 @@ def _run_item(item: dict[str, Any], config: argparse.Namespace, backend, calibra
         "raw_metrics": compare_drum_midi(raw, ground_truth),
         "processed_metrics": compare_drum_midi(processed.processed_midi_path, ground_truth),
         "chart_metrics": compare_drum_midi(notation.performance_midi_path, ground_truth),
+        "adtof_raw_metrics": compare_drum_midi(source / "midi" / "raw_drum.mid", ground_truth),
+        "adtof_processed_metrics": compare_drum_midi(source / "midi" / "processed_drum.mid", ground_truth),
         "adtof_chart_metrics": compare_drum_midi(source / "notation" / "performance_score.mid", ground_truth),
         "adtof_performance_gate": adtof_gate,
         "performance_gate": gate,
@@ -95,19 +135,19 @@ def _comparison(runs: list[dict[str, Any]]) -> dict[str, Any]:
     by_type = {}
     for input_type in sorted({run["input_type"] for run in runs}):
         scoped = [run for run in runs if run["input_type"] == input_type]
-        alternative_scores = [run.get("chart_metrics", {}).get("f1") for run in scoped]
-        adtof_scores = [run.get("adtof_chart_metrics", {}).get("f1") for run in scoped]
-        alternative = _mean(alternative_scores)
-        adtof = _mean(adtof_scores)
+        stages = {
+            stage: _stage_comparison(scoped, stage)
+            for stage in ("raw", "processed", "chart")
+        }
+        chart = stages["chart"]
         by_type[input_type] = {
             "run_count": len(scoped),
-            "alternative_chart_f1": alternative,
-            "adtof_chart_f1": adtof,
-            "chart_f1_delta": round(alternative - adtof, 4) if alternative is not None and adtof is not None else None,
-            "per_drum": {
-                drum: _per_drum_comparison(scoped, drum)
-                for drum in ("kick", "snare", "closed_hat", "open_hat", "tom", "cymbal")
-            },
+            "stages": stages,
+            # Preserve these existing fields for older report consumers.
+            "alternative_chart_f1": chart["alternative_f1"],
+            "adtof_chart_f1": chart["adtof_f1"],
+            "chart_f1_delta": chart["f1_delta"],
+            "per_drum": chart["per_drum"],
             "core_groove_f1": {
                 "alternative": _core_f1(scoped, "chart_metrics"),
                 "adtof": _core_f1(scoped, "adtof_chart_metrics"),
@@ -124,9 +164,34 @@ def _comparison(runs: list[dict[str, Any]]) -> dict[str, Any]:
     return by_type
 
 
-def _per_drum_comparison(runs: list[dict[str, Any]], drum: str) -> dict[str, float | None]:
-    alternative = _mean([run.get("chart_metrics", {}).get("per_drum", {}).get(drum, {}).get("f1") for run in runs])
-    adtof = _mean([run.get("adtof_chart_metrics", {}).get("per_drum", {}).get(drum, {}).get("f1") for run in runs])
+def _stage_comparison(runs: list[dict[str, Any]], stage: str) -> dict[str, Any]:
+    alternative_name = f"{stage}_metrics"
+    adtof_name = f"adtof_{stage}_metrics"
+    alternative = _mean([run.get(alternative_name, {}).get("f1") for run in runs])
+    adtof = _mean([run.get(adtof_name, {}).get("f1") for run in runs])
+    return {
+        "alternative_f1": alternative,
+        "adtof_f1": adtof,
+        "f1_delta": round(alternative - adtof, 4) if alternative is not None and adtof is not None else None,
+        "per_drum": {
+            drum: _per_drum_comparison(runs, drum, alternative_name, adtof_name)
+            for drum in ("kick", "snare", "closed_hat", "open_hat", "tom", "cymbal")
+        },
+        "mean_timing_error_ticks": {
+            "alternative": _mean([run.get(alternative_name, {}).get("mean_timing_error_ticks") for run in runs]),
+            "adtof": _mean([run.get(adtof_name, {}).get("mean_timing_error_ticks") for run in runs]),
+        },
+    }
+
+
+def _per_drum_comparison(
+    runs: list[dict[str, Any]],
+    drum: str,
+    alternative_name: str = "chart_metrics",
+    adtof_name: str = "adtof_chart_metrics",
+) -> dict[str, float | None]:
+    alternative = _mean([run.get(alternative_name, {}).get("per_drum", {}).get(drum, {}).get("f1") for run in runs])
+    adtof = _mean([run.get(adtof_name, {}).get("per_drum", {}).get(drum, {}).get("f1") for run in runs])
     return {"alternative_f1": alternative, "adtof_f1": adtof, "delta": round(alternative - adtof, 4) if alternative is not None and adtof is not None else None}
 
 
@@ -145,10 +210,13 @@ def _is_integration_candidate(runs: list[dict[str, Any]], comparison: dict[str, 
         if result["chart_f1_delta"] < 0.05:
             return False
         per_drum = result.get("per_drum") if isinstance(result.get("per_drum"), dict) else {}
+        core_improvements = 0
         for drum in ("kick", "snare", "closed_hat"):
             delta = per_drum.get(drum, {}).get("delta") if isinstance(per_drum.get(drum), dict) else None
-            if not isinstance(delta, (int, float)) or delta < 0.05:
-                return False
+            if isinstance(delta, (int, float)) and delta >= 0.05:
+                core_improvements += 1
+        if core_improvements < 2:
+            return False
         core = result.get("core_groove_f1") if isinstance(result.get("core_groove_f1"), dict) else {}
         if not isinstance(core.get("alternative"), (int, float)) or not isinstance(core.get("adtof"), (int, float)) or core["alternative"] < core["adtof"] + 0.05:
             return False
@@ -218,6 +286,7 @@ def _verdict_rank(gate: object) -> int:
 
 def _write(output_dir: Path, report: dict[str, Any]) -> dict[str, Any]:
     _assert_safe(report)
+    report["redaction"] = {"status": "passed", "unsafe_token_count": 0}
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "alternative_backend_spike_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return report

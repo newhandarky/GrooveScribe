@@ -765,6 +765,14 @@ export function ResultCard({
   const unavailableExports = result.exports.filter((item) => item.status !== 'available');
   const pipelineMode = result.pipeline?.mode ?? 'unknown';
   const validation = result.pipeline?.validation ?? null;
+  const delivery = result.pipeline?.quality?.performance_gate;
+  // Legacy and demo results predate the performance gate. Keep their existing
+  // download behavior; only an explicit unsafe gate state moves exports into
+  // diagnostics.
+  const verifiedPerformanceScore = isVerifiedPerformanceScore(delivery);
+  const deliverableScore = !delivery || verifiedPerformanceScore || delivery.verdict === 'playable_but_low_confidence';
+  const scoreExports = deliverableScore ? availableExports : [];
+  const diagnosticExports = deliverableScore ? [] : availableExports;
 
   return (
     <div className="resultCard">
@@ -836,14 +844,29 @@ export function ResultCard({
         </div>
       ) : null}
 
-      <div className="downloadGrid">
-        {availableExports.map((item) => (
+      {scoreExports.length ? (
+        <div className="downloadGrid">
+          {scoreExports.map((item) => (
           <a className="downloadButton" href={downloadUrl(item.download_url)} key={item.type}>
-            {item.type.toUpperCase()}
-            <span>{formatBytes(item.file_size_bytes)}</span>
+              {performanceExportLabel(item.type, verifiedPerformanceScore)}
+              <span>{delivery?.verdict === 'playable_but_low_confidence' ? '可播放草稿，未完成對照驗證' : formatBytes(item.file_size_bytes)}</span>
           </a>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : null}
+
+      {diagnosticExports.length ? (
+        <div className="exportList">
+          <strong>技術診斷 artifacts</strong>
+          <p className="qualityStatusNote">系統未將此結果標示為完成 performance score；可從自動交付包取得技術 artifacts。</p>
+          {diagnosticExports.map((item) => (
+            <div className="exportRow" key={`diagnostic-${item.type}`}>
+              <span>{item.type.toUpperCase()}</span>
+              <span>已保留於交付包</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {unavailableExports.length ? (
         <div className="exportList">
@@ -968,7 +991,7 @@ function QualityStatusPanel({ pipeline }: { pipeline: TranscriptionResultRespons
           <span>Fill：{formatNumber(notationChart.fill_measure_count)}</span>
           <span>Groove 八分音符：{formatNumber(notationChart.groove_eighth_note_count)}</span>
           <span>Fill 十六分音符：{formatNumber(notationChart.fill_sixteenth_note_count)}</span>
-          <span>需人工整理：{formatNumber(notationChart.incomplete_core_groove_measure_count)}</span>
+          <span>核心節奏不完整小節：{formatNumber(notationChart.incomplete_core_groove_measure_count)}</span>
         </div>
       ) : null}
       {limitations.length ? (
@@ -1003,21 +1026,35 @@ function QualityStatusPanel({ pipeline }: { pipeline: TranscriptionResultRespons
 function PerformanceDeliveryPanel({ pipeline }: { pipeline: TranscriptionResultResponse['pipeline'] }) {
   const gate = pipeline?.quality?.performance_gate;
   if (!gate) return null;
+  const verifiedPerformanceScore = isVerifiedPerformanceScore(gate);
   const labels: Record<string, string> = {
     performance_ready: '可直接演奏',
     playable_but_low_confidence: '可播放，但系統信心不足',
     needs_better_source: '需要更好的來源音檔',
     not_ready: '系統未能可靠完成',
   };
+  const deliveryLabel = verifiedPerformanceScore
+    ? '可直接演奏'
+    : gate.verdict === 'performance_ready'
+      ? '可播放草稿，需人工確認'
+      : labels[gate.verdict] ?? '系統未能可靠完成';
   const alignment = gate.audio_alignment?.onset_alignment_rate;
+  const verificationStatus =
+    verifiedPerformanceScore
+      ? '已通過已校準自動交付驗證'
+      : gate.ground_truth_verified
+        ? '已由對照 MIDI 驗證'
+        : gate.real_audio_verified
+          ? '已由真實音訊證據驗證'
+          : '未完成真實音訊對照驗證';
   return (
     <section className={`performanceDeliveryPanel ${gate.verdict}`}>
       <div className="qualityStatusHeader">
         <div>
-          <strong>{labels[gate.verdict] ?? '系統未能可靠完成'}</strong>
+          <strong>{deliveryLabel}</strong>
           <span>自動演奏交付判定</span>
         </div>
-        <span>{gate.ground_truth_verified ? '已由對照 MIDI 驗證' : gate.delivery_allowed ? '已通過校準後自動 gate' : '不宣稱完成品'}</span>
+        <span>{verificationStatus}</span>
       </div>
       <div className="qualityStatusGrid">
         <Metric label="Performance MIDI" value={gate.midi?.playback_ready === true ? '可播放' : '未驗證'} />
@@ -1027,10 +1064,33 @@ function PerformanceDeliveryPanel({ pipeline }: { pipeline: TranscriptionResultR
       </div>
       {gate.blocking_issues.length ? (
         <p className="qualityStatusNote">系統限制：{gate.blocking_issues.map(qualityLimitationLabel).join('、')}</p>
+      ) : gate.verdict === 'performance_ready' && !verifiedPerformanceScore ? (
+        <p className="qualityStatusNote">已完成部分自動檢查，但缺少 verified delivery contract，因此不可標示為可直接演奏成品。</p>
+      ) : gate.verdict === 'playable_but_low_confidence' ? (
+        <p className="qualityStatusNote">已通過可播放與結構檢查，但沒有真實 full-mix 對照 MIDI 的自動驗證，因此只交付低信心草稿。</p>
       ) : (
         <p className="qualityStatusNote">系統已完成節奏、可演奏性與音訊對齊檢查。</p>
       )}
     </section>
+  );
+}
+
+function performanceExportLabel(type: string, verifiedPerformanceScore: boolean): string {
+  const prefix = verifiedPerformanceScore ? 'Performance' : 'Drum Draft';
+  if (type === 'midi') return `${prefix} MIDI`;
+  if (type === 'musicxml') return `${prefix} MusicXML`;
+  if (type === 'pdf') return `${prefix} PDF`;
+  return `${prefix} ${type.toUpperCase()}`;
+}
+
+type PerformanceGate = NonNullable<NonNullable<NonNullable<TranscriptionResultResponse['pipeline']>['quality']>['performance_gate']>;
+
+function isVerifiedPerformanceScore(gate: PerformanceGate | null | undefined): boolean {
+  return Boolean(
+    gate
+    && gate.verdict === 'performance_ready'
+    && gate.delivery_allowed === true
+    && gate.delivery_status === 'verified_performance_score',
   );
 }
 
@@ -1088,6 +1148,7 @@ function playDrumPreview(context: AudioContext, when: number, drum: string, velo
 
 function ReviewPacketPanel({ result }: { result: TranscriptionResultResponse }) {
   const performance = result.pipeline?.quality?.performance_gate;
+  const verifiedPerformanceScore = isVerifiedPerformanceScore(performance);
   const jsonUrl = `/api/v1/transcriptions/${encodeURIComponent(result.job_id)}/review-packet`;
   const zipUrl = `/api/v1/transcriptions/${encodeURIComponent(result.job_id)}/download/review-packet`;
 
@@ -1116,7 +1177,7 @@ function ReviewPacketPanel({ result }: { result: TranscriptionResultResponse }) 
         ))}
       </div>
       <p className="qualityStatusNote">
-        {performance?.delivery_allowed
+        {verifiedPerformanceScore
           ? '此交付包已通過自動播放、節奏、可演奏性與音訊對齊檢查。'
           : '此交付包保留自動品質結果；系統未通過時不將譜面包裝成可直接演奏。'}
       </p>
@@ -1152,8 +1213,8 @@ function unknownQualityVerdict(
 
 function qualityVerdictLabel(verdict: string): string {
   if (verdict === 'mvp_candidate') return '接近可用草稿';
-  if (verdict === 'draft_candidate_needs_review') return '草稿需人工檢查';
-  if (verdict === 'not_candidate') return '目前不建議修譜';
+  if (verdict === 'draft_candidate_needs_review') return '草稿品質仍需提升';
+  if (verdict === 'not_candidate') return '系統不建議交付此草稿';
   return '品質狀態未知';
 }
 
@@ -1204,7 +1265,7 @@ function qualityTomFilterLabel(status: string): string {
 function notationReadabilityLabel(readability: Record<string, unknown>): string {
   if (!readability || Object.keys(readability).length === 0) return '未回報';
   const warnings = Array.isArray(readability.warnings) ? readability.warnings : [];
-  if (warnings.includes('notation_dense_full_mix_likely')) return '譜面偏密，需人工整理';
+  if (warnings.includes('notation_dense_full_mix_likely')) return '譜面偏密，系統不建議直接交付';
   if (readability.has_hand_voice && readability.has_foot_voice) return '雙聲部鼓譜';
   if (readability.has_hand_voice || readability.has_foot_voice) return '單聲部鼓譜';
   return '需檢查';
@@ -1234,14 +1295,14 @@ function qualitySuggestionList(
 ): string[] {
   const suggestions = new Set<string>();
   if (!musicxmlParseable) {
-    suggestions.add('先確認 MusicXML 能否在預覽或 MuseScore 中開啟。');
+    suggestions.add('系統未能確認 MusicXML 可讀取，因此不會將此結果標示為可直接演奏。');
   }
   const readabilityWarnings = Array.isArray(notationReadability.warnings) ? notationReadability.warnings : [];
   if (readabilityWarnings.includes('notation_dense_full_mix_likely')) {
-    suggestions.add('這份 full-mix 草稿譜面偏密，請先整理重複或過密小節，再進行細修。');
+    suggestions.add('這份 full-mix 譜面仍偏密；系統會保留技術 artifacts，但不應視為完成 performance score。');
   }
   if (readabilityWarnings.includes('generic_tom_position_used')) {
-    suggestions.add('Tom 目前使用單一通用位置；需要時請人工區分高 tom、floor tom。');
+    suggestions.add('Tom 位置使用保守通用表示；目前不會宣稱其細節已自動驗證。');
   }
   const chartWarnings = Array.isArray(notationChart.warnings) ? notationChart.warnings : [];
   if (notationChart.mode === 'readable_drum_chart_v3') {
@@ -1252,28 +1313,28 @@ function qualitySuggestionList(
     suggestions.add('MusicXML 已使用簡化鼓譜模式；MIDI 仍保留完整 processed events。');
   }
   if (chartWarnings.includes('no_stable_groove_detected')) {
-    suggestions.add('未偵測到可穩定重複的 groove；此段保留簡化小節，建議人工標記段落。');
+    suggestions.add('未偵測到足夠穩定的 groove；系統會降低交付信心，而非把它標示為完成品。');
   }
   if (chartWarnings.includes('notation_fill_density_needs_review')) {
-    suggestions.add('Tom fill 小節仍偏多，請優先聽辨段落尾端並刪除非必要 fill。');
+    suggestions.add('Tom fill 偵測仍偏多；系統會將此視為品質限制。');
   }
   if (chartWarnings.includes('notation_chart_still_dense')) {
-    suggestions.add('簡化後仍有過密小節，請優先整理標示為 dense 的段落。');
+    suggestions.add('簡化後仍有過密小節；系統不會將這份譜標示為可直接演奏。');
   }
   if (chartWarnings.includes('notation_fragmented_groove_rhythm')) {
-    suggestions.add('部分 groove 節奏仍過於零碎，請優先將短音符整理成八分或四分節奏。');
+    suggestions.add('部分 groove 節奏仍過於零碎；系統會阻止正式 performance score 交付。');
   }
   for (const limitation of limitations) {
     if (limitation === 'tom_false_positive_likely') {
-      suggestions.add('優先檢查 tom 音符是否誤判，必要時對照原音刪除多餘 tom。');
+      suggestions.add('Tom 誤判可能偏多；系統將此列為自動品質限制。');
     } else if (limitation === 'hihat_missing_likely') {
-      suggestions.add('檢查 hi-hat 八分或十六分節奏是否缺失。');
+      suggestions.add('Hi-hat 節奏可能缺失；系統將降低自動交付信心。');
     } else if (limitation === 'no_snare_detected' || limitation === 'snare_missing') {
-      suggestions.add('先補正 snare backbeat，避免後續小節判讀偏移。');
+      suggestions.add('Snare backbeat 證據不足；系統不會將此結果標示為完成品。');
     } else if (limitation === 'kick_missing') {
-      suggestions.add('先檢查 kick downbeat 與低頻重音是否漏記。');
+      suggestions.add('Kick downbeat 證據不足；系統不會將此結果標示為完成品。');
     } else if (limitation === 'quality_verdict_unavailable') {
-      suggestions.add('這份結果缺少品質判斷，請以 MusicXML 可讀性與 MIDI 事件數人工檢查。');
+      suggestions.add('這份結果缺少自動品質判斷，因此系統不會將其標示為可直接演奏。');
     }
   }
   return [...suggestions];
@@ -1365,7 +1426,7 @@ function MusicXmlPreview({
         <ValidationStatus label="Visual QA" status={visualQaStatus} warnings={[]} />
       </div>
       {visualQa?.status === 'musescore_gui_session_unavailable' ? (
-        <p className="previewFallback">已產生 MusicXML；本機視覺預覽需在 MuseScore app 開啟。</p>
+        <p className="previewFallback">已產生 MusicXML；瀏覽器視覺預覽目前不可用，但下載與自動驗證不受影響。</p>
       ) : null}
       <div className="musicXmlCanvas">
         <div className="musicXmlRenderTarget" ref={renderTargetRef} />
@@ -1381,7 +1442,7 @@ function MusicXmlPreview({
 
 function visualQaLabel(status: string): string {
   if (status === 'completed') return 'rendered';
-  if (status === 'musescore_gui_session_unavailable') return '需在 MuseScore app 開啟';
+  if (status === 'musescore_gui_session_unavailable') return '本機視覺預覽不可用';
   if (status === 'renderer_unavailable') return 'renderer unavailable';
   if (status === 'render_failed') return 'needs review';
   return 'not requested';

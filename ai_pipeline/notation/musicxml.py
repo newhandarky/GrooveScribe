@@ -851,12 +851,25 @@ def _chart_measure_payload(
 
 
 def _readable_backbeat_snares(events: list[dict], measure_index: int, measure_ticks: int, ticks_per_beat: int) -> list[dict]:
-    result = []
+    result: list[dict] = []
     for local_tick in (ticks_per_beat, 3 * ticks_per_beat):
         event = _nearest_local_event(events, local_tick, window=max(1, ticks_per_beat // 2))
         if event is not None:
             result.append(_canonical_event(event, measure_index, measure_ticks, local_tick, "snare"))
-    return result
+    # The readable chart prefers conventional backbeats, but a model can return
+    # a valid snare onset outside that narrow window. Preserve up to two real
+    # source onsets rather than silently making a snare-less chart measure.
+    # This only quantizes an existing snare; it never invents or remaps a drum.
+    selected_slots = {event["local_tick"] for event in result}
+    for event in sorted(events, key=lambda item: (_backbeat_distance(item["local_tick"], ticks_per_beat), -item.get("velocity", 0))):
+        if len(result) >= 2:
+            break
+        local_tick = _nearest_eighth_tick(event["local_tick"], ticks_per_beat)
+        if local_tick in selected_slots:
+            continue
+        result.append(_canonical_event(event, measure_index, measure_ticks, local_tick, "snare"))
+        selected_slots.add(local_tick)
+    return sorted(result, key=lambda item: item["tick"])
 
 
 def _readable_kicks(events: list[dict], measure_index: int, measure_ticks: int, ticks_per_beat: int) -> list[dict]:
@@ -864,12 +877,25 @@ def _readable_kicks(events: list[dict], measure_index: int, measure_ticks: int, 
         return []
     grid = [index * ticks_per_beat // 2 for index in range(8)]
     candidates = []
+    used_source_events: set[int] = set()
     for local_tick in grid:
         event = _nearest_local_event(events, local_tick, window=max(1, ticks_per_beat // 3))
-        if event is not None:
+        if event is not None and id(event) not in used_source_events:
             candidates.append(_canonical_event(event, measure_index, measure_ticks, local_tick, "kick"))
+            used_source_events.add(id(event))
     candidates = _unique_events(candidates)
-    return sorted(candidates, key=lambda item: (_kick_priority(item, ticks_per_beat), item["tick"]))[:3]
+    selected_slots = {event["local_tick"] for event in candidates}
+    # Keep the readable three-to-four kick limit, but do not drop all source
+    # evidence merely because it landed outside the tight canonical window.
+    for event in sorted(events, key=lambda item: (-item.get("velocity", 0), item["local_tick"])):
+        if len(candidates) >= 4:
+            break
+        local_tick = _nearest_eighth_tick(event["local_tick"], ticks_per_beat)
+        if local_tick in selected_slots:
+            continue
+        candidates.append(_canonical_event(event, measure_index, measure_ticks, local_tick, "kick"))
+        selected_slots.add(local_tick)
+    return sorted(candidates, key=lambda item: (_kick_priority(item, ticks_per_beat), item["tick"]))[:4]
 
 
 def _kick_priority(event: dict, ticks_per_beat: int) -> tuple[int, int]:
@@ -877,6 +903,15 @@ def _kick_priority(event: dict, ticks_per_beat: int) -> tuple[int, int]:
     downbeat_bonus = 0 if local_tick == 0 else 1
     onbeat_bonus = 0 if local_tick % ticks_per_beat == 0 else 1
     return (downbeat_bonus, onbeat_bonus)
+
+
+def _nearest_eighth_tick(local_tick: int, ticks_per_beat: int) -> int:
+    subdivision = max(1, ticks_per_beat // 2)
+    return max(0, min(7 * subdivision, round(local_tick / subdivision) * subdivision))
+
+
+def _backbeat_distance(local_tick: int, ticks_per_beat: int) -> int:
+    return min(abs(local_tick - ticks_per_beat), abs(local_tick - 3 * ticks_per_beat))
 
 
 def _readable_cymbal_accent(

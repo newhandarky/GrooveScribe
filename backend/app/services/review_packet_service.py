@@ -31,7 +31,13 @@ UNSAFE_TOKENS = (
 )
 PUBLIC_PACKET_BLOCKED_KEYS = {"storage_key", "pipeline_log"}
 
-ZIP_FILENAMES = {
+PERFORMANCE_ZIP_FILENAMES = {
+    ExportFileType.MIDI: "performance_score.mid",
+    ExportFileType.MUSICXML: "performance_score.musicxml",
+    ExportFileType.PDF: "score.pdf",
+}
+
+DRAFT_ZIP_FILENAMES = {
     ExportFileType.MIDI: "drums.mid",
     ExportFileType.MUSICXML: "score.musicxml",
     ExportFileType.PDF: "score.pdf",
@@ -103,7 +109,7 @@ class ReviewPacketService:
                 "",
                 "## Delivery status",
                 "",
-                "`quality.performance_gate` is the authoritative automated delivery decision. Only `performance_ready` is marked as directly playable.",
+                _delivery_note(quality.get("performance_gate")),
             ]
         )
         rendered = "\n".join(lines)
@@ -121,7 +127,7 @@ class ReviewPacketService:
             archive.writestr("review_notes.md", notes + "\n")
             job = self.result_service.get_completed_result(db, job_id)
             for export in _sorted_exports(job.export_files):
-                filename = ZIP_FILENAMES.get(export.type)
+                filename = _zip_filename(export.type, packet)
                 if filename is None or not self._export_available(export):
                     continue
                 try:
@@ -129,6 +135,7 @@ class ReviewPacketService:
                         archive.writestr(filename, reader.read())
                 except (ArtifactInvalidError, ArtifactNotFoundError, StorageReadFailedError):
                     continue
+            self._write_processed_midi_diagnostic(archive, job.id, job.export_files)
             chart_events_key = build_job_artifact_key(job.id, ArtifactType.CHART_EVENTS)
             try:
                 with self.storage.open_reader(chart_events_key) as reader:
@@ -142,6 +149,19 @@ class ReviewPacketService:
             except (ArtifactInvalidError, ArtifactNotFoundError, StorageReadFailedError):
                 pass
         return ReviewPacketZip(content=buffer.getvalue())
+
+    def _write_processed_midi_diagnostic(self, archive: zipfile.ZipFile, job_id: str, exports: list[ExportFile]) -> None:
+        """Keep the full processed MIDI available without presenting it as the score."""
+
+        processed_key = build_job_artifact_key(job_id, ArtifactType.PROCESSED_MIDI)
+        user_midi_key = next((item.storage_key for item in exports if item.type == ExportFileType.MIDI), None)
+        if processed_key == user_midi_key:
+            return
+        try:
+            with self.storage.open_reader(processed_key) as reader:
+                archive.writestr("processed_drum.mid", reader.read())
+        except (ArtifactInvalidError, ArtifactNotFoundError, StorageReadFailedError):
+            pass
 
     def _build_packet_from_job(self, job: TranscriptionJob) -> dict:
         pipeline = self.result_service.pipeline_summary(job) or {}
@@ -225,6 +245,23 @@ def _sorted_exports(exports: list[ExportFile]) -> list[ExportFile]:
     return sorted(exports, key=lambda item: item.type.value)
 
 
+def _zip_filename(export_type: ExportFileType, packet: dict) -> str | None:
+    filenames = PERFORMANCE_ZIP_FILENAMES if _is_verified_performance_score(packet) else DRAFT_ZIP_FILENAMES
+    return filenames.get(export_type)
+
+
+def _is_verified_performance_score(packet: dict) -> bool:
+    quality = packet.get("quality") if isinstance(packet, dict) else None
+    gate = quality.get("performance_gate") if isinstance(quality, dict) else None
+    if not isinstance(gate, dict):
+        return False
+    return (
+        gate.get("verdict") == "performance_ready"
+        and gate.get("delivery_status") == "verified_performance_score"
+        and gate.get("delivery_allowed") is True
+    )
+
+
 def _validation_statuses(validation: dict | None) -> dict | None:
     if validation is None:
         return None
@@ -286,7 +323,7 @@ def _manual_eval_seed(job: TranscriptionJob, pipeline: dict, quality: dict | Non
 def _review_checklist(flags: list[str], warnings: list[str], validation: dict | None, exports: list[dict]) -> list[dict]:
     items = [
         {"code": "automated_quality_gate", "label": "自動品質 gate", "detail": "只在節奏、可演奏性與音訊對齊驗證通過時交付可直接演奏版本。"},
-        {"code": "musicxml_validation", "label": "MusicXML", "detail": "系統已驗證 MusicXML 與 Performance MIDI 的可讀取性。"},
+        {"code": "musicxml_validation", "label": "MusicXML", "detail": "系統已驗證 MIDI / MusicXML artifact 的可讀取性。"},
     ]
     if flags:
         items.append({"code": "review_quality_flags", "label": "Quality flags", "detail": ", ".join(flags)})
@@ -298,6 +335,21 @@ def _review_checklist(flags: list[str], warnings: list[str], validation: dict | 
     if validation is None:
         items.append({"code": "validation_missing", "label": "Validation", "detail": "舊資料缺少自動驗證摘要，因此不可標示為可直接演奏。"})
     return items
+
+
+def _delivery_note(gate: object) -> str:
+    if not isinstance(gate, dict):
+        return "自動交付狀態未回報；此結果不可標示為可直接演奏。"
+    verdict = str(gate.get("verdict") or "not_ready")
+    if _is_verified_performance_score({"quality": {"performance_gate": gate}}):
+        return "此 performance score 已通過已校準的自動交付 gate。"
+    if verdict == "performance_ready":
+        return "此結果回報 performance_ready，但缺少完整 verified delivery contract；不可標示為可直接演奏成品。"
+    if verdict == "playable_but_low_confidence":
+        return "已產生可播放草稿，但尚未完成真實音訊對照驗證；不可宣稱為可直接演奏成品。"
+    if verdict == "needs_better_source":
+        return "來源音訊不足以可靠交付 performance score；ZIP 僅保留技術診斷 artifacts。"
+    return "結構或 artifact 驗證未通過；ZIP 僅保留技術診斷 artifacts。"
 
 
 def _sanitize_object(value: Any) -> Any:

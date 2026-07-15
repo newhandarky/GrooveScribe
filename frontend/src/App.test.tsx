@@ -437,6 +437,154 @@ describe('local app smoke rendering', () => {
     expectPublicSafe(html);
   });
 
+  it('labels an unverified performance score conservatively and keeps a not-ready score out of primary downloads', () => {
+    const lowConfidenceHtml = renderToStaticMarkup(
+      <ResultCard
+        result={resultFixture({
+          pipeline: {
+            ...resultFixture().pipeline!,
+            quality: {
+              ...resultFixture().pipeline!.quality!,
+              performance_gate: {
+                schema_version: '1.0',
+                verdict: 'playable_but_low_confidence',
+                delivery_allowed: false,
+                ground_truth_verified: false,
+                real_audio_verified: false,
+                delivery_status: 'playable_draft_unverified',
+                blocking_issues: ['gate_calibration_not_ready'],
+                midi: { playback_ready: true },
+                musicxml: { parseable: true },
+                rhythm: { complete: true },
+                playability: { core_groove_stable: true },
+                audio_alignment: { status: 'measured', onset_alignment_rate: 0.82 },
+              },
+            },
+          },
+        })}
+      />,
+    );
+    const notReadyHtml = renderToStaticMarkup(
+      <ResultCard
+        result={resultFixture({
+          pipeline: {
+            ...resultFixture().pipeline!,
+            quality: {
+              ...resultFixture().pipeline!.quality!,
+              performance_gate: {
+                schema_version: '1.0',
+                verdict: 'not_ready',
+                delivery_allowed: false,
+                ground_truth_verified: false,
+                real_audio_verified: false,
+                delivery_status: 'technical_artifacts_only',
+                blocking_issues: ['core_drum_missing'],
+                midi: { playback_ready: true },
+                musicxml: { parseable: true },
+                rhythm: { complete: true },
+                playability: { core_groove_stable: false },
+                audio_alignment: { status: 'measured', onset_alignment_rate: 0.82 },
+              },
+            },
+          },
+        })}
+      />,
+    );
+
+    expect(lowConfidenceHtml).toContain('可播放草稿，未完成對照驗證');
+    expect(lowConfidenceHtml).toContain('未完成真實音訊對照驗證');
+    expect(lowConfidenceHtml).toContain('Drum Draft MIDI');
+    expect(lowConfidenceHtml).toContain('Drum Draft MusicXML');
+    expect(notReadyHtml).toContain('技術診斷 artifacts');
+    expect(notReadyHtml).not.toContain('/api/v1/transcriptions/job-1/download/midi');
+    expect(notReadyHtml).not.toContain('/api/v1/transcriptions/job-1/download/musicxml');
+    expectPublicSafe(lowConfidenceHtml);
+    expectPublicSafe(notReadyHtml);
+  });
+
+  it('labels a calibrated performance-ready score consistently and names PDF exports correctly', () => {
+    const html = renderToStaticMarkup(
+      <ResultCard
+        result={resultFixture({
+          exports: [
+            ...resultFixture().exports.slice(0, 2),
+            {
+              type: 'pdf',
+              status: 'available',
+              content_type: 'application/pdf',
+              file_size_bytes: 512,
+              checksum: 'pdf-checksum',
+              download_url: '/api/v1/transcriptions/job-1/download/pdf',
+            },
+          ],
+          pipeline: {
+            ...resultFixture().pipeline!,
+            quality: {
+              ...resultFixture().pipeline!.quality!,
+              performance_gate: {
+                schema_version: '1.0',
+                verdict: 'performance_ready',
+                delivery_allowed: true,
+                ground_truth_verified: false,
+                real_audio_verified: false,
+                delivery_status: 'verified_performance_score',
+                blocking_issues: [],
+                midi: { playback_ready: true },
+                musicxml: { parseable: true },
+                rhythm: { complete: true },
+                playability: { core_groove_stable: true },
+                audio_alignment: { status: 'measured', onset_alignment_rate: 0.92 },
+              },
+            },
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain('可直接演奏');
+    expect(html).toContain('已通過已校準自動交付驗證');
+    expect(html).toContain('Performance MIDI');
+    expect(html).toContain('Performance MusicXML');
+    expect(html).toContain('Performance PDF');
+    expect(html).not.toContain('未完成真實音訊對照驗證');
+  });
+
+  it('does not label inconsistent performance-ready gates as verified performance exports', () => {
+    const html = renderToStaticMarkup(
+      <ResultCard
+        result={resultFixture({
+          pipeline: {
+            ...resultFixture().pipeline!,
+            quality: {
+              ...resultFixture().pipeline!.quality!,
+              performance_gate: {
+                schema_version: '1.0',
+                verdict: 'performance_ready',
+                delivery_allowed: true,
+                ground_truth_verified: false,
+                real_audio_verified: false,
+                delivery_status: 'technical_artifacts_only',
+                blocking_issues: [],
+                midi: { playback_ready: true },
+                musicxml: { parseable: true },
+                rhythm: { complete: true },
+                playability: { core_groove_stable: true },
+                audio_alignment: { status: 'measured', onset_alignment_rate: 0.92 },
+              },
+            },
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain('技術診斷 artifacts');
+    expect(html).toContain('可播放草稿，需人工確認');
+    expect(html).toContain('未完成真實音訊對照驗證');
+    expect(html).toContain('缺少 verified delivery contract');
+    expect(html).not.toContain('已通過已校準自動交付驗證');
+    expect(html).toContain('此交付包保留自動品質結果');
+  });
+
   it('renders true AI pipeline summary without local paths or traceback', () => {
     const html = renderToStaticMarkup(
       <ResultCard
@@ -580,20 +728,20 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('TRUE AI');
     expect(html).toContain('separated_v1');
     expect(html).toContain('tom_guard_v1');
-    expect(html).toContain('草稿需人工檢查');
+    expect(html).toContain('草稿品質仍需提升');
     expect(html).toContain('3/5');
     expect(html).toContain('Tom 誤判偏多');
     expect(html).toContain('已套用 tom filter');
-    expect(html).toContain('譜面偏密，需人工整理');
-    expect(html).toContain('這份 full-mix 草稿譜面偏密，請先整理重複或過密小節，再進行細修。');
-    expect(html).toContain('Tom 目前使用單一通用位置；需要時請人工區分高 tom、floor tom。');
+    expect(html).toContain('譜面偏密，系統不建議直接交付');
+    expect(html).toContain('這份 full-mix 譜面仍偏密；系統會保留技術 artifacts，但不應視為完成 performance score。');
+    expect(html).toContain('Tom 位置使用保守通用表示；目前不會宣稱其細節已自動驗證。');
     expect(html).toContain('逐小節可讀鼓譜 24/80');
     expect(html).toContain('MusicXML 已使用逐小節可讀鼓譜；完整 processed events 仍保留於 MIDI。');
     expect(html).toContain('每小節實寫簡化鼓譜');
     expect(html).toContain('完整 core groove：6');
     expect(html).toContain('Hi-hat 小節：6');
     expect(html).toContain('需檢查');
-    expect(html).toContain('已產生 MusicXML；本機視覺預覽需在 MuseScore app 開啟。');
+    expect(html).toContain('已產生 MusicXML；瀏覽器視覺預覽目前不可用，但下載與自動驗證不受影響。');
     expect(html).toContain('Drum Transcription');
     expect(html).toContain('hihat_missing_likely');
     expect(html).toContain('tom: 6');

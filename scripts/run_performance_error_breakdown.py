@@ -5,7 +5,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ai_pipeline.benchmark.metrics import aggregate_by_input_type, compare_drum_midi, primary_failure_stage
+from ai_pipeline.benchmark.metrics import (
+    aggregate_by_input_type,
+    audit_drum_midi_contract,
+    primary_failure_stage,
+)
 from ai_pipeline.benchmark.provenance import UNSAFE_TOKENS, validate_item_provenance
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +41,7 @@ def run_breakdown(config: argparse.Namespace) -> dict[str, Any]:
         "synthetic_full_mix_present": any(row.get("synthetic_full_mix") is True for row in rows),
         "items": rows,
         "by_input_type": aggregate_by_input_type(rows),
+        "contract_audit": _contract_audit_summary(rows),
         "failure_ranking": _ranking(rows),
         "summary": {
             "run_count": len(rows),
@@ -74,7 +79,9 @@ def _item_breakdown(item: dict[str, Any], benchmark_dir: Path) -> dict[str, Any]
             "stages": {},
             "primary_failure_stage": "unknown",
         }
-    stages = {stage: compare_drum_midi(path, ground_truth) for stage, path in paths.items()}
+    audits = {stage: audit_drum_midi_contract(path, ground_truth) for stage, path in paths.items()}
+    stages = {stage: audit["uncorrected"] for stage, audit in audits.items()}
+    corrected_stages = {stage: audit["offset_corrected"] for stage, audit in audits.items()}
     return {
         "id": item_id,
         "status": "measured" if ground_truth.exists() and all(path.exists() for path in paths.values()) else "skipped",
@@ -82,8 +89,39 @@ def _item_breakdown(item: dict[str, Any], benchmark_dir: Path) -> dict[str, Any]
         "synthetic_full_mix": item.get("synthetic_full_mix") is True,
         "real_audio_verified": bool(item.get("ground_truth_verified") is True and item.get("synthetic_full_mix") is not True),
         "stages": stages,
+        "contract_audit": {
+            "taxonomy": "benchmark_6_class_v1",
+            "stages": audits,
+            "primary_failure_stage_after_offset_audit": primary_failure_stage(corrected_stages),
+        },
         "primary_failure_stage": primary_failure_stage(stages),
     }
+
+
+def _contract_audit_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    summary: dict[str, Any] = {"taxonomy": "benchmark_6_class_v1", "by_input_type": {}}
+    for input_type in sorted({str(row.get("input_type") or "unknown") for row in rows}):
+        scoped = [row for row in rows if str(row.get("input_type") or "unknown") == input_type]
+        stage_summary: dict[str, Any] = {}
+        for stage in ("raw", "processed", "chart"):
+            audits = [
+                row.get("contract_audit", {}).get("stages", {}).get(stage, {})
+                for row in scoped
+                if isinstance(row.get("contract_audit"), dict)
+            ]
+            measured = [audit for audit in audits if isinstance(audit, dict) and audit.get("status") == "measured"]
+            deltas = [
+                float(audit.get("global_timing_offset", {}).get("f1_delta") or 0.0)
+                for audit in measured
+                if isinstance(audit.get("global_timing_offset"), dict)
+            ]
+            stage_summary[stage] = {
+                "measured_count": len(measured),
+                "mean_f1_delta_after_offset_audit": round(sum(deltas) / len(deltas), 4) if deltas else None,
+                "material_timing_gain_count": sum(delta >= 0.08 for delta in deltas),
+            }
+        summary["by_input_type"][input_type] = stage_summary
+    return summary
 
 
 def _ranking(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -74,6 +74,8 @@ def test_performance_gate_is_public_safe_and_keeps_not_ready_state() -> None:
         "verdict": "performance_ready",
         "delivery_allowed": True,
         "ground_truth_verified": False,
+        "real_audio_verified": False,
+        "delivery_status": "technical_artifacts_only",
         "blocking_issues": ["audio_onset_alignment_low"],
         "midi": {"parseable": True},
         "musicxml": {},
@@ -620,6 +622,29 @@ def test_download_service_opens_available_export(tmp_path) -> None:
             artifact.reader.close()
 
 
+def test_download_service_uses_performance_filename_for_performance_export(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    performance_key = "jobs/job-1/notation/performance_score.mid"
+    storage.put_bytes(b"performance", performance_key, "audio/midi")
+    with _session() as session:
+        _create_job(
+            session,
+            status=JobStatus.COMPLETED,
+            stage=PipelineStage.COMPLETED,
+            export_status=ExportFileStatus.AVAILABLE,
+            storage_key=performance_key,
+        )
+        service = DownloadService(storage=storage)
+
+        artifact = service.open_export(session, job_id="job-1", export_type="midi")
+
+        try:
+            assert artifact.filename == "performance_score.mid"
+            assert artifact.reader.read() == b"performance"
+        finally:
+            artifact.reader.close()
+
+
 def test_download_service_rejects_pending_export(tmp_path) -> None:
     with _session() as session:
         _create_job(
@@ -829,6 +854,79 @@ def test_review_packet_service_drops_unsafe_dict_keys_from_public_packet_and_zip
     for token in UNSAFE_TOKENS:
         assert token not in zipped_packet
     assert json.loads(zipped_packet)["manual_eval_seed"]["processed_drum_counts"] == {"kick": 4, "snare": 2}
+
+
+def test_review_packet_notes_do_not_verify_inconsistent_performance_gate(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    storage.put_bytes(b"midi", "jobs/job-1/midi/processed_drum.mid", "audio/midi")
+    storage.put_bytes(
+        b"""
+        {
+          "status": "completed",
+          "quality": {
+            "performance_gate": {
+              "verdict": "performance_ready",
+              "delivery_allowed": true,
+              "delivery_status": "technical_artifacts_only"
+            }
+          }
+        }
+        """,
+        build_job_artifact_key("job-1", ArtifactType.PIPELINE_LOG),
+        "application/json",
+    )
+    with _session() as session:
+        _create_job(
+            session,
+            status=JobStatus.COMPLETED,
+            stage=PipelineStage.COMPLETED,
+            export_status=ExportFileStatus.AVAILABLE,
+        )
+        service = ReviewPacketService(settings=Settings(), storage=storage)
+
+        packet = service.build_packet(session, job_id="job-1")
+        notes = service.build_notes_markdown(packet)
+
+    assert "缺少完整 verified delivery contract" in notes
+    assert "已通過已校準的自動交付 gate" not in notes
+
+
+def test_review_packet_zip_keeps_processed_midi_as_a_separate_diagnostic_artifact(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    performance_key = "jobs/job-1/notation/performance_score.mid"
+    processed_key = "jobs/job-1/midi/processed_drum.mid"
+    storage.put_bytes(b"performance-score", performance_key, "audio/midi")
+    storage.put_bytes(b"processed-events", processed_key, "audio/midi")
+    storage.put_bytes(
+        b"""
+        {
+          "status": "completed",
+          "quality": {
+            "performance_gate": {
+              "verdict": "performance_ready",
+              "delivery_allowed": true,
+              "delivery_status": "verified_performance_score"
+            }
+          }
+        }
+        """,
+        build_job_artifact_key("job-1", ArtifactType.PIPELINE_LOG),
+        "application/json",
+    )
+    with _session() as session:
+        _create_job(
+            session,
+            status=JobStatus.COMPLETED,
+            stage=PipelineStage.COMPLETED,
+            export_status=ExportFileStatus.AVAILABLE,
+            storage_key=performance_key,
+        )
+        service = ReviewPacketService(settings=Settings(), storage=storage)
+        packet_zip = service.build_zip(session, job_id="job-1")
+
+    with zipfile.ZipFile(BytesIO(packet_zip.content)) as archive:
+        assert archive.read("performance_score.mid") == b"performance-score"
+        assert archive.read("processed_drum.mid") == b"processed-events"
 
 
 def test_review_packet_service_marks_missing_export_artifact_unavailable(tmp_path) -> None:
