@@ -123,6 +123,23 @@ input {
   max-width: 1240px;
 }
 
+.scorePreviewPanel {
+  margin: 18px auto 0;
+  max-width: 1240px;
+}
+
+.scorePreviewHeader {
+  align-items: center;
+}
+
+.scorePreviewMeta {
+  color: #69736d;
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
 .leftPane {
   display: grid;
   gap: 18px;
@@ -601,6 +618,18 @@ input {
   justify-content: flex-end;
 }
 
+.historyLoadMoreButton {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.historyLoadMoreButton span {
+  color: #69736d;
+  font-size: 12px;
+  font-weight: 640;
+}
+
 .jobPanel {
   min-height: 566px;
 }
@@ -1019,6 +1048,12 @@ input {
   padding: 12px;
 }
 
+.scorePreviewPanel .musicXmlPreview {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
 .musicXmlCanvas {
   background: #f7f9fa;
   border: 1px solid #d6e0e5;
@@ -1026,6 +1061,11 @@ input {
   min-height: 220px;
   overflow: auto;
   padding: 10px;
+}
+
+.fullWidthPreview .musicXmlCanvas {
+  min-height: 720px;
+  padding: 18px;
 }
 
 .previewFallback {
@@ -1037,6 +1077,11 @@ input {
 
 .musicXmlRenderTarget {
   min-height: 198px;
+}
+
+.fullWidthPreview .musicXmlRenderTarget {
+  min-height: 680px;
+  min-width: 960px;
 }
 
 .qualityMetrics {
@@ -1167,6 +1212,18 @@ input {
   .topBar,
   .layoutGrid {
     display: grid;
+  }
+
+  .scorePreviewMeta {
+    text-align: left;
+  }
+
+  .fullWidthPreview .musicXmlCanvas {
+    min-height: 520px;
+  }
+
+  .fullWidthPreview .musicXmlRenderTarget {
+    min-width: 720px;
   }
 
   .panelHeader,

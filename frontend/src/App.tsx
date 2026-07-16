@@ -31,6 +31,7 @@ const POLL_INTERVAL_MS = 1500;
 const ACTIVE_JOB_STORAGE_KEY = 'groovescribe.activeJobId';
 const TRUE_AI_THRESHOLD_PRESET = 'separated_v1';
 const TRUE_AI_TOM_FILTER_PRESET = 'tom_guard_v1';
+const INITIAL_HISTORY_LIMIT = 5;
 
 export function App() {
   const [runtime, setRuntime] = useState<RuntimePreflightResponse | null>(null);
@@ -42,6 +43,7 @@ export function App() {
   const [pipelineModeTouched, setPipelineModeTouched] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
     const urlJobId = new URLSearchParams(window.location.search).get('jobId')?.trim();
     return urlJobId || window.localStorage.getItem(ACTIVE_JOB_STORAGE_KEY);
   });
@@ -287,6 +289,7 @@ export function App() {
           trueAiReady={trueAiReady}
         />
       </section>
+      {result ? <ScorePreviewSection result={result} /> : null}
     </main>
   );
 }
@@ -567,6 +570,15 @@ export function JobHistoryPanel({
   onSelectJob: (jobId: string) => void;
   onRetry: (jobId: string) => void;
 }) {
+  const [visibleCount, setVisibleCount] = useState(INITIAL_HISTORY_LIMIT);
+  const initialVisibleJobs = jobs.slice(0, visibleCount);
+  const activeHiddenJob = activeJobId
+    ? jobs.find((job, index) => job.job_id === activeJobId && index >= visibleCount)
+    : undefined;
+  const visibleJobs = activeHiddenJob ? [...initialVisibleJobs, activeHiddenJob] : initialVisibleJobs;
+  const visibleJobIds = new Set(visibleJobs.map((job) => job.job_id));
+  const remainingCount = jobs.filter((job) => !visibleJobIds.has(job.job_id)).length;
+
   return (
     <section className="panel">
       <div className="panelHeader">
@@ -582,7 +594,7 @@ export function JobHistoryPanel({
       {!loading && !jobs.length ? <p className="formNote">尚無近期任務。</p> : null}
       {jobs.length ? (
         <div className="historyList">
-          {jobs.map((job) => (
+          {visibleJobs.map((job) => (
             <div className={job.job_id === activeJobId ? 'historyRow active' : 'historyRow'} key={job.job_id}>
               <div className="historyMain">
                 <div>
@@ -624,6 +636,16 @@ export function JobHistoryPanel({
               </div>
             </div>
           ))}
+          {remainingCount ? (
+            <button
+              className="secondaryButton historyLoadMoreButton"
+              type="button"
+              onClick={() => setVisibleCount((count) => Math.min(count + INITIAL_HISTORY_LIMIT, jobs.length))}
+            >
+              讀取更多
+              <span>尚有 {remainingCount} 筆</span>
+            </button>
+          ) : null}
         </div>
       ) : null}
     </section>
@@ -764,7 +786,6 @@ export function ResultCard({
   const availableExports = result.exports.filter((item) => item.status === 'available');
   const unavailableExports = result.exports.filter((item) => item.status !== 'available');
   const pipelineMode = result.pipeline?.mode ?? 'unknown';
-  const validation = result.pipeline?.validation ?? null;
   const delivery = result.pipeline?.quality?.performance_gate;
   // Legacy and demo results predate the performance gate. Keep their existing
   // download behavior; only an explicit unsafe gate state moves exports into
@@ -832,7 +853,6 @@ export function ResultCard({
       <QualityStatusPanel pipeline={result.pipeline} />
       <PerformanceDeliveryPanel pipeline={result.pipeline} />
       <PerformancePlaybackPanel playback={result.review_timeline?.performance_playback} />
-      <MusicXmlPreview url={result.preview.musicxml_url} validation={validation} />
 
       {result.drum_track?.warnings.length ? (
         <div className="alert warn">
@@ -880,6 +900,25 @@ export function ResultCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+export function ScorePreviewSection({ result }: { result: TranscriptionResultResponse }) {
+  return (
+    <section className="panel scorePreviewPanel" aria-label="鼓譜預覽">
+      <div className="panelHeader scorePreviewHeader">
+        <div>
+          <p className="eyebrow">Score preview</p>
+          <h2>鼓譜滿版預覽</h2>
+        </div>
+        <span className="scorePreviewMeta">{result.title || result.audio.file_name}</span>
+      </div>
+      <MusicXmlPreview
+        url={result.preview.musicxml_url}
+        validation={result.pipeline?.validation ?? null}
+        fullWidth
+      />
+    </section>
   );
 }
 
@@ -1393,9 +1432,11 @@ function pipelineModeLabel(mode: string): string {
 function MusicXmlPreview({
   url,
   validation,
+  fullWidth = false,
 }: {
   url: string | null;
   validation: NonNullable<NonNullable<TranscriptionResultResponse['pipeline']>['validation']> | null;
+  fullWidth?: boolean;
 }) {
   const renderTargetRef = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable' | 'error'>(
@@ -1449,9 +1490,10 @@ function MusicXmlPreview({
     : 'not reported';
   const visualQa = validation?.visual_qa;
   const visualQaStatus = visualQa ? visualQaLabel(visualQa.status) : 'not reported';
+  const showCanvas = Boolean(url) && status !== 'unavailable' && status !== 'error';
 
   return (
-    <div className="musicXmlPreview">
+    <div className={fullWidth ? 'musicXmlPreview fullWidthPreview' : 'musicXmlPreview'}>
       <div className="reviewHeader">
         <strong>MusicXML preview</strong>
         <span>{previewStatusLabel(status)}</span>
@@ -1472,9 +1514,11 @@ function MusicXmlPreview({
       {visualQa?.status === 'musescore_gui_session_unavailable' ? (
         <p className="previewFallback">已產生 MusicXML；瀏覽器視覺預覽目前不可用，但下載與自動驗證不受影響。</p>
       ) : null}
-      <div className="musicXmlCanvas">
-        <div className="musicXmlRenderTarget" ref={renderTargetRef} />
-      </div>
+      {showCanvas ? (
+        <div className="musicXmlCanvas">
+          <div className="musicXmlRenderTarget" ref={renderTargetRef} />
+        </div>
+      ) : null}
       {status === 'unavailable' ? <p className="previewFallback">MusicXML preview unavailable</p> : null}
       {status === 'loading' || status === 'idle' ? <p className="previewFallback">Loading preview</p> : null}
       {status === 'error' ? (

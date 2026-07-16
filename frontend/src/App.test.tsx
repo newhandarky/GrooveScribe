@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { JobHistoryPanel, JobStatusCard, LocalDataPanel, ResultCard, RuntimePanel, UploadPanel } from './App';
+import { App, JobHistoryPanel, JobStatusCard, LocalDataPanel, ResultCard, RuntimePanel, ScorePreviewSection, UploadPanel } from './App';
 import type {
   JobStatusResponse,
   LocalDataSummaryResponse,
@@ -276,6 +276,14 @@ function localDataFixture(overrides: Partial<LocalDataSummaryResponse> = {}): Lo
 }
 
 describe('local app smoke rendering', () => {
+  it('can render the app shell without browser globals during static rendering', () => {
+    const html = renderToStaticMarkup(<App />);
+
+    expect(html).toContain('本機鼓譜轉寫工作台');
+    expect(html).toContain('Runtime 尚未完成檢查');
+    expectPublicSafe(html);
+  });
+
   it.each(['ready', 'degraded', 'not_ready', 'error'] as const)('renders runtime status %s safely', (status) => {
     const html = renderToStaticMarkup(
       <RuntimePanel
@@ -415,18 +423,12 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('Processed events');
     expect(html).toContain('closed_hat: 2');
     expect(html).toContain('sparse_transcription');
-    expect(html).toContain('MusicXML preview');
     expect(html).toContain('品質狀態未知');
     expect(html).toContain('尚未產生品質判斷');
     expect(html).toContain('Demo/mock 結果僅供流程驗證');
     expect(html).toContain('不代表真實音檔轉譜品質');
     expect(html).toContain('雙聲部鼓譜');
     expect(html).toContain('可讀鼓譜 5/7');
-    expect(html).toContain('MusicXML validation');
-    expect(html).toContain('parseable');
-    expect(html).toContain('PDF validation');
-    expect(html).toContain('optional unavailable');
-    expect(html).toContain('pdf_optional_unavailable');
     expect(html).toContain('Midi Post Processing');
     expect(html).toContain('mock_ai_enabled');
     expect(html).toContain('5 events');
@@ -436,6 +438,36 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('failed');
     expect(html).toContain('failed · optional');
     expect(html).not.toContain('href="#"');
+    expectPublicSafe(html);
+  });
+
+  it('renders score preview in a full-width section with validation fallback', () => {
+    const html = renderToStaticMarkup(<ScorePreviewSection result={resultFixture()} />);
+
+    expect(html).toContain('鼓譜滿版預覽');
+    expect(html).toContain('Demo Groove');
+    expect(html).toContain('MusicXML preview');
+    expect(html).toContain('fullWidthPreview');
+    expect(html).toContain('MusicXML validation');
+    expect(html).toContain('parseable');
+    expect(html).toContain('PDF validation');
+    expect(html).toContain('optional unavailable');
+    expect(html).toContain('pdf_optional_unavailable');
+    expectPublicSafe(html);
+  });
+
+  it('does not reserve a full-height score canvas when preview is unavailable', () => {
+    const html = renderToStaticMarkup(
+      <ScorePreviewSection
+        result={resultFixture({
+          preview: { musicxml_url: null },
+        })}
+      />,
+    );
+
+    expect(html).toContain('鼓譜滿版預覽');
+    expect(html).toContain('MusicXML preview unavailable');
+    expect(html).not.toContain('musicXmlCanvas');
     expectPublicSafe(html);
   });
 
@@ -824,15 +856,14 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('完整 core groove：6');
     expect(html).toContain('Hi-hat 小節：6');
     expect(html).toContain('需檢查');
-    expect(html).toContain('已產生 MusicXML；瀏覽器視覺預覽目前不可用，但下載與自動驗證不受影響。');
     expect(html).toContain('Drum Transcription');
     expect(html).toContain('hihat_missing_likely');
     expect(html).toContain('tom: 6');
     expectPublicSafe(html);
   });
 
-  it('renders missing validation as not reported for backward-compatible results', () => {
-    const html = renderToStaticMarkup(<ResultCard result={resultFixture({ pipeline: null })} />);
+  it('renders missing validation as not reported for backward-compatible score previews', () => {
+    const html = renderToStaticMarkup(<ScorePreviewSection result={resultFixture({ pipeline: null })} />);
 
     expect(html).toContain('MusicXML preview');
     expect(html).toContain('MusicXML validation');
@@ -842,35 +873,38 @@ describe('local app smoke rendering', () => {
     expectPublicSafe(html);
   });
 
-  it('renders legacy pipeline summary without quality or validation blocks', () => {
+  it('renders legacy pipeline summary without quality blocks', () => {
+    const legacyResult = resultFixture({
+      pipeline: {
+        mode: 'unknown',
+        status: 'completed',
+        config: {
+          mode: 'unknown',
+          adtof_threshold_preset: null,
+          tom_filter_preset: null,
+          runtime_fallback_status: null,
+          source_job_id: null,
+        },
+        stages: [],
+        artifacts: [],
+        warnings: [],
+        pipeline_log_available: false,
+      },
+    });
     const html = renderToStaticMarkup(
       <ResultCard
-        result={resultFixture({
-          pipeline: {
-            mode: 'unknown',
-            status: 'completed',
-            config: {
-              mode: 'unknown',
-              adtof_threshold_preset: null,
-              tom_filter_preset: null,
-              runtime_fallback_status: null,
-              source_job_id: null,
-            },
-            stages: [],
-            artifacts: [],
-            warnings: [],
-            pipeline_log_available: false,
-          },
-        })}
+        result={legacyResult}
       />,
     );
+    const scoreHtml = renderToStaticMarkup(<ScorePreviewSection result={legacyResult} />);
 
     expect(html).toContain('Pipeline summary');
     expect(html).toContain('log unavailable');
-    expect(html).toContain('MusicXML validation');
-    expect(html).toContain('not reported');
+    expect(scoreHtml).toContain('MusicXML validation');
+    expect(scoreHtml).toContain('not reported');
     expect(html).not.toContain('Raw events');
     expectPublicSafe(html);
+    expectPublicSafe(scoreHtml);
   });
 
   it('renders unknown quality verdict without crashing', () => {
@@ -1185,6 +1219,64 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('重試');
     expect(html).toContain('Active Groove');
     expect(html).not.toContain('raw command');
+    expectPublicSafe(html);
+  });
+
+  it('limits job history to five rows before loading more', () => {
+    const jobs = Array.from({ length: 7 }, (_, index) =>
+      jobSummaryFixture({
+        job_id: `job-${index}`,
+        title: `History Job ${index + 1}`,
+      }),
+    );
+    const html = renderToStaticMarkup(
+      <JobHistoryPanel
+        jobs={jobs}
+        loading={false}
+        error={null}
+        activeJobId={null}
+        retryingJobId={null}
+        onRefresh={() => undefined}
+        onSelectJob={() => undefined}
+        onRetry={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('History Job 1');
+    expect(html).toContain('History Job 5');
+    expect(html).not.toContain('History Job 6');
+    expect(html).not.toContain('History Job 7');
+    expect(html).toContain('讀取更多');
+    expect(html).toContain('尚有 2 筆');
+    expectPublicSafe(html);
+  });
+
+  it('keeps an active history row visible even when it is outside the first five rows', () => {
+    const jobs = Array.from({ length: 7 }, (_, index) =>
+      jobSummaryFixture({
+        job_id: `job-${index}`,
+        title: `History Job ${index + 1}`,
+      }),
+    );
+    const html = renderToStaticMarkup(
+      <JobHistoryPanel
+        jobs={jobs}
+        loading={false}
+        error={null}
+        activeJobId="job-5"
+        retryingJobId={null}
+        onRefresh={() => undefined}
+        onSelectJob={() => undefined}
+        onRetry={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('History Job 1');
+    expect(html).toContain('History Job 5');
+    expect(html).toContain('History Job 6');
+    expect(html).not.toContain('History Job 7');
+    expect(html).toContain('historyRow active');
+    expect(html).toContain('尚有 1 筆');
     expectPublicSafe(html);
   });
 });
