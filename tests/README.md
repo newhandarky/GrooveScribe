@@ -162,6 +162,24 @@ Focused tests：
 
 RC pilot 會呼叫 deterministic release gate 並輸出 repo 外 `rc_manifest.json` / `rc_handoff.md`。測試使用 mocked command runner，不會在 unit test 內真跑完整 gate。不得提交 generated RC outputs、evidence、review packet、storage、DB、tmp、`frontend/dist` 或 Playwright reports。
 
+## V1 Product Pilot
+
+Product pilot 用來驗證功能流程是否真的可用，不是 release/tag gate：
+
+```bash
+.venv-ai/bin/python scripts/run_v1_product_pilot.py \
+  --output-dir /tmp/groovescribe-v1-product-pilot
+```
+
+Focused tests：
+
+```bash
+.venv-ai/bin/python -m pytest tests/pipeline/test_product_pilot_runner.py
+npm run test:e2e
+```
+
+預設 product pilot 會跑 browser e2e，覆蓋 upload -> completed result、review packet、MIDI/MusicXML links、PDF optional status、job history、completed rerun、failed/interrupted retry 與 local data dry-run visibility。輸出必須在 repo 外；不得提交 product pilot reports、storage、DB、tmp、`frontend/dist` 或 Playwright reports。
+
 ## V1 Final Tag Prep
 
 tag 前最小驗證：

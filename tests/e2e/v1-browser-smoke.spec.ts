@@ -68,6 +68,11 @@ test('mock browser smoke reaches result review without leaking local diagnostics
   expect(apiMetrics.resultRequests).toBe(1);
   expect(apiMetrics.listRequests).toBeGreaterThanOrEqual(1);
   expect(apiMetrics.localDataRequests).toBeGreaterThanOrEqual(1);
+
+  await page.getByRole('button', { name: '沿用設定重跑' }).click();
+  await expect(page.getByText('任務已重新排入本機分析佇列。')).toBeVisible();
+  await expect(page.locator('.statusCard .statusPill', { hasText: 'queued' })).toBeVisible();
+  expect(apiMetrics.retryRequests).toBe(1);
 });
 
 for (const terminalStatus of ['failed', 'interrupted'] as const) {
@@ -157,6 +162,33 @@ async function installMockApi(page: Page): Promise<MockApiMetrics> {
         status_url: `/api/v1/transcriptions/${JOB_ID}/status`,
         result_url: `/api/v1/transcriptions/${JOB_ID}`,
         created_at: createdAt,
+      });
+    }
+
+    if (request.method() === 'POST' && pathname === `/api/v1/transcriptions/${JOB_ID}/retry`) {
+      metrics.retryRequests += 1;
+      return json(route, {
+        job_id: `${JOB_ID}-rerun`,
+        status: 'queued',
+        status_url: `/api/v1/transcriptions/${JOB_ID}-rerun/status`,
+        result_url: `/api/v1/transcriptions/${JOB_ID}-rerun`,
+        created_at: createdAt,
+      });
+    }
+
+    if (request.method() === 'GET' && pathname === `/api/v1/transcriptions/${JOB_ID}-rerun/status`) {
+      return json(route, {
+        job_id: `${JOB_ID}-rerun`,
+        status: 'queued',
+        stage: 'queued',
+        progress: 0,
+        message: '任務已重新排入本機分析佇列。',
+        error: null,
+        created_at: createdAt,
+        queued_at: createdAt,
+        started_at: null,
+        completed_at: null,
+        failed_at: null,
       });
     }
 
