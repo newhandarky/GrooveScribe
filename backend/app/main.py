@@ -18,6 +18,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.include_router(internal_router)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
 
+    @app.get("/")
+    def root() -> dict[str, object]:
+        return {
+            "name": settings.app_name,
+            "status": "ok",
+            "api": settings.api_v1_prefix,
+            "health": "/health",
+        }
+
     return app
 
 

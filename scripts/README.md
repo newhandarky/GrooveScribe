@@ -20,6 +20,8 @@
 - `inspect_pipeline_artifacts.py`：合併 raw / processed MIDI inspection，輸出 manual eval 與 result API 可重用的 quality summary。
 - `run_true_ai_smoke_baseline.py`：opt-in 執行 true-AI preflight / pipeline smoke，並輸出 `baseline.json`；runtime degraded 時保存 blocked reason。
 - `run_true_ai_quality_matrix.py`：對多個 fixture 與 ADTOF threshold 跑 true-AI baseline matrix，彙整 raw note histogram、processed drum counts、quality flags、MusicXML validation 與最低可用性門檻。
+- `check_v1_true_ai_setup.py`：套用 V1 true-AI 本機預設 env，驗證 ADTOF CLI / verify input / raw MIDI note events，輸出 public-safe setup report。
+- `run_v1_real_audio_pilot.py`：對 repo 外授權真實音檔跑 true-AI eval 與 threshold matrix，輸出 repo 外 pilot report / handoff / manual eval seed。
 - `generate_manual_eval_row.py`：從 `baseline.json` 產生一列符合 `tests/manual_eval/manual_eval_template.csv` 的 CSV row；artifact ref 只輸出 redacted label。
 - `check_manual_eval_gate.py`：驗證 manual eval CSV schema、blocked/completed row contract 與 redaction。
 - `cleanup_storage.py`：檢查 repo-local `storage/local` 狀態；目前只支援 dry-run，不刪檔。
@@ -43,6 +45,18 @@ PYTHONPATH=. "$PYTHON" scripts/check_ai_runtime.py
 ```
 
 若 `runtime_checks.local_pipeline.true_ai_ready` 不是 `true`，不要宣告 true-AI smoke 完成；依輸出的 `missing_requirements` 與 `runtime_checks.adtof_pytorch.status_code` 補安裝 Demucs/PyTorch、設定 `GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE`，或提供 `GROOVESCRIBE_ADTOF_VERIFY_INPUT`。
+
+V1 true-AI setup doctor：
+
+```bash
+npm run check:true-ai
+```
+
+true-AI local app：
+
+```bash
+npm run dev:true-ai -- --backend-port 8001 --frontend-port 5174
+```
 
 ADTOF verification input 必須是已存在的 drums stem，不是完整歌曲。可先執行：
 
@@ -118,6 +132,16 @@ PYTHONPATH=. "$PYTHON" scripts/run_true_ai_quality_matrix.py \
 ```bash
 export GROOVESCRIBE_AUTHORIZED_REAL_DRUM_FIXTURE="/path/to/authorized_real_drum.wav"
 ```
+
+真實音檔 pilot 會同時產出 V1 eval 與 threshold matrix 摘要：
+
+```bash
+.venv-ai/bin/python scripts/run_v1_real_audio_pilot.py \
+  --input /path/to/your-authorized-audio.wav \
+  --output-dir /tmp/groovescribe-v1-real-audio-pilot
+```
+
+輸出包含 `pilot_report.json`、`pilot_handoff.md`、`v1_eval/v1_eval_report.json`、`quality_matrix/matrix_report.json`。若結果是 `completed_with_blockers`，代表 artifacts 產生了但還不建議交付；請依 `primary_blocker` 與 `candidate_thresholds` 調整來源音檔或 threshold。真實音檔與 pilot outputs 不進 git。
 
 也可以針對既有 artifact 產出 inspection JSON：
 

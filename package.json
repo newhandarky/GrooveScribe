@@ -4,9 +4,11 @@
   "version": "0.1.0",
   "scripts": {
     "check:local": ".venv-ai/bin/python scripts/check_v1_local_setup.py",
+    "check:true-ai": ".venv-ai/bin/python scripts/check_v1_true_ai_setup.py",
     "dev:backend": "cd backend && .venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000",
     "dev:frontend": "npm --prefix frontend run dev",
     "dev:local": ".venv-ai/bin/python scripts/run_v1_local_dev.py",
+    "dev:true-ai": ".venv-ai/bin/python scripts/run_v1_local_dev.py --true-ai",
     "build:frontend": "npm --prefix frontend run build",
     "lint:frontend": "npm --prefix frontend run lint",
     "test:frontend": "npm --prefix frontend run test",

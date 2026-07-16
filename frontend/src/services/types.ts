@@ -261,12 +261,12 @@ export interface TranscriptionResultResponse {
         ground_truth_verified: boolean;
         real_audio_verified: boolean;
         delivery_status: 'verified_performance_score' | 'playable_draft_unverified' | 'needs_better_source' | 'technical_artifacts_only' | string;
-        blocking_issues: string[];
-        midi: Record<string, string | number | boolean | null>;
-        musicxml: Record<string, string | number | boolean | null>;
-        rhythm: Record<string, string | number | boolean | null>;
-        playability: Record<string, string | number | boolean | null>;
-        audio_alignment: Record<string, string | number | boolean | null>;
+        blocking_issues?: string[];
+        midi?: Record<string, string | number | boolean | null>;
+        musicxml?: Record<string, string | number | boolean | null>;
+        rhythm?: Record<string, string | number | boolean | null>;
+        playability?: Record<string, string | number | boolean | null>;
+        audio_alignment?: Record<string, string | number | boolean | null>;
       };
     } | null;
     validation?: {

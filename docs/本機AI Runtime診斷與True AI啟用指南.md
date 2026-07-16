@@ -92,6 +92,28 @@ export GROOVESCRIBE_ADTOF_VERIFY_INPUT="/tmp/groovescribe-stems/drums.wav"
 PYTHONPATH=. "$PYTHON" scripts/check_ai_runtime.py
 ```
 
+V1 true-AI setup doctor 會套用本機預設 env 並輸出 public-safe 摘要：
+
+```bash
+npm run check:true-ai
+```
+
+若 8000 被占用，true-AI local app 可改用 8001 / 5174：
+
+```bash
+npm run dev:true-ai -- --backend-port 8001 --frontend-port 5174
+```
+
+`dev:true-ai` 預設帶入：
+
+- ADTOF CLI：`.venv-ai/bin/adtof --audio {input} --out {output} --device {device} --threshold {threshold}`
+- verify input：`/tmp/groovescribe-stems/drums.wav`
+- verify output：`/tmp/groovescribe-adtof-verify`
+- Demucs / ADTOF device：`cpu`
+- scalar threshold：`0.5`
+- product preset：`separated_v1`
+- tom filter：`tom_guard_v1`
+
 Backend API：
 
 ```bash
@@ -160,6 +182,32 @@ PYTHONPATH=. "$PYTHON" scripts/run_true_ai_smoke_baseline.py \
 - preflight 若 `true_ai_ready=true`，才執行不帶 `--mock-ai` 的 `run_local_pipeline.py`。
 - completed baseline 會記錄 raw / processed MIDI inspection、`drum_events.json` warnings、MusicXML / PDF artifact 狀態與 pipeline stage summary。
 - PDF 維持 optional；`pdf.status=unavailable` 不阻塞 MIDI / MusicXML baseline。
+
+## Real Audio Pilot
+
+使用者提供的授權音檔請走 real audio pilot，不要用 Demo/mock 結果判斷品質：
+
+```bash
+.venv-ai/bin/python scripts/run_v1_real_audio_pilot.py \
+  --input /path/to/your-authorized-audio.wav \
+  --output-dir /tmp/groovescribe-v1-real-audio-pilot
+```
+
+pilot 預設會：
+
+- 檢查 true-AI setup 是否 ready，blocked 時保留明確 reason。
+- 用 `separated_v1` + `tom_guard_v1` 跑 V1 true-AI eval。
+- 跑 threshold matrix：`0.3`、`0.4`、`0.5`、`0.6`。
+- 輸出 `pilot_report.json`、`pilot_handoff.md`、`v1_eval/v1_eval_report.json`、`quality_matrix/matrix_report.json`。
+- 產出 manual eval seed；人工分數仍由 reviewer 填。
+
+如果 report 顯示 `completed_with_blockers`，代表 pipeline 有完成 artifacts，但還不能交付。請看 `primary_blocker`，常見情況：
+
+- `sparse_transcription`：偵測事件過少，先換更乾淨鼓聲或檢查 threshold matrix。
+- `hihat_missing_likely`：hi-hat 證據不足，優先檢查分離鼓聲與 ADTOF threshold。
+- `mostly_tom_output`：tom 誤判偏多，檢查 `tom_guard_v1` 是否改善。
+
+真實音檔、pilot outputs、review packet、storage、DB、tmp 與 Playwright reports 都不可提交。
 
 ## Artifact Inspection
 

@@ -418,6 +418,8 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('MusicXML preview');
     expect(html).toContain('品質狀態未知');
     expect(html).toContain('尚未產生品質判斷');
+    expect(html).toContain('Demo/mock 結果僅供流程驗證');
+    expect(html).toContain('不代表真實音檔轉譜品質');
     expect(html).toContain('雙聲部鼓譜');
     expect(html).toContain('可讀鼓譜 5/7');
     expect(html).toContain('MusicXML validation');
@@ -434,6 +436,54 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('failed');
     expect(html).toContain('failed · optional');
     expect(html).not.toContain('href="#"');
+    expectPublicSafe(html);
+  });
+
+  it('shows concrete next steps for low-quality true-AI results', () => {
+    const html = renderToStaticMarkup(
+      <ResultCard
+        result={resultFixture({
+          pipeline: {
+            ...resultFixture().pipeline!,
+            mode: 'true_ai',
+            config: {
+              ...resultFixture().pipeline!.config!,
+              mode: 'true_ai',
+              adtof_threshold_preset: 'separated_v1',
+              tom_filter_preset: 'tom_guard_v1',
+            },
+            quality: {
+              ...resultFixture().pipeline!.quality!,
+              quality_verdict: {
+                ...resultFixture().pipeline!.quality!.quality_verdict!,
+                usability_score: 2,
+                limitations: ['sparse_transcription'],
+                candidate_gate: {
+                  ...resultFixture().pipeline!.quality!.quality_verdict!.candidate_gate,
+                  status: 'failed',
+                  blocking_flags: ['sparse_transcription'],
+                },
+              },
+              performance_gate: {
+                schema_version: '1.0',
+                verdict: 'needs_better_source',
+                delivery_allowed: false,
+                ground_truth_verified: false,
+                real_audio_verified: false,
+                delivery_status: 'technical_artifacts_only',
+                blocking_issues: ['sparse_transcription'],
+              },
+            },
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain('TRUE AI');
+    expect(html).toContain('True-AI 結果需要人工修譜或重新嘗試');
+    expect(html).toContain('主要 blocker');
+    expect(html).toContain('執行 real audio pilot / quality matrix');
+    expect(html).not.toContain('Demo/mock 結果僅供流程驗證');
     expectPublicSafe(html);
   });
 
@@ -500,6 +550,39 @@ describe('local app smoke rendering', () => {
     expect(notReadyHtml).not.toContain('/api/v1/transcriptions/job-1/download/musicxml');
     expectPublicSafe(lowConfidenceHtml);
     expectPublicSafe(notReadyHtml);
+  });
+
+  it('renders legacy performance gates without blocking issues', () => {
+    const html = renderToStaticMarkup(
+      <ResultCard
+        result={resultFixture({
+          pipeline: {
+            ...resultFixture().pipeline!,
+            quality: {
+              ...resultFixture().pipeline!.quality!,
+              performance_gate: {
+                schema_version: '1.0',
+                verdict: 'playable_but_low_confidence',
+                delivery_allowed: false,
+                ground_truth_verified: false,
+                real_audio_verified: false,
+                delivery_status: 'playable_draft_unverified',
+                midi: { playback_ready: true },
+                musicxml: { parseable: true },
+                rhythm: { complete: true },
+                playability: { core_groove_stable: true },
+                audio_alignment: { status: 'measured', onset_alignment_rate: 0.82 },
+              },
+            },
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain('可播放，但系統信心不足');
+    expect(html).toContain('已通過可播放與結構檢查');
+    expect(html).not.toContain('系統限制');
+    expectPublicSafe(html);
   });
 
   it('labels a calibrated performance-ready score consistently and names PDF exports correctly', () => {

@@ -11,8 +11,24 @@ from pathlib import Path
 
 try:
     from scripts.check_v1_local_setup import check_local_setup
+    from scripts.true_ai_runtime_defaults import (
+        DEFAULT_ADTOF_DEVICE,
+        DEFAULT_ADTOF_THRESHOLD,
+        DEFAULT_ADTOF_VERIFY_INPUT,
+        DEFAULT_ADTOF_VERIFY_OUTPUT_DIR,
+        DEFAULT_DEMUCS_DEVICE,
+        true_ai_runtime_env,
+    )
 except ModuleNotFoundError:  # pragma: no cover - direct script execution
     from check_v1_local_setup import check_local_setup
+    from true_ai_runtime_defaults import (
+        DEFAULT_ADTOF_DEVICE,
+        DEFAULT_ADTOF_THRESHOLD,
+        DEFAULT_ADTOF_VERIFY_INPUT,
+        DEFAULT_ADTOF_VERIFY_OUTPUT_DIR,
+        DEFAULT_DEMUCS_DEVICE,
+        true_ai_runtime_env,
+    )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPO_ROOT / "backend"
@@ -32,6 +48,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--frontend-port", type=int, default=5173)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--skip-doctor", action="store_true", help="Skip setup checks before starting servers.")
+    parser.add_argument("--true-ai", action="store_true", help="Start backend with local true-AI runtime env defaults.")
+    parser.add_argument("--adtof-command-template")
+    parser.add_argument("--adtof-verify-input", type=Path, default=DEFAULT_ADTOF_VERIFY_INPUT)
+    parser.add_argument("--adtof-verify-output-dir", type=Path, default=DEFAULT_ADTOF_VERIFY_OUTPUT_DIR)
+    parser.add_argument("--demucs-device", default=DEFAULT_DEMUCS_DEVICE)
+    parser.add_argument("--adtof-device", default=DEFAULT_ADTOF_DEVICE)
+    parser.add_argument("--adtof-threshold", default=DEFAULT_ADTOF_THRESHOLD)
     return parser.parse_args()
 
 
@@ -42,7 +65,24 @@ def main() -> int:
         if setup["status"] == "failed":
             print(format_setup_failure(setup), file=sys.stderr)
             return 1
-    specs = build_process_specs(host=args.host, backend_port=args.backend_port, frontend_port=args.frontend_port)
+    backend_env = (
+        true_ai_runtime_env(
+            adtof_command_template=args.adtof_command_template,
+            verify_input=args.adtof_verify_input,
+            verify_output_dir=args.adtof_verify_output_dir,
+            demucs_device=args.demucs_device,
+            adtof_device=args.adtof_device,
+            adtof_threshold=args.adtof_threshold,
+        )
+        if args.true_ai
+        else None
+    )
+    specs = build_process_specs(
+        host=args.host,
+        backend_port=args.backend_port,
+        frontend_port=args.frontend_port,
+        backend_env=backend_env,
+    )
     return run_processes(specs)
 
 
@@ -79,7 +119,13 @@ def setup_failure_issues(setup: dict) -> list[str]:
     return issues or [f"setup status: {setup.get('status', 'failed')}"]
 
 
-def build_process_specs(*, host: str = "127.0.0.1", backend_port: int = 8000, frontend_port: int = 5173) -> list[DevProcessSpec]:
+def build_process_specs(
+    *,
+    host: str = "127.0.0.1",
+    backend_port: int = 8000,
+    frontend_port: int = 5173,
+    backend_env: dict[str, str] | None = None,
+) -> list[DevProcessSpec]:
     api_proxy_target = f"http://{host}:{backend_port}"
     return [
         DevProcessSpec(
@@ -96,6 +142,7 @@ def build_process_specs(*, host: str = "127.0.0.1", backend_port: int = 8000, fr
                 str(backend_port),
             ],
             cwd=BACKEND_ROOT,
+            env=backend_env,
         ),
         DevProcessSpec(
             name="frontend",
