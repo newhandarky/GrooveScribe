@@ -19,6 +19,25 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = Path("/tmp/groovescribe-v1-product-pilot")
 REPORT_FILENAME = "product_pilot_report.json"
 HANDOFF_FILENAME = "product_pilot_handoff.md"
+GENERATED_ARTIFACTS = (
+    Path("frontend/dist"),
+    Path("test-results"),
+    Path("playwright-report"),
+    Path("blob-report"),
+)
+STATUS_FORBIDDEN_SUBSTRINGS = (
+    "frontend/dist",
+    "storage/",
+    "backend/storage/",
+    "worker/storage/",
+    ".db",
+    ".sqlite",
+    ".sqlite3",
+    "tmp",
+    "playwright-report",
+    "test-results",
+    "blob-report",
+)
 
 
 @dataclass(frozen=True)
@@ -117,7 +136,7 @@ def _commands(*, skip_browser: bool) -> list[PilotCommand]:
         commands.append(PilotCommand("browser_product_flow", ["npm", "run", "test:e2e"]))
     commands.extend(
         [
-            PilotCommand("git_status", ["git", "status", "--short", "--branch"]),
+            PilotCommand("git_status", ["git", "status", "--short", "--branch", "--untracked-files=all"]),
             PilotCommand("git_diff_check", ["git", "diff", "--check"]),
         ]
     )
@@ -125,19 +144,22 @@ def _commands(*, skip_browser: bool) -> list[PilotCommand]:
 
 
 def _cleanup_generated_artifacts() -> None:
-    for relative in (
-        "frontend/dist",
-        "test-results",
-        "playwright-report",
-        "blob-report",
-    ):
+    for relative in GENERATED_ARTIFACTS:
         path = REPO_ROOT / relative
         if path.exists():
             shutil.rmtree(path)
 
 
 def _run_safe(command: PilotCommand, runner: CommandRunner) -> dict[str, Any]:
-    completed = runner(command)
+    try:
+        completed = runner(command)
+    except Exception:
+        return {
+            "name": command.name,
+            "returncode": 1,
+            "cwd": _safe_cwd(command.cwd),
+            "error_code": "command_runner_failed",
+        }
     result: dict[str, Any] = {
         "name": command.name,
         "returncode": completed.returncode,
@@ -171,19 +193,14 @@ def _artifact_hygiene(git_status: dict[str, Any] | None) -> dict[str, Any]:
     forbidden = [
         line
         for line in output.splitlines()
-        if any(
-            token in line
-            for token in (
-                "frontend/dist",
-                "playwright-report",
-                "test-results",
-                "blob-report",
-                ".sqlite",
-                ".db",
-            )
-        )
+        if not line.startswith("## ") and any(token in line for token in STATUS_FORBIDDEN_SUBSTRINGS)
     ]
-    return {"status": "passed" if not forbidden else "failed", "forbidden_status_entries": forbidden}
+    generated_present = [path.as_posix() for path in GENERATED_ARTIFACTS if (REPO_ROOT / path).exists()]
+    return {
+        "status": "passed" if not forbidden and not generated_present else "failed",
+        "forbidden_status_entries": forbidden,
+        "generated_artifacts_present": generated_present,
+    }
 
 
 def _command_by_name(results: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
@@ -196,7 +213,13 @@ def _passed(results: list[dict[str, Any]], name: str) -> bool:
 
 
 def _command_summary(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{"name": item["name"], "returncode": item["returncode"], "cwd": item["cwd"]} for item in results]
+    summary = []
+    for item in results:
+        command = {"name": item["name"], "returncode": item["returncode"], "cwd": item["cwd"]}
+        if item.get("error_code"):
+            command["error_code"] = item["error_code"]
+        summary.append(command)
+    return summary
 
 
 def _safe_cwd(path: Path) -> str:

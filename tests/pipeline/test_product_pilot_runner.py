@@ -55,7 +55,11 @@ def test_product_pilot_writes_passed_report_and_handoff(tmp_path: Path) -> None:
     assert report["schema_version"] == "1.0"
     assert report["status"] == "passed"
     assert report["output_location"] == {"status": "repo_external", "ref": "product-pilot"}
-    assert report["artifact_hygiene"] == {"status": "passed", "forbidden_status_entries": []}
+    assert report["artifact_hygiene"] == {
+        "status": "passed",
+        "forbidden_status_entries": [],
+        "generated_artifacts_present": [],
+    }
     assert report["true_ai_opt_in"]["status"] == "not_required_for_product_pilot"
     assert report["pdf_renderer"]["status"] == "optional_not_blocking"
     assert {item["name"] for item in report["usability_scenarios"]} >= {
@@ -82,6 +86,32 @@ def test_product_pilot_failed_browser_flow_marks_scenarios_failed(tmp_path: Path
     assert_public_safe(json.dumps(report, ensure_ascii=False))
 
 
+def test_product_pilot_runner_exception_writes_safe_failed_report(tmp_path: Path) -> None:
+    output_dir = tmp_path / "product-pilot-runner-error"
+
+    report = run_product_pilot(output_dir=output_dir, runner=_raising_browser_runner)
+    report_text = (output_dir / "product_pilot_report.json").read_text(encoding="utf-8")
+    handoff = (output_dir / "product_pilot_handoff.md").read_text(encoding="utf-8")
+
+    assert report["status"] == "failed"
+    browser = next(item for item in report["commands"] if item["name"] == "browser_product_flow")
+    assert browser["returncode"] == 1
+    assert browser["error_code"] == "command_runner_failed"
+    assert_public_safe(report_text)
+    assert_public_safe(handoff)
+
+
+def test_product_pilot_flags_forbidden_git_status_artifacts(tmp_path: Path) -> None:
+    report = run_product_pilot(output_dir=tmp_path / "product-pilot-artifacts", runner=_artifact_status_runner)
+
+    assert report["status"] == "failed"
+    assert report["artifact_hygiene"]["status"] == "failed"
+    offenders = "\n".join(report["artifact_hygiene"]["forbidden_status_entries"])
+    assert "storage/local/groovescribe.db" in offenders
+    assert "frontend/dist" in offenders
+    assert_public_safe(json.dumps(report, ensure_ascii=False))
+
+
 def test_product_pilot_skip_browser_is_explicitly_marked(tmp_path: Path) -> None:
     report = run_product_pilot(output_dir=tmp_path / "product-pilot-skip", skip_browser=True, runner=_passing_runner)
 
@@ -98,6 +128,27 @@ def _passing_runner(command: PilotCommand) -> subprocess.CompletedProcess[str]:
 def _failing_browser_runner(command: PilotCommand) -> subprocess.CompletedProcess[str]:
     if command.name == "browser_product_flow":
         return subprocess.CompletedProcess(command.command, 1, stdout="Traceback at /tmp/private", stderr="stderr leaked")
+    return _passing_runner(command)
+
+
+def _raising_browser_runner(command: PilotCommand) -> subprocess.CompletedProcess[str]:
+    if command.name == "browser_product_flow":
+        raise RuntimeError("Traceback /Users/private stdout stderr raw command")
+    return _passing_runner(command)
+
+
+def _artifact_status_runner(command: PilotCommand) -> subprocess.CompletedProcess[str]:
+    if command.name == "git_status":
+        return subprocess.CompletedProcess(
+            command.command,
+            0,
+            stdout=(
+                "## codex/v1-product-pilot\n"
+                "?? storage/local/groovescribe.db\n"
+                "?? frontend/dist/index.html\n"
+            ),
+            stderr="",
+        )
     return _passing_runner(command)
 
 
