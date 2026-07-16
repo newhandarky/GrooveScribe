@@ -852,7 +852,7 @@ export function ResultCard({
       <ReviewPacketPanel result={result} />
       <QualityStatusPanel pipeline={result.pipeline} />
       <PerformanceDeliveryPanel pipeline={result.pipeline} />
-      <PerformancePlaybackPanel playback={result.review_timeline?.performance_playback} />
+      <PerformancePlaybackPanel timeline={result.review_timeline} />
 
       {result.drum_track?.warnings.length ? (
         <div className="alert warn">
@@ -1176,26 +1176,73 @@ function isVerifiedPerformanceScore(gate: PerformanceGate | null | undefined): b
   );
 }
 
-function PerformancePlaybackPanel({
-  playback,
+export function PerformancePlaybackPanel({
+  timeline,
 }: {
-  playback: NonNullable<TranscriptionResultResponse['review_timeline']>['performance_playback'];
+  timeline: TranscriptionResultResponse['review_timeline'];
 }) {
   const [playing, setPlaying] = useState(false);
+  const [volume, setVolume] = useState(45);
+  const [currentTime, setCurrentTime] = useState<number | null>(null);
+  const [audioError, setAudioError] = useState<string | null>(null);
   const timers = useRef<number[]>([]);
+  const contextRef = useRef<AudioContext | null>(null);
+  const playback = timeline?.performance_playback;
   const events = playback?.events ?? [];
-  if (!playback?.available || !events.length) return null;
-  const stop = () => {
+
+  const clearPlaybackTimers = () => {
     timers.current.forEach((timer) => window.clearTimeout(timer));
     timers.current = [];
-    setPlaying(false);
   };
+
+  const stop = () => {
+    clearPlaybackTimers();
+    void contextRef.current?.close();
+    contextRef.current = null;
+    setPlaying(false);
+    setCurrentTime(null);
+  };
+
+  useEffect(() => {
+    return () => {
+      clearPlaybackTimers();
+      void contextRef.current?.close();
+      contextRef.current = null;
+    };
+  }, []);
+
+  if (!playback?.available || !events.length) return null;
+
+  const currentMeasure = currentTime === null ? null : measureIndexForPlaybackTime(timeline?.measures ?? [], currentTime);
   const play = () => {
     stop();
-    const context = new AudioContext();
-    const start = context.currentTime + 0.05;
+    setAudioError(null);
+    if (typeof window === 'undefined') return;
+    const AudioContextConstructor = window.AudioContext
+      ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextConstructor) {
+      setAudioError('此瀏覽器不支援內建試聽。請改用 MIDI / MusicXML 下載。');
+      return;
+    }
+    let context: AudioContext;
+    try {
+      context = new AudioContextConstructor();
+    } catch {
+      setAudioError('此瀏覽器不支援內建試聽。請改用 MIDI / MusicXML 下載。');
+      return;
+    }
+    contextRef.current = context;
+    if (typeof context.resume === 'function') {
+      void context.resume().catch(() => {
+        stop();
+        setAudioError('此瀏覽器不支援內建試聽。請改用 MIDI / MusicXML 下載。');
+      });
+    }
     events.forEach((event) => {
-      const timer = window.setTimeout(() => playDrumPreview(context, start + event.time_seconds, event.drum, event.velocity), Math.max(0, event.time_seconds * 1000));
+      const timer = window.setTimeout(() => {
+        setCurrentTime(event.time_seconds);
+        playDrumPreview(context, context.currentTime + 0.01, event.drum, event.velocity, volume / 100);
+      }, Math.max(0, event.time_seconds * 1000));
       timers.current.push(timer);
     });
     const last = events[events.length - 1];
@@ -1209,24 +1256,161 @@ function PerformancePlaybackPanel({
           <strong>瀏覽器內試聽</strong>
           <span>使用 simplified performance chart，而非完整偵測事件</span>
         </div>
-        <button type="button" className="secondaryButton compactButton" onClick={playing ? stop : play}>
-          {playing ? '停止' : '播放鼓譜'}
-        </button>
+        <div className="playbackActions">
+          <button type="button" className="secondaryButton compactButton" onClick={playing ? stop : play}>
+            {playing ? '停止' : '播放鼓譜'}
+          </button>
+          <button type="button" className="secondaryButton compactButton" onClick={play}>
+            重播
+          </button>
+        </div>
       </div>
+      <div className="playbackControls">
+        <label>
+          <span>音量</span>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            value={volume}
+            onChange={(event) => setVolume(Number(event.currentTarget.value))}
+            aria-label="試聽音量"
+          />
+          <strong>{volume}%</strong>
+        </label>
+        <span className="playbackStatus">
+          {playing
+            ? `播放中：${formatPlaybackTime(currentTime ?? 0)}${currentMeasure ? ` · 第 ${currentMeasure} 小節` : ''}`
+            : '待播放'}
+        </span>
+      </div>
+      {audioError ? <p className="previewFallback">{audioError}</p> : null}
     </section>
   );
 }
 
-function playDrumPreview(context: AudioContext, when: number, drum: string, velocity: number) {
+function playDrumPreview(context: AudioContext, when: number, drum: string, velocity: number, volume: number) {
+  const intensity = drumPreviewIntensity(velocity, volume);
+  if (intensity <= 0) return;
+  if (drum === 'kick') {
+    playKickPreview(context, when, intensity);
+    return;
+  }
+  if (drum === 'snare') {
+    playSnarePreview(context, when, intensity);
+    return;
+  }
+  if (drum === 'tom') {
+    playTomPreview(context, when, intensity);
+    return;
+  }
+  playHatPreview(context, when, intensity, drum === 'open_hat' || drum === 'cymbal');
+}
+
+function playKickPreview(context: AudioContext, when: number, intensity: number) {
   const gain = context.createGain();
-  gain.gain.setValueAtTime(Math.max(0.03, velocity / 500), when);
-  gain.gain.exponentialRampToValueAtTime(0.001, when + (drum === 'closed_hat' || drum === 'open_hat' || drum === 'cymbal' ? 0.06 : 0.16));
   const oscillator = context.createOscillator();
-  oscillator.type = drum === 'kick' ? 'sine' : drum === 'snare' ? 'triangle' : 'square';
-  oscillator.frequency.setValueAtTime(drum === 'kick' ? 95 : drum === 'snare' ? 220 : drum === 'tom' ? 145 : 1700, when);
+  oscillator.type = 'sine';
+  oscillator.frequency.setValueAtTime(120, when);
+  oscillator.frequency.exponentialRampToValueAtTime(48, when + 0.12);
+  gain.gain.setValueAtTime(intensity * 0.9, when);
+  gain.gain.exponentialRampToValueAtTime(0.001, when + 0.18);
   oscillator.connect(gain).connect(context.destination);
   oscillator.start(when);
-  oscillator.stop(when + 0.18);
+  oscillator.stop(when + 0.2);
+}
+
+function playSnarePreview(context: AudioContext, when: number, intensity: number) {
+  playNoiseHit(context, when, {
+    duration: 0.13,
+    filterType: 'bandpass',
+    frequency: 1700,
+    gain: intensity * 0.42,
+    q: 0.9,
+  });
+  const bodyGain = context.createGain();
+  const body = context.createOscillator();
+  body.type = 'triangle';
+  body.frequency.setValueAtTime(185, when);
+  bodyGain.gain.setValueAtTime(intensity * 0.12, when);
+  bodyGain.gain.exponentialRampToValueAtTime(0.001, when + 0.09);
+  body.connect(bodyGain).connect(context.destination);
+  body.start(when);
+  body.stop(when + 0.1);
+}
+
+function playTomPreview(context: AudioContext, when: number, intensity: number) {
+  const gain = context.createGain();
+  const oscillator = context.createOscillator();
+  oscillator.type = 'sine';
+  oscillator.frequency.setValueAtTime(155, when);
+  oscillator.frequency.exponentialRampToValueAtTime(105, when + 0.14);
+  gain.gain.setValueAtTime(intensity * 0.45, when);
+  gain.gain.exponentialRampToValueAtTime(0.001, when + 0.2);
+  oscillator.connect(gain).connect(context.destination);
+  oscillator.start(when);
+  oscillator.stop(when + 0.22);
+}
+
+function playHatPreview(context: AudioContext, when: number, intensity: number, open: boolean) {
+  playNoiseHit(context, when, {
+    duration: open ? 0.18 : 0.055,
+    filterType: 'highpass',
+    frequency: 5200,
+    gain: intensity * (open ? 0.18 : 0.13),
+    q: 0.65,
+  });
+}
+
+function playNoiseHit(
+  context: AudioContext,
+  when: number,
+  options: { duration: number; filterType: BiquadFilterType; frequency: number; gain: number; q: number },
+) {
+  if (options.gain <= 0) return;
+  const sampleCount = Math.max(1, Math.floor(context.sampleRate * options.duration));
+  const buffer = context.createBuffer(1, sampleCount, context.sampleRate);
+  const channel = buffer.getChannelData(0);
+  for (let index = 0; index < sampleCount; index += 1) {
+    channel[index] = (Math.random() * 2 - 1) * (1 - index / sampleCount);
+  }
+  const source = context.createBufferSource();
+  const filter = context.createBiquadFilter();
+  const gain = context.createGain();
+  source.buffer = buffer;
+  filter.type = options.filterType;
+  filter.frequency.setValueAtTime(options.frequency, when);
+  filter.Q.setValueAtTime(options.q, when);
+  gain.gain.setValueAtTime(Math.max(0.001, options.gain), when);
+  gain.gain.exponentialRampToValueAtTime(0.001, when + options.duration);
+  source.connect(filter).connect(gain).connect(context.destination);
+  source.start(when);
+  source.stop(when + options.duration);
+}
+
+export function drumPreviewIntensity(velocity: number, volume: number): number {
+  if (volume <= 0) return 0;
+  return Math.max(0.04, Math.min(1, velocity / 127)) * Math.min(1, volume);
+}
+
+export function measureIndexForPlaybackTime(
+  measures: NonNullable<TranscriptionResultResponse['review_timeline']>['measures'],
+  timeSeconds: number,
+): number | null {
+  const match = measures.find((measure) => {
+    const start = measure.start_seconds;
+    const end = measure.end_seconds;
+    return typeof start === 'number' && typeof end === 'number' && timeSeconds >= start && timeSeconds < end;
+  });
+  if (match) return match.measure_index;
+  const previous = [...measures]
+    .reverse()
+    .find((measure) => typeof measure.start_seconds === 'number' && timeSeconds >= measure.start_seconds);
+  return previous?.measure_index ?? null;
+}
+
+function formatPlaybackTime(seconds: number): string {
+  return `${seconds.toFixed(1)}s`;
 }
 
 function ReviewPacketPanel({ result }: { result: TranscriptionResultResponse }) {

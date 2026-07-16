@@ -1,7 +1,19 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { App, JobHistoryPanel, JobStatusCard, LocalDataPanel, ResultCard, RuntimePanel, ScorePreviewSection, UploadPanel } from './App';
+import {
+  App,
+  drumPreviewIntensity,
+  JobHistoryPanel,
+  JobStatusCard,
+  LocalDataPanel,
+  measureIndexForPlaybackTime,
+  PerformancePlaybackPanel,
+  ResultCard,
+  RuntimePanel,
+  ScorePreviewSection,
+  UploadPanel,
+} from './App';
 import type {
   JobStatusResponse,
   LocalDataSummaryResponse,
@@ -124,7 +136,25 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
           drum_counts: { closed_hat: 8, kick: 2, snare: 2 },
           warnings: [],
         },
+        {
+          measure_index: 2,
+          start_seconds: 2,
+          end_seconds: 4,
+          render_kind: 'groove',
+          drum_counts: { closed_hat: 8, kick: 2, snare: 2 },
+          warnings: [],
+        },
       ],
+      performance_playback: {
+        available: true,
+        event_count: 4,
+        events: [
+          { time_seconds: 0, drum: 'kick', velocity: 100 },
+          { time_seconds: 0.5, drum: 'closed_hat', velocity: 68 },
+          { time_seconds: 1, drum: 'snare', velocity: 96 },
+          { time_seconds: 2.5, drum: 'open_hat', velocity: 72 },
+        ],
+      },
     },
     pipeline: {
       mode: 'mock',
@@ -427,6 +457,12 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('尚未產生品質判斷');
     expect(html).toContain('Demo/mock 結果僅供流程驗證');
     expect(html).toContain('不代表真實音檔轉譜品質');
+    expect(html).toContain('瀏覽器內試聽');
+    expect(html).toContain('播放鼓譜');
+    expect(html).toContain('重播');
+    expect(html).toContain('音量');
+    expect(html).toContain('45%');
+    expect(html).toContain('待播放');
     expect(html).toContain('雙聲部鼓譜');
     expect(html).toContain('可讀鼓譜 5/7');
     expect(html).toContain('Midi Post Processing');
@@ -439,6 +475,40 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('failed · optional');
     expect(html).not.toContain('href="#"');
     expectPublicSafe(html);
+  });
+
+  it('renders browser playback controls only when performance events are available', () => {
+    const html = renderToStaticMarkup(<PerformancePlaybackPanel timeline={resultFixture().review_timeline} />);
+    const unavailableHtml = renderToStaticMarkup(
+      <PerformancePlaybackPanel
+        timeline={{
+          ...resultFixture().review_timeline!,
+          performance_playback: { available: false, event_count: 0, events: [] },
+        }}
+      />,
+    );
+
+    expect(html).toContain('瀏覽器內試聽');
+    expect(html).toContain('使用 simplified performance chart');
+    expect(html).toContain('播放鼓譜');
+    expect(html).toContain('重播');
+    expect(html).toContain('音量');
+    expect(html).toContain('aria-label="試聽音量"');
+    expect(html).toContain('45%');
+    expect(html).toContain('待播放');
+    expect(unavailableHtml).toBe('');
+    expectPublicSafe(html);
+  });
+
+  it('keeps browser playback mute and measure helpers predictable', () => {
+    const measures = resultFixture().review_timeline!.measures;
+
+    expect(drumPreviewIntensity(100, 0)).toBe(0);
+    expect(drumPreviewIntensity(0, 0.45)).toBeGreaterThan(0);
+    expect(drumPreviewIntensity(127, 1)).toBe(1);
+    expect(measureIndexForPlaybackTime(measures, 0.5)).toBe(1);
+    expect(measureIndexForPlaybackTime(measures, 2.5)).toBe(2);
+    expect(measureIndexForPlaybackTime([], 2.5)).toBeNull();
   });
 
   it('renders score preview in a full-width section with validation fallback', () => {
