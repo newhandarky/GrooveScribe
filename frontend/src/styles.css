@@ -861,6 +861,54 @@ input {
   border-left-color: #b91c1c;
 }
 
+.playbackActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.playbackControls {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+
+.playbackControls label {
+  align-items: center;
+  display: flex;
+  flex: 1 1 240px;
+  gap: 8px;
+  min-width: 0;
+}
+
+.playbackControls label span,
+.playbackStatus {
+  color: #69736d;
+  font-size: 13px;
+}
+
+.playbackControls input[type="range"] {
+  accent-color: #235265;
+  min-width: 120px;
+  width: 180px;
+}
+
+.playbackControls strong {
+  color: #243841;
+  font-size: 13px;
+  min-width: 42px;
+}
+
+.playbackStatus {
+  flex: 1 1 160px;
+  font-weight: 700;
+  text-align: right;
+}
+
 .qualityStatusPanel.ready {
   background: #edf7f0;
   border-color: #a9d2b7;
@@ -1239,6 +1287,21 @@ input {
   .buttonRow .secondaryButton,
   .historyActions .secondaryButton {
     flex: 1;
+  }
+
+  .playbackActions,
+  .playbackControls,
+  .playbackControls label {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .playbackControls input[type="range"] {
+    width: 100%;
+  }
+
+  .playbackStatus {
+    text-align: left;
   }
 
   .historyMain,
