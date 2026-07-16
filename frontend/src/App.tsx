@@ -362,8 +362,8 @@ function RuntimeStatusNote({ runtime }: { runtime: RuntimePreflightResponse | nu
   }
 
   const descriptions: Record<string, string> = {
-    ready: 'Mock pipeline 與 true AI runtime 都可用。一般操作仍可走本機 mock flow；true AI 僅在你明確 opt-in 時執行。',
-    degraded: 'Mock pipeline 可用，true AI runtime 尚未 ready。你仍可上傳音檔、檢查結果、下載 MIDI / MusicXML；true AI smoke 需另行 opt-in。',
+    ready: 'Mock pipeline 與 true AI runtime 都可用。你可以選 True-AI V1 preset 跑真實音檔；true AI 仍只在明確 opt-in 時執行。',
+    degraded: 'Mock pipeline 可用，true AI runtime 尚未 ready。Demo mode 可驗證流程，但不代表真實轉譜品質；true AI smoke 需另行 opt-in。',
     not_ready: 'Mock pipeline 尚未 ready；請先修復 runtime 缺口，upload 會維持停用。',
     error: 'Runtime preflight 本身失敗；請先修復 AI Python 或 diagnostics 執行問題。',
   };
@@ -827,6 +827,7 @@ export function ResultCard({
       <PipelineConfigPanel pipeline={result.pipeline} sourceJobId={result.source_job_id} />
       <SourceComparisonPanel summary={result.source_result_summary} currentPipeline={result.pipeline} />
       <PipelineReview pipeline={result.pipeline} exports={result.exports} />
+      <ResultModeGuidance pipeline={result.pipeline} />
       <ReviewPacketPanel result={result} />
       <QualityStatusPanel pipeline={result.pipeline} />
       <PerformanceDeliveryPanel pipeline={result.pipeline} />
@@ -878,6 +879,47 @@ export function ResultCard({
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function ResultModeGuidance({ pipeline }: { pipeline: TranscriptionResultResponse['pipeline'] }) {
+  const mode = pipeline?.mode ?? pipeline?.config?.mode ?? 'unknown';
+  const verdict = pipeline?.quality?.quality_verdict;
+  const gate = verdict?.candidate_gate;
+  const limitations = verdict?.limitations ?? [];
+  const performance = pipeline?.quality?.performance_gate;
+  const lowQuality =
+    gate?.status === 'failed'
+    || performance?.verdict === 'needs_better_source'
+    || performance?.verdict === 'not_ready'
+    || limitations.length > 0
+    || verdict?.verdict === 'unknown'
+    || (typeof verdict?.usability_score === 'number' && verdict.usability_score < 4);
+
+  if ((mode === 'demo_mock' || mode === 'mock') && lowQuality) {
+    return (
+      <div className="alert warn">
+        <strong>Demo/mock 結果僅供流程驗證</strong>
+        <p>這個結果可用來檢查 upload、result review、MIDI / MusicXML 下載與 review packet，但不代表真實音檔轉譜品質。</p>
+      </div>
+    );
+  }
+
+  if (mode !== 'true_ai' || !lowQuality) return null;
+  const blockers = limitations.length
+    ? limitations.slice(0, 3)
+    : performance?.blocking_issues?.slice(0, 3) ?? [];
+
+  return (
+    <div className="alert warn">
+      <strong>True-AI 結果需要人工修譜或重新嘗試</strong>
+      {blockers.length ? <p>主要 blocker：{blockers.map(qualityLimitationLabel).join('、')}</p> : null}
+      <ul>
+        <li>改用更乾淨的鼓聲來源或分離後 drums stem。</li>
+        <li>執行 real audio pilot / quality matrix，比較 threshold 0.3、0.4、0.5、0.6。</li>
+        <li>匯出 review packet 給人工修譜，不要把低分草稿當成可直接交付成品。</li>
+      </ul>
     </div>
   );
 }
@@ -1039,6 +1081,7 @@ function PerformanceDeliveryPanel({ pipeline }: { pipeline: TranscriptionResultR
       ? '可播放草稿，需人工確認'
       : labels[gate.verdict] ?? '系統未能可靠完成';
   const alignment = gate.audio_alignment?.onset_alignment_rate;
+  const blockingIssues = gate.blocking_issues ?? [];
   const verificationStatus =
     verifiedPerformanceScore
       ? '已通過已校準自動交付驗證'
@@ -1062,8 +1105,8 @@ function PerformanceDeliveryPanel({ pipeline }: { pipeline: TranscriptionResultR
         <Metric label="音訊 onset 對齊" value={typeof alignment === 'number' ? `${Math.round(alignment * 100)}%` : '未取得'} />
         <Metric label="核心 groove" value={gate.playability?.core_groove_stable === true ? '穩定' : '未確認'} />
       </div>
-      {gate.blocking_issues.length ? (
-        <p className="qualityStatusNote">系統限制：{gate.blocking_issues.map(qualityLimitationLabel).join('、')}</p>
+      {blockingIssues.length ? (
+        <p className="qualityStatusNote">系統限制：{blockingIssues.map(qualityLimitationLabel).join('、')}</p>
       ) : gate.verdict === 'performance_ready' && !verifiedPerformanceScore ? (
         <p className="qualityStatusNote">已完成部分自動檢查，但缺少 verified delivery contract，因此不可標示為可直接演奏成品。</p>
       ) : gate.verdict === 'playable_but_low_confidence' ? (
@@ -1101,7 +1144,8 @@ function PerformancePlaybackPanel({
 }) {
   const [playing, setPlaying] = useState(false);
   const timers = useRef<number[]>([]);
-  if (!playback?.available || !playback.events.length) return null;
+  const events = playback?.events ?? [];
+  if (!playback?.available || !events.length) return null;
   const stop = () => {
     timers.current.forEach((timer) => window.clearTimeout(timer));
     timers.current = [];
@@ -1111,11 +1155,11 @@ function PerformancePlaybackPanel({
     stop();
     const context = new AudioContext();
     const start = context.currentTime + 0.05;
-    playback.events.forEach((event) => {
+    events.forEach((event) => {
       const timer = window.setTimeout(() => playDrumPreview(context, start + event.time_seconds, event.drum, event.velocity), Math.max(0, event.time_seconds * 1000));
       timers.current.push(timer);
     });
-    const last = playback.events[playback.events.length - 1];
+    const last = events[events.length - 1];
     timers.current.push(window.setTimeout(stop, last.time_seconds * 1000 + 700));
     setPlaying(true);
   };

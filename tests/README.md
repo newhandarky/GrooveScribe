@@ -143,6 +143,30 @@ manual eval CSV 可單獨驗證：
 
 true-AI 仍是 opt-in；不要放進一般 CI 必跑，也不要提交 `frontend/dist`、`storage/`、SQLite/DB、tmp 或 Playwright report artifacts。
 
+## V1 True-AI Real Audio Pilot
+
+true-AI runtime setup focused tests：
+
+```bash
+.venv-ai/bin/python -m pytest tests/pipeline/test_true_ai_runtime_real_audio_pilot.py tests/pipeline/test_local_launch_scripts.py
+```
+
+本機 true-AI doctor：
+
+```bash
+npm run check:true-ai
+```
+
+真實音檔 pilot：
+
+```bash
+.venv-ai/bin/python scripts/run_v1_real_audio_pilot.py \
+  --input /path/to/your-authorized-audio.wav \
+  --output-dir /tmp/groovescribe-v1-real-audio-pilot
+```
+
+pilot 使用 true-AI opt-in，不進一般 CI 必跑。輸出必須在 repo 外；不得提交真實音檔、pilot reports、review packet、storage、DB、tmp、`frontend/dist` 或 Playwright reports。
+
 ## V1 RC Pilot / Handoff
 
 最終 RC 交接包可重跑：

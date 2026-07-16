@@ -118,6 +118,24 @@ def test_local_dev_launcher_builds_backend_and_frontend_commands() -> None:
     assert specs[1].env == {"VITE_API_PROXY_TARGET": "http://127.0.0.1:9000"}
 
 
+def test_local_dev_launcher_can_attach_true_ai_backend_environment() -> None:
+    specs = build_process_specs(
+        host="127.0.0.1",
+        backend_port=9000,
+        frontend_port=5174,
+        backend_env={
+            "GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE": "adtof --audio {input} --out {output}",
+            "GROOVESCRIBE_ADTOF_VERIFY_INPUT": "/tmp/groovescribe-stems/drums.wav",
+        },
+    )
+
+    assert specs[0].env == {
+        "GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE": "adtof --audio {input} --out {output}",
+        "GROOVESCRIBE_ADTOF_VERIFY_INPUT": "/tmp/groovescribe-stems/drums.wav",
+    }
+    assert specs[1].env == {"VITE_API_PROXY_TARGET": "http://127.0.0.1:9000"}
+
+
 def test_local_pipeline_reads_private_adtof_runtime_environment(monkeypatch) -> None:
     monkeypatch.setenv("GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE", "adtof --audio {input} --out {output}")
     monkeypatch.setenv("GROOVESCRIBE_ADTOF_DEVICE", "cpu")

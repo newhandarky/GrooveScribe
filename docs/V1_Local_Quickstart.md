@@ -61,6 +61,21 @@ http://127.0.0.1:5173
 
 Vite 會將 `/api/*` proxy 到 `http://127.0.0.1:8000`。
 
+若 8000 已被其他服務占用，請直接指定 port：
+
+```bash
+npm run dev:local -- --backend-port 8001 --frontend-port 5174
+```
+
+啟用 true-AI local app 時使用：
+
+```bash
+npm run check:true-ai
+npm run dev:true-ai -- --backend-port 8001 --frontend-port 5174
+```
+
+`dev:true-ai` 會替 backend process 帶入 ADTOF / Demucs 的本機預設 env；true-AI 仍只在 UI 選擇 `True-AI V1 preset` 時執行。
+
 ## 3. 跑一次 Mock Flow
 
 1. 在 Runtime 區確認 `Mock pipeline` 是 `ready`。
@@ -74,6 +89,8 @@ Vite 會將 `/api/*` proxy 到 `http://127.0.0.1:8000`。
    - MusicXML preview 或 fallback 可見。
    - PDF 若 failed / unavailable，會顯示 optional，不阻塞 MIDI / MusicXML。
    - Review packet JSON / ZIP 可見，可交給 reviewer 做人工修譜與評分。
+
+若 Demo/mock 結果顯示「系統不建議交付此草稿」，代表 mock pipeline 的草稿品質 gate 沒過；這不是前後端故障。Demo mode 只驗證產品流程，不代表真實轉譜品質。要評估你提供的音檔，請使用 true-AI preset 或 real audio pilot。
 
 ## 4. 使用近期任務與 Retry
 
@@ -161,3 +178,13 @@ true AI 需另外設定 Demucs / ADTOF runtime。流程見：
 - `.env.true-ai.example`
 
 true AI degraded 時，請保存 blocked reason，不要填假 manual eval 分數。PDF renderer 仍是 optional，不是一般 sign-off blocker。
+
+真實音檔 pilot：
+
+```bash
+.venv-ai/bin/python scripts/run_v1_real_audio_pilot.py \
+  --input /path/to/your-authorized-audio.wav \
+  --output-dir /tmp/groovescribe-v1-real-audio-pilot
+```
+
+pilot 會輸出 repo 外 `pilot_report.json` 與 `pilot_handoff.md`，彙整 runtime readiness、raw/processed event count、drum counts、quality blockers、MusicXML/PDF status、manual eval seed 與 quality matrix 摘要。不要提交真實音檔或 pilot outputs。
