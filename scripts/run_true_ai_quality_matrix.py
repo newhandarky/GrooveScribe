@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from ai_pipeline.midi.candidate_recommendation import evaluate_candidate_recommendation
 from scripts.redaction import find_unsafe_tokens
 from scripts.run_true_ai_smoke_baseline import BaselineConfig, run_baseline
 
@@ -210,6 +211,11 @@ def _run_threshold(
     quality = _dict(baseline.get("quality"))
     validation = _dict(baseline.get("validation"))
     musicxml = _musicxml_summary(validation)
+    recommendation = evaluate_candidate_recommendation(
+        status=result.status,
+        quality=quality,
+        validation={"musicxml": musicxml},
+    )
     return {
         "threshold": threshold,
         "status": result.status,
@@ -226,6 +232,7 @@ def _run_threshold(
         "warnings": _list(quality.get("warnings")),
         "musicxml": musicxml,
         "minimum_gate": _minimum_gate(quality, run_status=result.status, musicxml=musicxml),
+        "recommendation": recommendation,
     }
 
 
@@ -268,6 +275,8 @@ def _summary(fixtures: list[dict[str, Any]]) -> dict[str, Any]:
             "processed_event_count": run.get("processed_event_count"),
             "processed_drum_counts": run.get("processed_drum_counts", {}),
             "quality_flags": run.get("quality_flags", []),
+            "recommendation": _dict(run.get("recommendation")).get("recommendation"),
+            "score": _dict(run.get("recommendation")).get("score"),
         }
         for fixture in fixtures
         for run in fixture.get("runs", [])
@@ -281,6 +290,9 @@ def _summary(fixtures: list[dict[str, Any]]) -> dict[str, Any]:
         "failed_runs": sum(1 for run in runs if run.get("status") == "failed"),
         "skipped_fixtures": sum(1 for fixture in fixtures if fixture.get("status") == "skipped"),
         "candidate_thresholds": candidates,
+        "recommended_candidates": [
+            candidate for candidate in candidates if candidate.get("recommendation") == "recommended_for_practice"
+        ],
     }
 
 

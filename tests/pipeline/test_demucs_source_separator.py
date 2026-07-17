@@ -40,7 +40,9 @@ def test_separate_copies_demucs_drums_to_stable_artifact(tmp_path) -> None:
         output_dir = Path(command[command.index("-o") + 1])
         model_name = command[command.index("-n") + 1]
         demucs_drums = output_dir / model_name / input_path.stem / "drums.wav"
+        demucs_accompaniment = output_dir / model_name / input_path.stem / "no_drums.wav"
         _write_wav(demucs_drums)
+        _write_wav(demucs_accompaniment)
         return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
 
     separator = DemucsSourceSeparator(runner=fake_runner)
@@ -48,6 +50,8 @@ def test_separate_copies_demucs_drums_to_stable_artifact(tmp_path) -> None:
 
     assert result.drums_path == tmp_path / "artifacts" / "drums.wav"
     assert result.drums_path.exists()
+    assert result.accompaniment_path == tmp_path / "artifacts" / "no_drums.wav"
+    assert result.accompaniment_path.exists()
     assert result.metadata.sample_rate == 44_100
     assert result.metadata.channels == 2
     assert result.report.separator == "demucs"

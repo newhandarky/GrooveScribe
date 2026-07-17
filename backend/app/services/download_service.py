@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from typing import BinaryIO
 
@@ -9,8 +11,9 @@ from app.core.errors import ApiErrorException, ErrorCode
 from app.models import ExportFile, TranscriptionJob
 from app.models.enums import ExportFileStatus, ExportFileType, JobStatus
 from app.storage.base import StorageAdapter
-from app.storage.errors import ArtifactNotFoundError
-from app.storage.keys import sanitize_filename
+from app.storage.errors import ArtifactNotFoundError, PathTraversalRejectedError
+from app.storage.keys import build_candidate_artifact_key, build_job_artifact_key, sanitize_filename
+from app.storage.types import ArtifactType, CONTENT_TYPE_BY_ARTIFACT_TYPE
 
 _FILENAME_BY_EXPORT_TYPE: dict[ExportFileType, str] = {
     ExportFileType.MIDI: "processed_drum.mid",
@@ -87,6 +90,10 @@ class DownloadService:
             storage_key = job.drum_track.drums_stem_storage_key
             content_type = "audio/wav"
             filename = "drums_stem.wav"
+        elif audio_kind == "accompaniment":
+            storage_key = build_job_artifact_key(job_id, ArtifactType.ACCOMPANIMENT_STEM)
+            content_type = "audio/wav"
+            filename = "no_drums.wav"
         else:
             raise ApiErrorException(ErrorCode.EXPORT_NOT_FOUND, details={"job_id": job_id, "type": audio_kind})
         try:
@@ -94,6 +101,50 @@ class DownloadService:
         except ArtifactNotFoundError as exc:
             raise ApiErrorException(ErrorCode.EXPORT_NOT_FOUND, details={"job_id": job_id, "type": audio_kind}) from exc
         return DownloadArtifact(reader=reader, content_type=content_type, filename=filename)
+
+    def open_candidate_export(self, db: Session, *, job_id: str, candidate_id: str, export_type: str) -> DownloadArtifact:
+        normalized_type = self._parse_export_type(export_type)
+        artifact_type = {
+            ExportFileType.MIDI: ArtifactType.PERFORMANCE_MIDI,
+            ExportFileType.MUSICXML: ArtifactType.MUSICXML,
+            ExportFileType.PDF: ArtifactType.PDF,
+        }[normalized_type]
+        job = db.query(TranscriptionJob).filter(TranscriptionJob.id == job_id).one_or_none()
+        if job is None:
+            raise ApiErrorException(ErrorCode.JOB_NOT_FOUND, details={"job_id": job_id})
+        if job.status != JobStatus.COMPLETED:
+            raise ApiErrorException(ErrorCode.JOB_NOT_COMPLETED, details={"job_id": job_id, "status": job.status.value})
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", candidate_id):
+            raise ApiErrorException(ErrorCode.EXPORT_NOT_FOUND, details={"job_id": job_id, "type": normalized_type.value})
+        if not self._is_published_candidate(job_id, candidate_id):
+            raise ApiErrorException(ErrorCode.EXPORT_NOT_FOUND, details={"job_id": job_id, "type": normalized_type.value})
+        try:
+            storage_key = build_candidate_artifact_key(job_id, candidate_id, artifact_type)
+            reader = self.storage.open_reader(storage_key)
+        except (ArtifactNotFoundError, PathTraversalRejectedError, ValueError) as exc:
+            raise ApiErrorException(ErrorCode.EXPORT_NOT_FOUND, details={"job_id": job_id, "type": normalized_type.value}) from exc
+        return DownloadArtifact(
+            reader=reader,
+            content_type=CONTENT_TYPE_BY_ARTIFACT_TYPE[artifact_type],
+            filename=_FILENAME_BY_EXPORT_TYPE[normalized_type],
+        )
+
+    def _is_published_candidate(self, job_id: str, candidate_id: str) -> bool:
+        try:
+            with self.storage.open_reader(build_job_artifact_key(job_id, ArtifactType.PIPELINE_LOG)) as reader:
+                payload = json.loads(reader.read().decode("utf-8"))
+        except (ArtifactNotFoundError, UnicodeDecodeError, json.JSONDecodeError, OSError):
+            return False
+        analysis = payload.get("candidate_analysis") if isinstance(payload, dict) else None
+        candidates = analysis.get("candidates") if isinstance(analysis, dict) else None
+        if not isinstance(candidates, list):
+            return False
+        return any(
+            isinstance(candidate, dict)
+            and candidate.get("candidate_id") == candidate_id
+            and candidate.get("status") == "completed"
+            for candidate in candidates
+        )
 
     def _parse_export_type(self, export_type: str) -> ExportFileType:
         try:

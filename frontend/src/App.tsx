@@ -49,6 +49,7 @@ export function App() {
   });
   const [jobStatus, setJobStatus] = useState<JobStatusResponse | null>(null);
   const [result, setResult] = useState<TranscriptionResultResponse | null>(null);
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [jobError, setJobError] = useState<string | null>(null);
   const [jobHistory, setJobHistory] = useState<TranscriptionJobSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -224,6 +225,19 @@ export function App() {
   const canUpload = runtime?.mock_ai_ready === true && !uploading;
   const trueAiReady = runtime?.true_ai_ready === true;
 
+  useEffect(() => {
+    const analysis = result?.pipeline?.candidate_analysis;
+    if (!analysis?.candidates.length) {
+      setSelectedCandidateId(null);
+      return;
+    }
+    setSelectedCandidateId((current) =>
+      analysis.candidates.some((candidate) => candidate.candidate_id === current)
+        ? current
+        : analysis.recommended_candidate_id ?? analysis.canonical_candidate_id ?? analysis.candidates[0].candidate_id,
+    );
+  }, [result]);
+
   return (
     <main className="appShell">
       <header className="topBar">
@@ -287,9 +301,11 @@ export function App() {
           onReset={resetJob}
           retryingJobId={retryingJobId}
           trueAiReady={trueAiReady}
+          selectedCandidateId={selectedCandidateId}
+          onCandidateSelect={setSelectedCandidateId}
         />
       </section>
-      {result ? <ScorePreviewSection result={result} /> : null}
+      {result ? <ScorePreviewSection result={result} selectedCandidateId={selectedCandidateId} /> : null}
     </main>
   );
 }
@@ -662,6 +678,8 @@ function JobPanel({
   onReset,
   retryingJobId,
   trueAiReady,
+  selectedCandidateId,
+  onCandidateSelect,
 }: {
   activeJobId: string | null;
   status: JobStatusResponse | null;
@@ -672,6 +690,8 @@ function JobPanel({
   onReset: () => void;
   retryingJobId: string | null;
   trueAiReady: boolean;
+  selectedCandidateId: string | null;
+  onCandidateSelect: (candidateId: string | null) => void;
 }) {
   return (
     <section className="panel jobPanel">
@@ -712,6 +732,8 @@ function JobPanel({
           onRerun={onRetry}
           rerunning={retryingJobId === result.job_id}
           trueAiReady={trueAiReady}
+          selectedCandidateId={selectedCandidateId}
+          onCandidateSelect={onCandidateSelect}
         />
       ) : null}
     </section>
@@ -777,11 +799,15 @@ export function ResultCard({
   onRerun,
   rerunning = false,
   trueAiReady = false,
+  selectedCandidateId = null,
+  onCandidateSelect,
 }: {
   result: TranscriptionResultResponse;
   onRerun?: (jobId: string, config?: PipelineRunConfigInput) => void;
   rerunning?: boolean;
   trueAiReady?: boolean;
+  selectedCandidateId?: string | null;
+  onCandidateSelect?: (candidateId: string | null) => void;
 }) {
   const availableExports = result.exports.filter((item) => item.status === 'available');
   const unavailableExports = result.exports.filter((item) => item.status !== 'available');
@@ -794,6 +820,12 @@ export function ResultCard({
   const deliverableScore = !delivery || verifiedPerformanceScore || delivery.verdict === 'playable_but_low_confidence';
   const scoreExports = deliverableScore ? availableExports : [];
   const diagnosticExports = deliverableScore ? [] : availableExports;
+  const candidateAnalysis = result.pipeline?.candidate_analysis;
+  const selectedCandidate = candidateAnalysis?.candidates.find((item) => item.candidate_id === selectedCandidateId)
+    ?? candidateAnalysis?.candidates.find((item) => item.candidate_id === candidateAnalysis.recommended_candidate_id)
+    ?? candidateAnalysis?.candidates.find((item) => item.candidate_id === candidateAnalysis.canonical_candidate_id)
+    ?? candidateAnalysis?.candidates.find((item) => item.selected)
+    ?? null;
 
   return (
     <div className="resultCard">
@@ -846,13 +878,23 @@ export function ResultCard({
       </div>
 
       <PipelineConfigPanel pipeline={result.pipeline} sourceJobId={result.source_job_id} />
+      {candidateAnalysis ? (
+        <CandidateAnalysisPanel
+          analysis={candidateAnalysis}
+          selectedCandidate={selectedCandidate}
+          onSelect={onCandidateSelect}
+        />
+      ) : null}
       <SourceComparisonPanel summary={result.source_result_summary} currentPipeline={result.pipeline} />
       <PipelineReview pipeline={result.pipeline} exports={result.exports} />
       <ResultModeGuidance pipeline={result.pipeline} />
       <ReviewPacketPanel result={result} />
       <QualityStatusPanel pipeline={result.pipeline} />
       <PerformanceDeliveryPanel pipeline={result.pipeline} />
-      <PerformancePlaybackPanel timeline={result.review_timeline} />
+      <PracticePlaybackPanel
+        key={selectedCandidate?.candidate_id ?? 'canonical'}
+        timeline={selectedCandidate?.review_timeline ?? result.review_timeline}
+      />
 
       {result.drum_track?.warnings.length ? (
         <div className="alert warn">
@@ -903,7 +945,19 @@ export function ResultCard({
   );
 }
 
-export function ScorePreviewSection({ result }: { result: TranscriptionResultResponse }) {
+export function ScorePreviewSection({
+  result,
+  selectedCandidateId = null,
+}: {
+  result: TranscriptionResultResponse;
+  selectedCandidateId?: string | null;
+}) {
+  const candidateAnalysis = result.pipeline?.candidate_analysis;
+  const candidate = candidateAnalysis?.candidates.find((item) => item.candidate_id === selectedCandidateId)
+    ?? candidateAnalysis?.candidates.find((item) => item.candidate_id === candidateAnalysis.recommended_candidate_id)
+    ?? candidateAnalysis?.candidates.find((item) => item.candidate_id === candidateAnalysis.canonical_candidate_id)
+    ?? candidateAnalysis?.candidates.find((item) => item.selected)
+    ?? null;
   return (
     <section className="panel scorePreviewPanel" aria-label="鼓譜預覽">
       <div className="panelHeader scorePreviewHeader">
@@ -911,15 +965,82 @@ export function ScorePreviewSection({ result }: { result: TranscriptionResultRes
           <p className="eyebrow">Score preview</p>
           <h2>鼓譜滿版預覽</h2>
         </div>
-        <span className="scorePreviewMeta">{result.title || result.audio.file_name}</span>
+        <span className="scorePreviewMeta">
+          {candidate ? `候選 ${candidate.rank ?? candidate.position ?? '-'} · ${practiceRecommendationLabel(candidate.recommendation.recommendation)}` : result.title || result.audio.file_name}
+        </span>
       </div>
       <MusicXmlPreview
-        url={result.preview.musicxml_url}
-        validation={result.pipeline?.validation ?? null}
+        url={candidate?.preview.musicxml_url ?? result.preview.musicxml_url}
+        validation={candidate?.validation ?? result.pipeline?.validation ?? null}
         fullWidth
       />
     </section>
   );
+}
+
+function CandidateAnalysisPanel({
+  analysis,
+  selectedCandidate,
+  onSelect,
+}: {
+  analysis: NonNullable<NonNullable<TranscriptionResultResponse['pipeline']>['candidate_analysis']>;
+  selectedCandidate: NonNullable<NonNullable<TranscriptionResultResponse['pipeline']>['candidate_analysis']>['candidates'][number] | null;
+  onSelect?: (candidateId: string | null) => void;
+}) {
+  const recommendation = selectedCandidate?.recommendation.recommendation ?? 'reanalyze_recommended';
+  return (
+    <section className={`candidateAnalysisPanel ${recommendation}`}>
+      <div className="qualityStatusHeader">
+        <div>
+          <strong>{practiceRecommendationLabel(recommendation)}</strong>
+          <span>系統已比較 {analysis.candidates.length} 組設定，預設選擇較適合跟練的版本。</span>
+        </div>
+        {selectedCandidate?.recommendation.score !== null && selectedCandidate?.recommendation.score !== undefined ? (
+          <span className="qualityScore">{selectedCandidate.recommendation.score}/100</span>
+        ) : null}
+      </div>
+      <div className="candidateButtons" role="list" aria-label="候選版本">
+        {analysis.candidates.map((candidate) => (
+          <button
+            className={candidate.candidate_id === selectedCandidate?.candidate_id ? 'candidateButton selected' : 'candidateButton'}
+            type="button"
+            key={candidate.candidate_id}
+            onClick={() => onSelect?.(candidate.candidate_id)}
+            disabled={candidate.status !== 'completed'}
+          >
+            <span>版本 {candidate.rank ?? candidate.position ?? '-'}</span>
+            <strong>{practiceRecommendationLabel(candidate.recommendation.recommendation)}</strong>
+            <small>{candidate.config.threshold !== null ? `靈敏度 ${candidate.config.threshold}` : candidate.status}</small>
+          </button>
+        ))}
+      </div>
+      {selectedCandidate ? (
+        <>
+          <ul className="candidateReasons">
+            {selectedCandidate.recommendation.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+          </ul>
+          <details className="candidateDiagnostics">
+            <summary>技術診斷</summary>
+            <p>事件數：{selectedCandidate.quality?.processed_event_count ?? '-'}；MusicXML：{selectedCandidate.validation?.musicxml?.parseable ? '可讀取' : '需檢查'}</p>
+            {selectedCandidate.quality?.quality_flags?.length ? <p>品質旗標：{selectedCandidate.quality.quality_flags.join('、')}</p> : <p>未回報明確品質旗標。</p>}
+          </details>
+          <div className="downloadGrid compactDownloads">
+            {selectedCandidate.exports.filter((item) => item.status === 'available' && item.download_url).map((item) => (
+              <a className="downloadButton" href={downloadUrl(item.download_url)} key={item.type}>
+                {item.type.toUpperCase()}<span>此候選版本</span>
+              </a>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function practiceRecommendationLabel(value: string): string {
+  if (value === 'recommended_for_practice') return '推薦用於練習';
+  if (value === 'reference_with_caveats') return '可作為參考，細節可能不準';
+  return '不建議使用，建議重新分析';
 }
 
 function ResultModeGuidance({ pipeline }: { pipeline: TranscriptionResultResponse['pipeline'] }) {
@@ -1174,6 +1295,226 @@ function isVerifiedPerformanceScore(gate: PerformanceGate | null | undefined): b
     && gate.delivery_allowed === true
     && gate.delivery_status === 'verified_performance_score',
   );
+}
+
+export function PracticePlaybackPanel({
+  timeline,
+}: {
+  timeline: TranscriptionResultResponse['review_timeline'];
+}) {
+  const events = timeline?.performance_playback?.events ?? [];
+  const audioSources = timeline?.audio_sources ?? [];
+  const original = audioSources.find((source) => source.kind === 'original');
+  const accompaniment = audioSources.find((source) => source.kind === 'accompaniment');
+  const hasChart = Boolean(timeline?.performance_playback?.available && events.length);
+  const [mode, setMode] = useState<'original' | 'chart' | 'accompaniment'>(() => preferredPracticeMode(hasChart, Boolean(original?.available)));
+  const [playing, setPlaying] = useState(false);
+  const [audioVolume, setAudioVolume] = useState(75);
+  const [drumVolume, setDrumVolume] = useState(45);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const contextRef = useRef<AudioContext | null>(null);
+  const timers = useRef<number[]>([]);
+  const animationFrame = useRef<number | null>(null);
+  const playbackSession = useRef(0);
+  const activeAudio = mode === 'original' ? original : mode === 'accompaniment' ? accompaniment : null;
+  const duration = Math.max(events.at(-1)?.time_seconds ?? 0, timeline?.measures.at(-1)?.end_seconds ?? 0);
+
+  const clearScheduled = () => {
+    timers.current.forEach((timer) => window.clearTimeout(timer));
+    timers.current = [];
+    if (animationFrame.current !== null) window.cancelAnimationFrame(animationFrame.current);
+    animationFrame.current = null;
+  };
+  const stop = () => {
+    playbackSession.current += 1;
+    clearScheduled();
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    void contextRef.current?.close();
+    contextRef.current = null;
+    setPlaying(false);
+    setCurrentTime(0);
+  };
+  useEffect(() => () => {
+    playbackSession.current += 1;
+    clearScheduled();
+    if (audioRef.current) audioRef.current.pause();
+    void contextRef.current?.close();
+  }, []);
+
+  if (!hasChart && !original?.available) return null;
+  const currentMeasure = measureIndexForPlaybackTime(timeline?.measures ?? [], currentTime);
+  const scheduleChart = (context: AudioContext, startAt: number) => {
+    for (const event of events) {
+      if (event.time_seconds < startAt) continue;
+      const timer = window.setTimeout(() => {
+        playDrumPreview(context, context.currentTime + 0.01, event.drum, event.velocity, drumVolume / 100);
+      }, Math.max(0, (event.time_seconds - startAt) * 1000));
+      timers.current.push(timer);
+    }
+  };
+  const playFrom = async (requestedStartAt: number) => {
+    clearScheduled();
+    setAudioError(null);
+    const startAt = Math.max(0, Math.min(duration, requestedStartAt));
+    const session = ++playbackSession.current;
+    if (activeAudio?.playback_url) {
+      const audio = audioRef.current;
+      if (!audio) return;
+      audio.src = downloadUrl(activeAudio.playback_url);
+      audio.volume = audioVolume / 100;
+      audio.currentTime = startAt;
+      try {
+        await audio.play();
+      } catch {
+        if (playbackSession.current !== session) return;
+        clearScheduled();
+        audio.pause();
+        setPlaying(false);
+        setAudioError('瀏覽器無法開始音訊播放。請點選播放後再試一次。');
+        return;
+      }
+      if (playbackSession.current !== session) return;
+    }
+    if (mode !== 'original') {
+      const AudioContextConstructor = typeof window === 'undefined' ? undefined : window.AudioContext
+        ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextConstructor) {
+        if (!isCurrentPlaybackSession(playbackSession.current, session)) return;
+        stop();
+        setAudioError('此瀏覽器不支援鼓譜試聽；仍可播放原曲或下載 MIDI。');
+        return;
+      }
+      let context: AudioContext | null = null;
+      try {
+        context = new AudioContextConstructor();
+        contextRef.current = context;
+        await context.resume();
+        if (!isCurrentPlaybackSession(playbackSession.current, session)) {
+          void context.close();
+          return;
+        }
+        scheduleChart(context, startAt);
+      } catch {
+        const cleanedCurrentSession = cleanupFailedChartStart({
+          activeSession: playbackSession.current,
+          failedSession: session,
+          failedContext: context,
+          activeContext: contextRef.current,
+          clearScheduled,
+          releaseActiveContext: () => { contextRef.current = null; },
+          pauseAudio: () => audioRef.current?.pause(),
+        });
+        if (!cleanedCurrentSession) return;
+        setPlaying(false);
+        setAudioError('瀏覽器未允許鼓譜試聽；仍可下載 MIDI。');
+        return;
+      }
+    }
+    const startedAt = performance.now();
+    const updateTime = () => {
+      const nextTime = activeAudio?.playback_url && audioRef.current
+        ? audioRef.current.currentTime
+        : startAt + elapsedPlaybackSeconds(startedAt, performance.now());
+      setCurrentTime(duration > 0 ? Math.min(duration, nextTime) : nextTime);
+      const audioStillPlaying = Boolean(
+        activeAudio?.playback_url && audioRef.current && !audioRef.current.paused && !audioRef.current.ended,
+      );
+      const chartStillPlaying = !activeAudio?.playback_url && nextTime < duration;
+      if (audioStillPlaying || chartStillPlaying) {
+        animationFrame.current = window.requestAnimationFrame(updateTime);
+      } else {
+        stop();
+      }
+    };
+    animationFrame.current = window.requestAnimationFrame(updateTime);
+    if (!activeAudio?.playback_url && duration > 0) {
+      timers.current.push(window.setTimeout(stop, Math.max(0, duration - startAt) * 1000 + 600));
+    }
+    setPlaying(true);
+  };
+  const play = () => { void playFrom(currentTime); };
+  const seek = (value: number) => {
+    const next = Math.max(0, Math.min(duration, value));
+    if (playing) stop();
+    setCurrentTime(next);
+  };
+  return (
+    <section className="practicePlaybackPanel">
+      <audio ref={audioRef} onEnded={stop} preload="metadata" />
+      <div className="qualityStatusHeader">
+        <div><strong>同步練習 / 瀏覽器內試聽</strong><span>原曲不疊鼓；伴奏模式會使用去鼓後伴奏加上鼓譜。</span></div>
+        <div className="playbackActions">
+          <button type="button" className="secondaryButton compactButton" onClick={playing ? stop : play}>{playing ? '停止' : mode === 'chart' ? '播放鼓譜' : '播放'}</button>
+          <button type="button" className="secondaryButton compactButton" onClick={() => { stop(); window.setTimeout(() => void playFrom(0), 0); }}>重播</button>
+        </div>
+      </div>
+      <div className="practiceModes" role="group" aria-label="練習播放模式">
+        <button type="button" className={mode === 'original' ? 'selected' : ''} onClick={() => { stop(); setMode('original'); }} disabled={!original?.available}>原曲</button>
+        <button type="button" className={mode === 'chart' ? 'selected' : ''} onClick={() => { stop(); setMode('chart'); }} disabled={!hasChart}>鼓譜單獨</button>
+        <button type="button" className={mode === 'accompaniment' ? 'selected' : ''} onClick={() => { stop(); setMode('accompaniment'); }} disabled={!accompaniment?.available}>伴奏加鼓譜</button>
+      </div>
+      {!accompaniment?.available ? <p className="previewFallback">伴奏 stem 未取得；仍可使用原曲或鼓譜單獨模式。</p> : null}
+      <div className="playbackControls practiceControls">
+        <label><span>{mode === 'chart' ? '鼓譜音量' : '原曲／伴奏音量'}</span><input type="range" min="0" max="100" value={mode === 'chart' ? drumVolume : audioVolume} onChange={(event) => mode === 'chart' ? setDrumVolume(Number(event.currentTarget.value)) : setAudioVolume(Number(event.currentTarget.value))} /><strong>{mode === 'chart' ? drumVolume : audioVolume}%</strong></label>
+        {mode === 'accompaniment' ? <label><span>鼓譜音量</span><input type="range" min="0" max="100" value={drumVolume} onChange={(event) => setDrumVolume(Number(event.currentTarget.value))} /><strong>{drumVolume}%</strong></label> : null}
+        {duration > 0 ? <label><span>播放位置</span><input type="range" min="0" max={duration} step="0.1" value={Math.min(duration, currentTime)} onChange={(event) => seek(Number(event.currentTarget.value))} /><strong>{formatPlaybackTime(currentTime)}</strong></label> : null}
+        <span className="playbackStatus">{playing ? `播放中${currentMeasure ? ` · 第 ${currentMeasure} 小節` : ''}` : '待播放'}</span>
+      </div>
+      {audioError ? <p className="previewFallback">{audioError}</p> : null}
+    </section>
+  );
+}
+
+export function preferredPracticeMode(
+  hasChart: boolean,
+  originalAvailable: boolean,
+): 'original' | 'chart' {
+  return hasChart || !originalAvailable ? 'chart' : 'original';
+}
+
+export function isCurrentPlaybackSession(activeSession: number, session: number): boolean {
+  return activeSession === session;
+}
+
+export function elapsedPlaybackSeconds(startedAtMs: number, nowMs: number): number {
+  return Math.max(0, (nowMs - startedAtMs) / 1000);
+}
+
+type ClosableAudioContext = Pick<AudioContext, 'close'>;
+
+export function cleanupFailedChartStart({
+  activeSession,
+  failedSession,
+  failedContext,
+  activeContext,
+  clearScheduled,
+  releaseActiveContext,
+  pauseAudio,
+}: {
+  activeSession: number;
+  failedSession: number;
+  failedContext: ClosableAudioContext | null;
+  activeContext: ClosableAudioContext | null;
+  clearScheduled: () => void;
+  releaseActiveContext: () => void;
+  pauseAudio: () => void;
+}): boolean {
+  if (!isCurrentPlaybackSession(activeSession, failedSession)) {
+    void failedContext?.close();
+    return false;
+  }
+  clearScheduled();
+  if (activeContext === failedContext) {
+    void failedContext?.close();
+    releaseActiveContext();
+  }
+  pauseAudio();
+  return true;
 }
 
 export function PerformancePlaybackPanel({

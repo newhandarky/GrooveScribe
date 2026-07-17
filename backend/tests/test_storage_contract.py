@@ -1,10 +1,11 @@
-from app.storage.keys import build_job_artifact_key, sanitize_filename, sanitize_storage_key
+from app.storage.keys import build_candidate_artifact_key, build_job_artifact_key, sanitize_filename, sanitize_storage_key
 from app.storage.types import ArtifactRef, ArtifactType, CONTENT_TYPE_BY_ARTIFACT_TYPE
 
 
 def test_build_job_artifact_key_matches_storage_contract() -> None:
     assert build_job_artifact_key("job-1", ArtifactType.NORMALIZED_AUDIO) == "jobs/job-1/audio/normalized.wav"
     assert build_job_artifact_key("job-1", ArtifactType.DRUMS_STEM) == "jobs/job-1/stems/drums.wav"
+    assert build_job_artifact_key("job-1", ArtifactType.ACCOMPANIMENT_STEM) == "jobs/job-1/stems/no_drums.wav"
     assert build_job_artifact_key("job-1", ArtifactType.RAW_MIDI) == "jobs/job-1/midi/raw_drum.mid"
     assert build_job_artifact_key("job-1", ArtifactType.PROCESSED_MIDI) == "jobs/job-1/midi/processed_drum.mid"
     assert build_job_artifact_key("job-1", ArtifactType.DRUM_EVENTS) == "jobs/job-1/midi/drum_events.json"
@@ -13,6 +14,15 @@ def test_build_job_artifact_key_matches_storage_contract() -> None:
     assert build_job_artifact_key("job-1", ArtifactType.MUSICXML) == "jobs/job-1/notation/score.musicxml"
     assert build_job_artifact_key("job-1", ArtifactType.PDF) == "jobs/job-1/exports/score.pdf"
     assert build_job_artifact_key("job-1", ArtifactType.PIPELINE_LOG) == "jobs/job-1/logs/pipeline.json"
+
+
+def test_build_candidate_artifact_key_keeps_candidate_files_under_controlled_prefix() -> None:
+    assert build_candidate_artifact_key("job-1", "threshold_0_4", ArtifactType.PERFORMANCE_MIDI) == (
+        "jobs/job-1/candidates/threshold_0_4/notation/performance_score.mid"
+    )
+    assert build_candidate_artifact_key("job-1", "threshold_0_4", ArtifactType.MUSICXML) == (
+        "jobs/job-1/candidates/threshold_0_4/notation/score.musicxml"
+    )
 
 
 def test_original_audio_key_sanitizes_filename() -> None:

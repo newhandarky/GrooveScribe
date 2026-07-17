@@ -291,6 +291,26 @@ export interface TranscriptionResultResponse {
       };
     } | null;
     pipeline_log_available: boolean;
+    candidate_analysis?: {
+        schema_version: string;
+        status: string;
+        recommended_candidate_id: string | null;
+        canonical_candidate_id?: string | null;
+      candidates: Array<{
+        candidate_id: string;
+        rank: number | null;
+        position: number | null;
+        status: string;
+        selected: boolean;
+        config: { threshold: number | null; adtof_threshold_preset: string | null; tom_filter_preset: string | null };
+        recommendation: { score: number | null; recommendation: 'recommended_for_practice' | 'reference_with_caveats' | 'reanalyze_recommended'; reasons: string[]; rejected: boolean };
+        preview: { musicxml_url: string | null };
+        exports: Array<{ type: string; status: string; download_url: string | null }>;
+        quality: NonNullable<TranscriptionResultResponse['pipeline']>['quality'];
+        validation: NonNullable<TranscriptionResultResponse['pipeline']>['validation'];
+        review_timeline: NonNullable<TranscriptionResultResponse['review_timeline']>;
+      }>;
+    } | null;
   } | null;
   source_result_summary: {
     job_id: string | null;

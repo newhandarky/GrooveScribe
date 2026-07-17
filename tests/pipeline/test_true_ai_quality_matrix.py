@@ -95,6 +95,10 @@ def test_quality_matrix_summarizes_completed_threshold_candidates(tmp_path: Path
     assert "mostly_tom_output" not in first_run["quality_flags"]
     assert first_run["musicxml"]["available"] is True
     assert first_run["musicxml"]["parseable"] is True
+    assert first_run["recommendation"]["recommendation"] in {
+        "recommended_for_practice",
+        "reference_with_caveats",
+    }
     assert "/tmp/" not in json.dumps(report)
     assert "command_template" not in json.dumps(report)
 

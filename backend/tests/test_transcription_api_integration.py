@@ -25,6 +25,7 @@ from app.services.local_job_queue import LocalJobQueue
 from app.services.local_pipeline_runner import LocalMockPipelineRunner
 from app.services.pipeline_service import PipelineServiceRunner
 from app.services.upload_service import UploadService
+from app.storage import ArtifactType, build_candidate_artifact_key, build_job_artifact_key
 from app.storage.dependencies import get_storage_adapter
 from app.storage.local import LocalStorageAdapter
 
@@ -397,6 +398,7 @@ def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path)
     assert "/tmp/" not in str(result_body["pipeline"])
     assert result_body["review_timeline"]["measures"][0]["drum_counts"] == {"kick": 1, "snare": 1}
     assert result_body["review_timeline"]["audio_sources"][0]["playback_url"].endswith("/review-audio/original")
+    assert any(source["kind"] == "accompaniment" and not source["available"] for source in result_body["review_timeline"]["audio_sources"])
     assert "/tmp/" not in str(result_body["review_timeline"])
     assert midi_response.status_code == 200
     assert musicxml_response.status_code == 200
@@ -504,6 +506,146 @@ def test_result_api_uses_audio_contract(tmp_path: Path) -> None:
     assert "stage_reports" not in body
     assert body["audio"]["file_name"] == "demo.wav"
     assert body["preview"]["musicxml_url"] == "/api/v1/transcriptions/job-result/download/musicxml"
+
+
+def test_result_api_validates_and_redacts_candidate_analysis_contract(tmp_path: Path) -> None:
+    client, session_factory, storage = _client(tmp_path)
+    candidate_id = "threshold_0_4"
+    with session_factory() as session:
+        _seed_job(
+            session,
+            job_id="job-candidates",
+            status=JobStatus.COMPLETED,
+            stage=PipelineStage.COMPLETED,
+        )
+    storage.put_bytes(b"candidate midi", build_candidate_artifact_key("job-candidates", candidate_id, ArtifactType.PERFORMANCE_MIDI), "audio/midi")
+    storage.put_bytes(
+        b"<score-partwise />",
+        build_candidate_artifact_key("job-candidates", candidate_id, ArtifactType.MUSICXML),
+        "application/vnd.recordare.musicxml+xml",
+    )
+    failed_candidate_id = "threshold_0_3"
+    storage.put_bytes(
+        b"partial candidate midi",
+        build_candidate_artifact_key("job-candidates", failed_candidate_id, ArtifactType.PERFORMANCE_MIDI),
+        "audio/midi",
+    )
+    storage.put_bytes(
+        json.dumps(
+            {
+                "status": "completed",
+                "candidate_analysis": {
+                    "schema_version": "1.0",
+                    "status": "completed",
+                    "recommended_candidate_id": "threshold.0.4",
+                    "canonical_candidate_id": "threshold.0.4",
+                    "candidates": [
+                        {
+                            "candidate_id": candidate_id,
+                            "rank": 1,
+                            "position": 1,
+                            "status": "completed",
+                            "selected": True,
+                            "config": {"threshold": 0.4, "tom_filter_preset": "tom_guard_v1"},
+                            "recommendation": {
+                                "score": 82,
+                                "recommendation": "recommended_for_practice",
+                                "reasons": [
+                                    "節奏與譜面結構相對穩定",
+                                    "/home/alice/private.wav",
+                                    r"C:\\Users\\Alice\\private.wav",
+                                    "command: adtof --audio secret.wav",
+                                    "Traceback: private details",
+                                    "stdout: private details",
+                                    "stderr: private details",
+                                    "/etc/passwd",
+                                    "ffmpeg --version",
+                                    "reason,/etc/passwd",
+                                    "reason,ffmpeg -i input.wav",
+                                    "git status --short",
+                                    "musescore --version",
+                                    r"\Users\Alice\secret.wav",
+                                    r"%USERPROFILE%\secret.wav",
+                                ],
+                            },
+                            "quality": {
+                                    "raw_note_histogram": {"36": 2, "/opt/private": 99, r"C:\\private": 98, "command": 97, "git status": 96},
+                                "processed_drum_counts": {"kick": 8, "stderr": 99, "musescore --version": 97},
+                                "performance_gate": {
+                                    "audio_alignment": {
+                                        "status": "measured",
+                                        "onset_alignment_rate": 0.71,
+                                        "/etc/passwd": 99,
+                                        "command": 98,
+                                        "punctuated_path": "reason,/etc/passwd",
+                                        "punctuated_command": "reason,ffmpeg -i input.wav",
+                                        "git status": "git status --short",
+                                        "musescore": "musescore --version",
+                                        "windows_root_relative": r"\Users\Alice\secret.wav",
+                                        "windows_environment": r"%USERPROFILE%\secret.wav",
+                                    },
+                                },
+                            },
+                            "validation": {
+                                "musicxml": {"available": True, "parseable": True, "warnings": []},
+                                "pdf": {"available": False, "optional": True, "openable": None, "warnings": []},
+                            },
+                        },
+                        {
+                            "candidate_id": failed_candidate_id,
+                            "status": "failed",
+                            "recommendation": {"recommendation": "reanalyze_recommended", "reasons": []},
+                            "quality": {},
+                            "validation": {},
+                        },
+                    ],
+                },
+            }
+        ).encode("utf-8"),
+        build_job_artifact_key("job-candidates", ArtifactType.PIPELINE_LOG),
+        "application/json",
+    )
+
+    response = client.get("/api/v1/transcriptions/job-candidates")
+
+    assert response.status_code == 200
+    body = response.json()
+    analysis = body["pipeline"]["candidate_analysis"]
+    candidate = analysis["candidates"][0]
+    assert analysis["recommended_candidate_id"] is None
+    assert analysis["canonical_candidate_id"] is None
+    assert candidate["candidate_id"] == candidate_id
+    assert candidate["recommendation"]["recommendation"] == "recommended_for_practice"
+    assert candidate["recommendation"]["reasons"] == ["節奏與譜面結構相對穩定"]
+    assert candidate["quality"]["raw_note_histogram"] == {"36": 2}
+    assert candidate["quality"]["processed_drum_counts"] == {"kick": 8}
+    assert candidate["quality"]["performance_gate"]["audio_alignment"] == {
+        "status": "measured",
+        "onset_alignment_rate": 0.71,
+    }
+    assert candidate["exports"][0]["download_url"].endswith(f"/candidates/{candidate_id}/download/midi")
+    assert candidate["review_timeline"]["schema_version"] == "1.0"
+    failed_candidate = next(item for item in analysis["candidates"] if item["candidate_id"] == failed_candidate_id)
+    assert all(item["download_url"] is None for item in failed_candidate["exports"])
+    assert all(item["status"] != "available" for item in failed_candidate["exports"])
+    failed_download = client.get(f"/api/v1/transcriptions/job-candidates/candidates/{failed_candidate_id}/download/midi")
+    assert failed_download.status_code == 404
+    for unsafe in (
+        "/home/",
+        "/opt/",
+        "/etc/",
+        "c:\\users",
+        "command:",
+        "traceback",
+        "stdout",
+        "stderr",
+        "ffmpeg --version",
+        "ffmpeg -i",
+    ):
+        assert unsafe not in json.dumps(body).lower()
+    openapi = client.get("/openapi.json").json()
+    candidate_schema = openapi["components"]["schemas"]["PipelineSummaryResult"]["properties"]["candidate_analysis"]
+    assert candidate_schema["anyOf"][0]["$ref"].endswith("/PipelineCandidateAnalysis")
 
 
 def test_result_api_source_missing_returns_safe_compare_shape(tmp_path: Path) -> None:

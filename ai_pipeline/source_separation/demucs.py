@@ -71,6 +71,13 @@ class DemucsSourceSeparator:
             shutil.copy2(demucs_drums_path, stable_drums_path)
 
         metadata = self._read_stem_metadata(stable_drums_path)
+        accompaniment_path = self._find_demucs_accompaniment_path(demucs_output_dir, input_path)
+        stable_accompaniment_path = output_dir / "no_drums.wav"
+        if accompaniment_path is not None:
+            if accompaniment_path.resolve() != stable_accompaniment_path.resolve():
+                shutil.copy2(accompaniment_path, stable_accompaniment_path)
+            if not stable_accompaniment_path.exists() or stable_accompaniment_path.stat().st_size == 0:
+                stable_accompaniment_path = None
         report = SourceSeparationReport(
             separator="demucs",
             model_name=self.model_name,
@@ -78,7 +85,12 @@ class DemucsSourceSeparator:
             runtime_seconds=runtime_seconds,
             command=tuple(command),
         )
-        return StemSet(drums_path=stable_drums_path, metadata=metadata, report=report)
+        return StemSet(
+            drums_path=stable_drums_path,
+            accompaniment_path=stable_accompaniment_path if accompaniment_path is not None else None,
+            metadata=metadata,
+            report=report,
+        )
 
     def _run(self, command: Sequence[str]) -> subprocess.CompletedProcess[str]:
         try:
@@ -104,6 +116,13 @@ class DemucsSourceSeparator:
             return matches[0]
 
         raise DrumsStemNotFoundError(f"Demucs did not produce drums.wav under {demucs_output_dir}")
+
+    def _find_demucs_accompaniment_path(self, demucs_output_dir: Path, input_path: Path) -> Path | None:
+        expected = demucs_output_dir / self.model_name / input_path.stem / "no_drums.wav"
+        if expected.exists():
+            return expected
+        matches = sorted(demucs_output_dir.rglob("no_drums.wav")) if demucs_output_dir.exists() else []
+        return matches[0] if matches else None
 
     def _read_stem_metadata(self, drums_path: Path) -> StemMetadata:
         if not drums_path.exists() or drums_path.stat().st_size == 0:

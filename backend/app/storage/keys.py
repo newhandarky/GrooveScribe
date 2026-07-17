@@ -52,6 +52,8 @@ def build_job_artifact_key(
         key = f"jobs/{safe_job_id}/audio/normalized.wav"
     elif artifact_type == ArtifactType.DRUMS_STEM:
         key = f"jobs/{safe_job_id}/stems/drums.wav"
+    elif artifact_type == ArtifactType.ACCOMPANIMENT_STEM:
+        key = f"jobs/{safe_job_id}/stems/no_drums.wav"
     elif artifact_type == ArtifactType.RAW_MIDI:
         key = f"jobs/{safe_job_id}/midi/raw_drum.mid"
     elif artifact_type == ArtifactType.PROCESSED_MIDI:
@@ -73,3 +75,23 @@ def build_job_artifact_key(
     else:
         raise ValueError(f"unsupported artifact type: {artifact_type}")
     return sanitize_storage_key(key)
+
+
+def build_candidate_artifact_key(job_id: str, candidate_id: str, artifact_type: ArtifactType) -> str:
+    """Build a storage-only key for a known candidate artifact."""
+
+    safe_job_id = sanitize_filename(job_id)
+    safe_candidate_id = sanitize_filename(candidate_id)
+    filenames = {
+        ArtifactType.RAW_MIDI: "midi/raw_drum.mid",
+        ArtifactType.PROCESSED_MIDI: "midi/processed_drum.mid",
+        ArtifactType.PERFORMANCE_MIDI: "notation/performance_score.mid",
+        ArtifactType.DRUM_EVENTS: "midi/drum_events.json",
+        ArtifactType.CHART_EVENTS: "notation/chart_events.json",
+        ArtifactType.MUSICXML: "notation/score.musicxml",
+        ArtifactType.PDF: "exports/score.pdf",
+    }
+    relative = filenames.get(artifact_type)
+    if relative is None:
+        raise ValueError(f"artifact type is not a candidate artifact: {artifact_type}")
+    return sanitize_storage_key(f"jobs/{safe_job_id}/candidates/{safe_candidate_id}/{relative}")

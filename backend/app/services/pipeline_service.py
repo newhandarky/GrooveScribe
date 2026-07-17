@@ -27,7 +27,7 @@ from app.services.pipeline_config import (
     PIPELINE_MODE_TRUE_AI,
     pipeline_config_for_job,
 )
-from app.storage import ArtifactRef, ArtifactType, LocalStorageAdapter, StorageAdapter, build_job_artifact_key
+from app.storage import ArtifactRef, ArtifactType, LocalStorageAdapter, StorageAdapter, build_candidate_artifact_key, build_job_artifact_key
 from app.storage.types import CONTENT_TYPE_BY_ARTIFACT_TYPE
 
 ProcessRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -38,6 +38,7 @@ _PIPELINE_SCRIPT = _REPO_ROOT / "scripts" / "run_local_pipeline.py"
 _PIPELINE_ARTIFACT_TYPES: dict[str, ArtifactType] = {
     "normalized_audio": ArtifactType.NORMALIZED_AUDIO,
     "drums_stem": ArtifactType.DRUMS_STEM,
+    "accompaniment_stem": ArtifactType.ACCOMPANIMENT_STEM,
     "raw_midi": ArtifactType.RAW_MIDI,
     "processed_midi": ArtifactType.PROCESSED_MIDI,
     "performance_midi": ArtifactType.PERFORMANCE_MIDI,
@@ -60,6 +61,7 @@ _REQUIRED_PIPELINE_ARTIFACTS = (
 _ARTIFACT_TO_BACKEND_STAGE: dict[str, str] = {
     "normalized_audio": PipelineStage.PREPROCESSING.value,
     "drums_stem": PipelineStage.SOURCE_SEPARATION.value,
+    "accompaniment_stem": PipelineStage.SOURCE_SEPARATION.value,
     "raw_midi": PipelineStage.DRUM_TRANSCRIPTION.value,
     "processed_midi": PipelineStage.MIDI_POST_PROCESSING.value,
     "performance_midi": PipelineStage.NOTATION_GENERATION.value,
@@ -256,6 +258,7 @@ class PipelineServiceRunner:
         if use_mock:
             command.append("--mock-ai")
         if job and mode == PIPELINE_MODE_TRUE_AI:
+            command.extend(["--candidate-thresholds", "0.3,0.4,0.5,0.6"])
             if job.adtof_threshold_preset:
                 command.extend(["--adtof-threshold-preset", job.adtof_threshold_preset])
             if job.tom_filter_preset:
@@ -487,7 +490,54 @@ class PipelineServiceRunner:
                 build_job_artifact_key(job.id, artifact_type),
                 CONTENT_TYPE_BY_ARTIFACT_TYPE[artifact_type],
             )
+        self._store_candidate_artifacts(job, payload, output_dir, pipeline_log_storage_key)
         return refs
+
+    def _store_candidate_artifacts(
+        self,
+        job: TranscriptionJob,
+        payload: dict[str, Any],
+        output_dir: Path,
+        pipeline_log_storage_key: str,
+    ) -> None:
+        analysis = payload.get("candidate_analysis")
+        candidates = analysis.get("candidates") if isinstance(analysis, dict) else None
+        if not isinstance(candidates, list):
+            return
+        allowed = {
+            "raw_midi": ArtifactType.RAW_MIDI,
+            "processed_midi": ArtifactType.PROCESSED_MIDI,
+            "performance_midi": ArtifactType.PERFORMANCE_MIDI,
+            "drum_events": ArtifactType.DRUM_EVENTS,
+            "chart_events": ArtifactType.CHART_EVENTS,
+            "musicxml": ArtifactType.MUSICXML,
+            "pdf": ArtifactType.PDF,
+        }
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            candidate_id = candidate.get("candidate_id")
+            raw_artifacts = candidate.get("artifacts")
+            if candidate.get("status") != "completed" or not isinstance(candidate_id, str) or not isinstance(raw_artifacts, dict):
+                continue
+            stored = []
+            for name, artifact_type in allowed.items():
+                raw_path = raw_artifacts.get(name)
+                if raw_path is None:
+                    continue
+                path = self._validated_artifact_path(
+                    artifact_name=name,
+                    raw_value=raw_path,
+                    output_dir=output_dir,
+                    pipeline_log_storage_key=pipeline_log_storage_key,
+                )
+                self.storage.put_file(
+                    path,
+                    build_candidate_artifact_key(job.id, candidate_id, artifact_type),
+                    CONTENT_TYPE_BY_ARTIFACT_TYPE[artifact_type],
+                )
+                stored.append(name)
+            candidate["artifacts"] = {name: "stored" for name in stored}
 
     def _artifact_paths(
         self,

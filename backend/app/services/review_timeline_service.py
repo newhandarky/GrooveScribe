@@ -14,8 +14,14 @@ class ReviewTimelineService:
     def __init__(self, *, storage: StorageAdapter) -> None:
         self.storage = storage
 
-    def build(self, job: TranscriptionJob, *, audio_urls: dict[str, str | None]) -> dict:
-        chart_payload = self._chart_payload(job.id)
+    def build(
+        self,
+        job: TranscriptionJob,
+        *,
+        audio_urls: dict[str, str | None],
+        chart_storage_key: str | None = None,
+    ) -> dict:
+        chart_payload = self._chart_payload(job.id, chart_storage_key)
         summary = chart_payload.get("chart_summary") if isinstance(chart_payload, dict) else {}
         summary = summary if isinstance(summary, dict) else {}
         ticks_per_beat = _positive_int(chart_payload.get("ticks_per_beat"), 480)
@@ -32,7 +38,7 @@ class ReviewTimelineService:
             drum = event.get("drum")
             if isinstance(tick, int) and isinstance(drum, str) and drum in {"kick", "snare", "closed_hat", "open_hat", "tom", "cymbal"}:
                 events_by_measure[tick // measure_ticks][drum] += 1
-                if tempo_bpm is not None and len(playback_events) < 2048:
+                if tempo_bpm is not None:
                     playback_events.append(
                         {
                             "time_seconds": round(tick * 60 / (ticks_per_beat * tempo_bpm), 4),
@@ -75,6 +81,12 @@ class ReviewTimelineService:
                     "available": audio_urls.get("drums_stem") is not None,
                     "playback_url": audio_urls.get("drums_stem"),
                 },
+                {
+                    "kind": "accompaniment",
+                    "label": "去鼓後伴奏",
+                    "available": audio_urls.get("accompaniment") is not None,
+                    "playback_url": audio_urls.get("accompaniment"),
+                },
             ],
             "measures": measures,
             "performance_playback": {
@@ -84,8 +96,8 @@ class ReviewTimelineService:
             },
         }
 
-    def _chart_payload(self, job_id: str) -> dict:
-        key = build_job_artifact_key(job_id, ArtifactType.CHART_EVENTS)
+    def _chart_payload(self, job_id: str, chart_storage_key: str | None = None) -> dict:
+        key = chart_storage_key or build_job_artifact_key(job_id, ArtifactType.CHART_EVENTS)
         try:
             with self.storage.open_reader(key) as reader:
                 payload = json.loads(reader.read().decode("utf-8"))

@@ -15,7 +15,7 @@ from app.services.download_service import DownloadService
 from app.services.job_query_service import JobQueryService
 from app.services.result_service import ResultService, _sanitize_performance_gate, _sanitize_validation_summary
 from app.services.review_packet_service import ReviewPacketService
-from app.storage.keys import build_job_artifact_key
+from app.storage.keys import build_candidate_artifact_key, build_job_artifact_key
 from app.storage.local import LocalStorageAdapter
 from app.storage.types import ArtifactType
 
@@ -457,6 +457,204 @@ def test_result_service_builds_redacted_pipeline_summary(tmp_path) -> None:
         assert "command_template" not in str(summary)
         assert "Traceback" not in str(summary)
         assert "command_failed" in str(summary)
+
+
+def test_result_service_exposes_candidate_urls_without_storage_paths_or_runtime_diagnostics(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    candidate_id = "threshold_0_4"
+    for artifact_type, content_type in (
+        (ArtifactType.PERFORMANCE_MIDI, "audio/midi"),
+        (ArtifactType.MUSICXML, "application/vnd.recordare.musicxml+xml"),
+    ):
+        storage.put_bytes(
+            b"candidate artifact",
+            build_candidate_artifact_key("job-1", candidate_id, artifact_type),
+            content_type,
+        )
+    storage.put_bytes(
+        json.dumps(
+            {
+                "status": "completed",
+                "candidate_analysis": {
+                    "schema_version": "1.0",
+                    "status": "completed",
+                    "recommended_candidate_id": candidate_id,
+                    "canonical_candidate_id": candidate_id,
+                    "candidates": [
+                        {
+                            "candidate_id": candidate_id,
+                            "rank": 1,
+                            "position": 2,
+                            "status": "completed",
+                            "config": {
+                                "threshold": 0.4,
+                                "base_threshold_preset": "separated_v1",
+                                "command_template": "/tmp/private",
+                            },
+                            "recommendation": {
+                                "score": 81,
+                                "recommendation": "recommended_for_practice",
+                                "reasons": ["節奏與譜面結構相對穩定", "stderr leaked", "git status --short"],
+                            },
+                            "quality": {
+                                "processed_drum_counts": {"kick": 8, "snare": 8},
+                                "quality_flags": ["/Users/private", "hihat_missing_likely"],
+                            },
+                            "validation": {
+                                "musicxml": {"available": True, "parseable": True, "warnings": ["Traceback leaked"]},
+                                "pdf": {"available": False, "optional": True, "openable": None, "warnings": []},
+                            },
+                        }
+                    ],
+                },
+            }
+        ).encode("utf-8"),
+        build_job_artifact_key("job-1", ArtifactType.PIPELINE_LOG),
+        "application/json",
+    )
+    with _session() as session:
+        job = _create_job(
+            session,
+            status=JobStatus.COMPLETED,
+            stage=PipelineStage.COMPLETED,
+            export_status=ExportFileStatus.AVAILABLE,
+        )
+        summary = ResultService(settings=Settings(), storage=storage).pipeline_summary(job)
+
+    candidate = summary["candidate_analysis"]["candidates"][0]
+    assert summary["candidate_analysis"]["recommended_candidate_id"] == candidate_id
+    assert summary["candidate_analysis"]["canonical_candidate_id"] == candidate_id
+    assert candidate["recommendation"]["recommendation"] == "recommended_for_practice"
+    assert candidate["recommendation"]["reasons"] == ["節奏與譜面結構相對穩定"]
+    assert candidate["exports"][0]["download_url"].endswith("/candidates/threshold_0_4/download/midi")
+    assert candidate["preview"]["musicxml_url"].endswith("/candidates/threshold_0_4/download/musicxml")
+    assert candidate["quality"]["quality_flags"] == ["hihat_missing_likely"]
+    assert candidate["validation"]["musicxml"]["warnings"] == []
+    assert candidate["config"]["adtof_threshold_preset"] == "separated_v1"
+    assert not any(token.lower() in json.dumps(summary).lower() for token in UNSAFE_TOKENS)
+
+
+def test_candidate_export_download_is_limited_to_known_job_candidate_artifacts(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    storage.put_bytes(
+        b"candidate-midi",
+        build_candidate_artifact_key("job-1", "threshold_0_4", ArtifactType.PERFORMANCE_MIDI),
+        "audio/midi",
+    )
+    storage.put_bytes(
+        json.dumps(
+            {
+                "candidate_analysis": {
+                    "candidates": [{"candidate_id": "threshold_0_4", "status": "completed"}],
+                },
+            }
+        ).encode("utf-8"),
+        build_job_artifact_key("job-1", ArtifactType.PIPELINE_LOG),
+        "application/json",
+    )
+    with _session() as session:
+        _create_job(
+            session,
+            status=JobStatus.COMPLETED,
+            stage=PipelineStage.COMPLETED,
+            export_status=ExportFileStatus.AVAILABLE,
+        )
+        artifact = DownloadService(storage=storage).open_candidate_export(
+            session,
+            job_id="job-1",
+            candidate_id="threshold_0_4",
+            export_type="midi",
+        )
+
+    try:
+        assert artifact.filename == "processed_drum.mid"
+        assert artifact.reader.read() == b"candidate-midi"
+    finally:
+        artifact.reader.close()
+
+
+def test_candidate_export_download_rejects_unpublished_residual_artifact(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    storage.put_bytes(
+        b"residual-midi",
+        build_candidate_artifact_key("job-1", "threshold_0_9", ArtifactType.PERFORMANCE_MIDI),
+        "audio/midi",
+    )
+    storage.put_bytes(
+        json.dumps(
+            {
+                "candidate_analysis": {
+                    "candidates": [{"candidate_id": "threshold_0_4", "status": "completed"}],
+                },
+            }
+        ).encode("utf-8"),
+        build_job_artifact_key("job-1", ArtifactType.PIPELINE_LOG),
+        "application/json",
+    )
+    with _session() as session:
+        _create_job(session, status=JobStatus.COMPLETED, stage=PipelineStage.COMPLETED)
+        try:
+            DownloadService(storage=storage).open_candidate_export(
+                session,
+                job_id="job-1",
+                candidate_id="threshold_0_9",
+                export_type="midi",
+            )
+        except ApiErrorException as exc:
+            assert exc.code == ErrorCode.EXPORT_NOT_FOUND
+        else:
+            raise AssertionError("expected unpublished candidate artifact to be rejected")
+
+
+def test_candidate_export_download_rejects_a_path_like_candidate_id(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    with _session() as session:
+        _create_job(
+            session,
+            status=JobStatus.COMPLETED,
+            stage=PipelineStage.COMPLETED,
+            export_status=ExportFileStatus.AVAILABLE,
+        )
+        try:
+            DownloadService(storage=storage).open_candidate_export(
+                session,
+                job_id="job-1",
+                candidate_id="../private",
+                export_type="midi",
+            )
+        except ApiErrorException as exc:
+            assert exc.code == ErrorCode.EXPORT_NOT_FOUND
+        else:
+            raise AssertionError("expected unsafe candidate id to be rejected")
+
+
+def test_review_audio_exposes_only_a_real_accompaniment_stem(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    with _session() as session:
+        _create_job(session, status=JobStatus.COMPLETED, stage=PipelineStage.COMPLETED)
+        missing_service = DownloadService(storage=storage)
+        try:
+            missing_service.open_review_audio(session, job_id="job-1", audio_kind="accompaniment")
+        except ApiErrorException as exc:
+            assert exc.code == ErrorCode.EXPORT_NOT_FOUND
+        else:
+            raise AssertionError("expected missing accompaniment to remain unavailable")
+
+        storage.put_bytes(
+            b"real-no-drums-stem",
+            build_job_artifact_key("job-1", ArtifactType.ACCOMPANIMENT_STEM),
+            "audio/wav",
+        )
+        artifact = DownloadService(storage=storage).open_review_audio(
+            session,
+            job_id="job-1",
+            audio_kind="accompaniment",
+        )
+    try:
+        assert artifact.filename == "no_drums.wav"
+        assert artifact.reader.read() == b"real-no-drums-stem"
+    finally:
+        artifact.reader.close()
 
 
 def test_result_service_keeps_legacy_pipeline_log_without_validation_graceful(tmp_path) -> None:

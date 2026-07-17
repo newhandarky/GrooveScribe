@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import shutil
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 from ai_pipeline.midi import MidiPostProcessor
+from ai_pipeline.midi.candidate_recommendation import evaluate_candidate_recommendation
 from ai_pipeline.midi.quality import evaluate_drum_draft_quality, quality_flag_subset
 from ai_pipeline.midi.simple_midi import write_drum_midi
 from ai_pipeline.midi.types import MidiPostProcessConfig, ProcessedDrumEvent
@@ -45,6 +46,7 @@ class LocalPipelineConfig:
     tempo_bpm: float | None = None
     pdf_renderer: str | None = None
     performance_gate_calibration: dict | None = None
+    candidate_thresholds: tuple[float, ...] = ()
 
 
 @dataclass
@@ -77,6 +79,8 @@ class LocalPipelineRunner:
             raise FileNotFoundError(f"input file does not exist: {input_path}")
 
         output_dir.mkdir(parents=True, exist_ok=True)
+        if self.config.candidate_thresholds and not self.config.mock_ai:
+            return self._run_candidate_analysis(input_path, output_dir)
         artifacts: dict[str, Path] = {"original_audio": input_path}
         stage_logs: list[StageLog] = []
         log_path = output_dir / "logs" / "pipeline.json"
@@ -157,7 +161,11 @@ class LocalPipelineRunner:
             drums_path = output_dir / "stems" / "drums.wav"
             drums_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(artifacts["normalized_audio"], drums_path)
-            return {"drums_stem": drums_path}, {"separator": "mock", "warnings": ["mock_ai_enabled"]}
+            return {"drums_stem": drums_path}, {
+                "separator": "mock",
+                "accompaniment_available": False,
+                "warnings": ["mock_ai_enabled"],
+            }
 
         separator = DemucsSourceSeparator(
             model_name=self.config.demucs_model_name,
@@ -165,11 +173,15 @@ class LocalPipelineRunner:
             timeout_seconds=self.config.demucs_timeout_seconds,
         )
         result = separator.separate(artifacts["normalized_audio"], output_dir / "stems")
-        return {"drums_stem": result.drums_path}, {
+        stage_artifacts = {"drums_stem": result.drums_path}
+        if result.accompaniment_path is not None:
+            stage_artifacts["accompaniment_stem"] = result.accompaniment_path
+        return stage_artifacts, {
             "separator": result.report.separator,
             "model_name": result.report.model_name,
             "device": result.report.device,
             "runtime_seconds": result.report.runtime_seconds,
+            "accompaniment_available": result.accompaniment_path is not None,
             "warnings": list(result.report.warnings),
         }
 
@@ -333,6 +345,7 @@ class LocalPipelineRunner:
         status: str,
         stage_logs: list[StageLog],
         artifacts: dict[str, Path],
+        candidate_analysis: dict | None = None,
     ) -> None:
         payload = {
             "schema_version": "1.0",
@@ -345,7 +358,144 @@ class LocalPipelineRunner:
             "quality": _build_quality_summary(stage_logs),
             "validation": _build_validation_summary(stage_logs),
         }
+        if candidate_analysis is not None:
+            payload["candidate_analysis"] = candidate_analysis
         log_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _run_candidate_analysis(self, input_path: Path, output_dir: Path) -> LocalPipelineResult:
+        artifacts: dict[str, Path] = {"original_audio": input_path}
+        shared_logs: list[StageLog] = []
+        log_path = output_dir / "logs" / "pipeline.json"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        for stage_name, stage_fn in (
+            ("audio_preprocessing", self._run_audio_preprocessing),
+            ("source_separation", self._run_source_separation),
+        ):
+            started = time.monotonic()
+            stage_log = StageLog(name=stage_name, status="running", started_at=_now_iso())
+            try:
+                stage_artifacts, report = stage_fn(artifacts, output_dir)
+                artifacts.update(stage_artifacts)
+                stage_log.status = "completed"
+                stage_log.artifacts = {name: str(path) for name, path in stage_artifacts.items()}
+                stage_log.report = report
+            except Exception as exc:
+                stage_log.status = "failed"
+                stage_log.error = _serialize_error(exc)
+                stage_log.ended_at = _now_iso()
+                stage_log.runtime_seconds = round(time.monotonic() - started, 4)
+                shared_logs.append(stage_log)
+                self._write_log(log_path, input_path, output_dir, "failed", shared_logs, artifacts)
+                return LocalPipelineResult("failed", output_dir, log_path, artifacts, stage_name)
+            stage_log.ended_at = _now_iso()
+            stage_log.runtime_seconds = round(time.monotonic() - started, 4)
+            shared_logs.append(stage_log)
+
+        candidates: list[dict] = []
+        successful: list[tuple[dict, dict[str, Path], list[StageLog]]] = []
+        for index, threshold in enumerate(self.config.candidate_thresholds, start=1):
+            candidate_id = f"threshold_{str(threshold).replace('.', '_')}"
+            candidate_artifacts = dict(artifacts)
+            candidate_logs: list[StageLog] = []
+            candidate_dir = output_dir / "candidates" / candidate_id
+            failed_stage = None
+            # ADTOF accepts either its per-class threshold preset or a scalar threshold.
+            # Candidate analysis compares scalar thresholds, so the preset must not mask
+            # every candidate with the same --thresholds argument.
+            candidate_runner = LocalPipelineRunner(
+                replace(
+                    self.config,
+                    adtof_threshold=threshold,
+                    adtof_class_thresholds=None,
+                    adtof_threshold_preset=None,
+                    candidate_thresholds=(),
+                )
+            )
+            for stage_name, stage_fn in (
+                ("drum_transcription", candidate_runner._run_drum_transcription),
+                ("midi_post_processing", candidate_runner._run_midi_post_processing),
+                ("notation_generation", candidate_runner._run_notation_generation),
+            ):
+                started = time.monotonic()
+                stage_log = StageLog(name=stage_name, status="running", started_at=_now_iso())
+                try:
+                    stage_artifacts, report = stage_fn(candidate_artifacts, candidate_dir)
+                    candidate_artifacts.update(stage_artifacts)
+                    stage_log.status = "completed"
+                    stage_log.artifacts = {name: str(path) for name, path in stage_artifacts.items()}
+                    stage_log.report = report
+                except Exception as exc:
+                    failed_stage = stage_name
+                    stage_log.status = "failed"
+                    stage_log.error = _serialize_error(exc)
+                stage_log.ended_at = _now_iso()
+                stage_log.runtime_seconds = round(time.monotonic() - started, 4)
+                candidate_logs.append(stage_log)
+                if failed_stage:
+                    break
+            quality = _build_quality_summary(candidate_logs) or {}
+            validation = _build_validation_summary(candidate_logs) or {}
+            recommendation = evaluate_candidate_recommendation(
+                status="failed" if failed_stage else "completed",
+                quality=quality,
+                validation=validation,
+            )
+            candidate = {
+                "candidate_id": candidate_id,
+                "position": index,
+                "status": "failed" if failed_stage else "completed",
+                "config": {
+                    "threshold": threshold,
+                    "base_threshold_preset": self.config.adtof_threshold_preset,
+                    "threshold_strategy": "scalar_candidate",
+                    "tom_filter_preset": self.config.tom_filter_preset,
+                },
+                "failed_stage": failed_stage,
+                "artifacts": {name: str(path) for name, path in candidate_artifacts.items() if name not in {"original_audio", "normalized_audio", "drums_stem", "accompaniment_stem"}},
+                "quality": quality,
+                "validation": validation,
+                "recommendation": recommendation,
+            }
+            candidates.append(candidate)
+            if not failed_stage and validation.get("musicxml", {}).get("parseable"):
+                successful.append((candidate, candidate_artifacts, candidate_logs))
+
+        if not successful:
+            analysis = {"schema_version": "1.0", "status": "failed", "recommended_candidate_id": None, "candidates": candidates}
+            self._write_log(log_path, input_path, output_dir, "failed", shared_logs, artifacts, analysis)
+            return LocalPipelineResult("failed", output_dir, log_path, artifacts, "candidate_analysis")
+        eligible = [item for item in successful if not bool(item[0]["recommendation"].get("rejected"))]
+        ranked = sorted(
+            eligible,
+            key=lambda item: (-int(item[0]["recommendation"].get("score") or 0), int(item[0]["position"])),
+        )
+        for rank, (candidate, _candidate_artifacts, _candidate_logs) in enumerate(ranked, start=1):
+            candidate["rank"] = rank
+        # A parseable but hard-rejected candidate remains available for diagnostic
+        # review and legacy downloads. It must never be presented as a recommendation.
+        selected, selected_artifacts, selected_logs = (
+            ranked[0]
+            if ranked
+            else min(successful, key=lambda item: int(item[0]["position"]))
+        )
+        candidate_id = str(selected["candidate_id"])
+        for candidate in candidates:
+            candidate["selected"] = candidate["candidate_id"] == candidate_id
+        shared_artifact_names = {"original_audio", "normalized_audio", "drums_stem", "accompaniment_stem"}
+        final_artifacts = {
+            **artifacts,
+            **{name: path for name, path in selected_artifacts.items() if name not in shared_artifact_names},
+        }
+        final_logs = [*shared_logs, *selected_logs]
+        analysis = {
+            "schema_version": "1.0",
+            "status": "completed",
+            "recommended_candidate_id": candidate_id if ranked else None,
+            "canonical_candidate_id": candidate_id,
+            "candidates": candidates,
+        }
+        self._write_log(log_path, input_path, output_dir, "completed", final_logs, final_artifacts, analysis)
+        return LocalPipelineResult("completed", output_dir, log_path, final_artifacts)
 
 
 def _now_iso() -> str:
