@@ -76,6 +76,24 @@ npm run dev:true-ai -- --backend-port 8001 --frontend-port 5174
 
 `dev:true-ai` 會替 backend process 帶入 ADTOF / Demucs 的本機預設 env；true-AI 仍只在 UI 選擇 `True-AI V1 preset` 時執行。
 
+## True-AI 多候選與同步練習
+
+True-AI V1 preset 會先正規化與分離音檔一次，再依序比較 `0.3`、`0.4`、`0.5`、`0.6` 四組轉譜候選。這比 Demo mode 花更久，但系統會自行選出較適合初學者練習的一版；使用者不需要根據 hi-hat、tom 或 threshold 做判斷。
+
+結果頁的候選建議只有三種：
+
+- 「推薦用於練習」：自動結構、對齊與可讀性檢查相對穩定。
+- 「可作為參考，細節可能不準」：可先跟練，但細節仍可能有誤。
+- 「不建議使用，建議重新分析」：沒有通過基本結構檢查，應換來源或重新分析。
+
+同步練習提供三種模式：
+
+- 原曲：只播放上傳音檔，絕不再疊加合成鼓聲，避免雙鼓聲。
+- 鼓譜單獨：用瀏覽器內建的柔和鼓聲試聽選定候選。
+- 伴奏加鼓譜：播放 Demucs 產生的 `no_drums` 伴奏，再疊加鼓譜，作為主要練習模式。
+
+若伴奏 stem 未取得或瀏覽器拒絕音訊播放，原曲、鼓譜下載與 MusicXML 預覽仍可使用。播放提示目前是小節級同步，不是音符級游標。
+
 ## 3. 跑一次 Mock Flow
 
 1. 在 Runtime 區確認 `Mock pipeline` 是 `ready`。

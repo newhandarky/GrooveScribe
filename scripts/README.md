@@ -6,7 +6,7 @@
 
 - `run_local_pipeline.py`：串接本地 POC pipeline；支援 dry-run 與 `--mock-ai` smoke test。
 - `run_normalize_audio.py`：使用 ffmpeg 將 MP3/WAV 轉成 `normalized.wav`。
-- `run_demucs_separation.py`：使用 Demucs 將 `normalized.wav` 分離成穩定輸出 `drums.wav`。
+- `run_demucs_separation.py`：使用 Demucs 將 `normalized.wav` 分離成穩定輸出 `drums.wav` 與可選 `no_drums.wav` 伴奏 stem。
 - `run_adtof_transcription.py`：透過可配置 ADTOF command 將 `drums.wav` 轉成 `raw_drum.mid`。
 - `run_midi_postprocess.py`：將 `raw_drum.mid` 後處理為 `processed_drum.mid` 與 `drum_events.json`。
 - `generate_score.py`：從 `drum_events.json` 產生 `score.musicxml`，可選用 MuseScore CLI 轉出 PDF。
@@ -279,6 +279,8 @@ manual eval 與 reset / cleanup 可單獨檢查：
 ```
 
 true-AI 仍是 opt-in：
+
+True-AI job 內建會依序比較 `0.3`、`0.4`、`0.5`、`0.6` 候選，重用同一次 Demucs 分離。候選輸出只存在 local storage，Result API 只提供受控 download URL；不得把候選 storage key、本機路徑、stems 或原始子程序輸出帶入文件、API 或 git。
 
 ```bash
 .venv-ai/bin/python scripts/generate_v1_release_evidence.py \

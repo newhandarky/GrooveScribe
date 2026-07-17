@@ -94,6 +94,17 @@ def test_mock_worker_output_can_be_read_by_pipeline_snapshot_cli(tmp_path) -> No
 
 
 def _add_backend_read_model_compatibility_columns(session) -> None:
-    session.execute(text("ALTER TABLE audio_files ADD COLUMN user_id VARCHAR(36)"))
-    session.execute(text("ALTER TABLE transcription_jobs ADD COLUMN user_id VARCHAR(36)"))
+    # The worker keeps a deliberately narrower write schema. Add nullable
+    # backend read-model columns so this integration test exercises snapshot
+    # compatibility without making worker jobs depend on backend migrations.
+    for statement in (
+        "ALTER TABLE audio_files ADD COLUMN user_id VARCHAR(36)",
+        "ALTER TABLE transcription_jobs ADD COLUMN user_id VARCHAR(36)",
+        "ALTER TABLE transcription_jobs ADD COLUMN pipeline_mode VARCHAR(32)",
+        "ALTER TABLE transcription_jobs ADD COLUMN adtof_threshold_preset VARCHAR(64)",
+        "ALTER TABLE transcription_jobs ADD COLUMN tom_filter_preset VARCHAR(64)",
+        "ALTER TABLE transcription_jobs ADD COLUMN runtime_fallback_status VARCHAR(64)",
+        "ALTER TABLE transcription_jobs ADD COLUMN source_job_id VARCHAR(36)",
+    ):
+        session.execute(text(statement))
     session.commit()

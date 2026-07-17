@@ -75,6 +75,29 @@ test('mock browser smoke reaches result review without leaking local diagnostics
   expect(apiMetrics.retryRequests).toBe(1);
 });
 
+test('candidate practice workspace defaults to a recommendation and exposes safe practice controls', async ({ page }) => {
+  await installMockApi(page, { candidateAnalysis: true });
+  await page.goto('/');
+  await page.getByLabel('Title').fill('Candidate Practice');
+  await page.locator('input[type="file"]').setInputFiles(path.resolve('tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav'));
+  await page.getByRole('button', { name: '開始本機分析' }).click();
+
+  await expect(page.getByText('推薦用於練習').first()).toBeVisible();
+  await expect(page.getByRole('button', { name: /版本 1/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /版本 2/ })).toBeVisible();
+  await expect(page.getByText('同步練習 / 瀏覽器內試聽')).toBeVisible();
+  await expect(page.getByRole('button', { name: '原曲' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '鼓譜單獨' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '伴奏加鼓譜' })).toBeVisible();
+  await expect(page.getByRole('link', { name: /MIDI.*此候選版本/i })).toHaveAttribute(
+    'href',
+    /\/api\/v1\/transcriptions\/job-browser-smoke\/candidates\/threshold_0_4\/download\/midi$/,
+  );
+  await page.getByRole('button', { name: /版本 2/ }).click();
+  await expect(page.getByText('可作為參考，細節可能不準').first()).toBeVisible();
+  await expectPublicSafe(page);
+});
+
 for (const terminalStatus of ['failed', 'interrupted'] as const) {
   test(`mock browser smoke renders ${terminalStatus} job without leaking diagnostics or downloads`, async ({ page }) => {
     const apiMetrics = await installTerminalMockApi(page, terminalStatus);
@@ -122,7 +145,7 @@ interface MockApiMetrics {
   retryRequests: number;
 }
 
-async function installMockApi(page: Page): Promise<MockApiMetrics> {
+async function installMockApi(page: Page, options: { candidateAnalysis?: boolean } = {}): Promise<MockApiMetrics> {
   const metrics: MockApiMetrics = {
     uploadRequests: 0,
     statusRequests: 0,
@@ -227,7 +250,7 @@ async function installMockApi(page: Page): Promise<MockApiMetrics> {
 
     if (request.method() === 'GET' && pathname === `/api/v1/transcriptions/${JOB_ID}`) {
       metrics.resultRequests += 1;
-      return json(route, resultPayload());
+      return json(route, resultPayload(options));
     }
 
     return json(route, { error: { code: 'NOT_MOCKED', message: `Unmocked e2e request: ${pathname}` } }, 404);
@@ -426,8 +449,9 @@ function historyPayload(status: 'completed' | 'failed' | 'interrupted') {
   };
 }
 
-function resultPayload() {
-  return {
+function resultPayload(options: { candidateAnalysis?: boolean } = {}) {
+  const timeline = practiceTimeline(options.candidateAnalysis);
+  const payload = {
     job_id: JOB_ID,
     status: 'completed',
     stage: 'completed',
@@ -454,6 +478,7 @@ function resultPayload() {
     preview: {
       musicxml_url: null,
     },
+    review_timeline: timeline,
     exports: [
       {
         type: 'midi',
@@ -525,6 +550,69 @@ function resultPayload() {
       },
       pipeline_log_available: true,
     },
+  };
+  if (options.candidateAnalysis) {
+    payload.pipeline.mode = 'true_ai';
+    payload.pipeline.candidate_analysis = {
+      schema_version: '1.0',
+      status: 'completed',
+      recommended_candidate_id: 'threshold_0_4',
+      candidates: [
+        candidatePayload('threshold_0_4', 1, 0.4, 'recommended_for_practice', 82, timeline, payload.pipeline.quality, payload.pipeline.validation),
+        candidatePayload('threshold_0_5', 2, 0.5, 'reference_with_caveats', 58, timeline, payload.pipeline.quality, payload.pipeline.validation),
+      ],
+    };
+  }
+  return payload;
+}
+
+function practiceTimeline(includeAccompaniment = false) {
+  return {
+    schema_version: '1.0',
+    timing_source: 'score_tempo',
+    tempo_bpm: 120,
+    audio_sources: [
+      { kind: 'original', label: '原始音訊', available: true, playback_url: `/api/v1/transcriptions/${JOB_ID}/review-audio/original` },
+      { kind: 'drums_stem', label: '分離鼓聲', available: true, playback_url: `/api/v1/transcriptions/${JOB_ID}/review-audio/drums_stem` },
+      ...(includeAccompaniment ? [{ kind: 'accompaniment', label: '去鼓後伴奏', available: true, playback_url: `/api/v1/transcriptions/${JOB_ID}/review-audio/accompaniment` }] : []),
+    ],
+    measures: [{ measure_index: 1, start_seconds: 0, end_seconds: 2, render_kind: 'groove', drum_counts: { kick: 1, snare: 1 }, warnings: [] }],
+    performance_playback: { available: true, event_count: 2, events: [{ time_seconds: 0, drum: 'kick', velocity: 100 }, { time_seconds: 0.5, drum: 'snare', velocity: 100 }] },
+  };
+}
+
+function candidatePayload(
+  candidateId: string,
+  rank: number,
+  threshold: number,
+  recommendation: 'recommended_for_practice' | 'reference_with_caveats',
+  score: number,
+  timeline: ReturnType<typeof practiceTimeline>,
+  quality: object,
+  validation: object,
+) {
+  return {
+    candidate_id: candidateId,
+    rank,
+    position: rank,
+    status: 'completed',
+    selected: rank === 1,
+    config: { threshold, adtof_threshold_preset: 'separated_v1', tom_filter_preset: 'tom_guard_v1' },
+    recommendation: {
+      score,
+      recommendation,
+      reasons: recommendation === 'recommended_for_practice' ? ['節奏與譜面結構相對穩定'] : ['可用於跟練，但部分細節可能不準'],
+      rejected: false,
+    },
+    preview: { musicxml_url: `/api/v1/transcriptions/${JOB_ID}/candidates/${candidateId}/download/musicxml` },
+    exports: [
+      { type: 'midi', status: 'available', download_url: `/api/v1/transcriptions/${JOB_ID}/candidates/${candidateId}/download/midi` },
+      { type: 'musicxml', status: 'available', download_url: `/api/v1/transcriptions/${JOB_ID}/candidates/${candidateId}/download/musicxml` },
+      { type: 'pdf', status: 'failed', download_url: null },
+    ],
+    quality,
+    validation,
+    review_timeline: timeline,
   };
 }
 

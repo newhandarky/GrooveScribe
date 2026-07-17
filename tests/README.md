@@ -143,6 +143,8 @@ manual eval CSV 可單獨驗證：
 
 true-AI 仍是 opt-in；不要放進一般 CI 必跑，也不要提交 `frontend/dist`、`storage/`、SQLite/DB、tmp 或 Playwright report artifacts。
 
+多候選推薦規則與 quality matrix 必須使用 fixture 或程式生成、具 paired ground-truth MIDI 的 benchmark 校準；真實使用者音檔不可作為測試 ground truth。候選 outputs、Demucs stems、benchmark audio/MIDI 與 calibration reports 都必須輸出到 repo 外。
+
 ## V1 True-AI Real Audio Pilot
 
 true-AI runtime setup focused tests：

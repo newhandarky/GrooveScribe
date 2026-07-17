@@ -68,6 +68,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional opt-in MIDI postprocess filter preset, e.g. tom_guard_v1",
     )
+    parser.add_argument(
+        "--candidate-thresholds",
+        default=None,
+        help="Optional comma-separated true-AI candidate thresholds, e.g. 0.3,0.4,0.5,0.6",
+    )
     return parser.parse_args()
 
 
@@ -128,6 +133,7 @@ def main() -> int:
         tempo_bpm=args.tempo_bpm,
         pdf_renderer=args.pdf_renderer,
         performance_gate_calibration=_load_json(args.performance_gate_calibration),
+        candidate_thresholds=_parse_thresholds(args.candidate_thresholds),
     )
     result = LocalPipelineRunner(config).run(args.input, args.output_dir)
     print(
@@ -158,6 +164,15 @@ def _load_json(path: Path | None) -> dict | None:
     except (OSError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _parse_thresholds(value: str | None) -> tuple[float, ...]:
+    if not value:
+        return ()
+    thresholds = tuple(float(item.strip()) for item in value.split(",") if item.strip())
+    if not thresholds or any(item <= 0 or item > 1 for item in thresholds):
+        raise SystemExit("--candidate-thresholds must contain values between 0 and 1")
+    return thresholds
 
 
 if __name__ == "__main__":

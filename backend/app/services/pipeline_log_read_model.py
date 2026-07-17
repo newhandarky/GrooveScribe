@@ -29,6 +29,7 @@ class PipelineLogReadModel:
     stage_reports: list[StageReportReadModel]
     quality: dict[str, Any] = field(default_factory=dict)
     validation: dict[str, Any] = field(default_factory=dict)
+    candidate_analysis: dict[str, Any] = field(default_factory=dict)
 
 
 class PipelineLogReadService:
@@ -58,6 +59,7 @@ def parse_pipeline_log_payload(payload: dict[str, Any]) -> PipelineLogReadModel:
         stage_reports=stage_reports,
         quality=_dict(payload.get("quality")),
         validation=_dict(payload.get("validation")),
+        candidate_analysis=_dict(payload.get("candidate_analysis")),
     )
 
 

@@ -8,6 +8,7 @@ class ArtifactType(StrEnum):
     ORIGINAL_AUDIO = "original_audio"
     NORMALIZED_AUDIO = "normalized_audio"
     DRUMS_STEM = "drums_stem"
+    ACCOMPANIMENT_STEM = "accompaniment_stem"
     RAW_MIDI = "raw_midi"
     PROCESSED_MIDI = "processed_midi"
     PERFORMANCE_MIDI = "performance_midi"
@@ -23,6 +24,7 @@ CONTENT_TYPE_BY_ARTIFACT_TYPE: dict[ArtifactType, str] = {
     ArtifactType.ORIGINAL_AUDIO: "application/octet-stream",
     ArtifactType.NORMALIZED_AUDIO: "audio/wav",
     ArtifactType.DRUMS_STEM: "audio/wav",
+    ArtifactType.ACCOMPANIMENT_STEM: "audio/wav",
     ArtifactType.RAW_MIDI: "audio/midi",
     ArtifactType.PROCESSED_MIDI: "audio/midi",
     ArtifactType.PERFORMANCE_MIDI: "audio/midi",

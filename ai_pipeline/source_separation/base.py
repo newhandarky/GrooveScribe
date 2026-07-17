@@ -28,6 +28,7 @@ class StemSet:
     drums_path: Path
     metadata: StemMetadata
     report: SourceSeparationReport
+    accompaniment_path: Path | None = None
 
 
 class SourceSeparator(Protocol):

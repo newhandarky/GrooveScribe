@@ -25,7 +25,6 @@ GENERATED_ARTIFACTS = (
 )
 STATUS_FORBIDDEN_SUBSTRINGS = (
     "frontend/dist",
-    "storage/",
     "backend/storage/",
     "worker/storage/",
     ".db",
@@ -36,6 +35,16 @@ STATUS_FORBIDDEN_SUBSTRINGS = (
     "test-results",
     "blob-report",
 )
+
+
+def _is_forbidden_status_entry(line: str) -> bool:
+    """Reject generated roots without mistaking backend/app/storage source for artifacts."""
+
+    entry = line[3:].strip().replace('"', "")
+    normalized = entry.replace("\\", "/").lower()
+    if normalized.startswith(("frontend/dist/", "storage/", "backend/storage/", "worker/storage/")):
+        return True
+    return any(token in normalized for token in STATUS_FORBIDDEN_SUBSTRINGS if token != "frontend/dist")
 
 
 @dataclass(frozen=True)
@@ -155,8 +164,7 @@ def check_artifact_hygiene() -> dict:
     offenders = [
         line
         for line in lines
-        if not line.startswith("## ")
-        and any(token in line for token in STATUS_FORBIDDEN_SUBSTRINGS)
+        if not line.startswith("## ") and _is_forbidden_status_entry(line)
     ]
     generated_present = [path.as_posix() for path in GENERATED_ARTIFACTS if (REPO_ROOT / path).exists()]
     return {
@@ -197,6 +205,7 @@ def _deterministic_steps(*, skip_browser: bool, skip_build: bool) -> list[GateCo
                 "tests/test_runtime_preflight_api.py",
                 "tests/test_transcription_apis.py",
                 "tests/test_local_job_recovery.py",
+                "tests/test_review_timeline_service.py",
             ],
             cwd=REPO_ROOT / "backend",
         ),
@@ -210,6 +219,8 @@ def _deterministic_steps(*, skip_browser: bool, skip_build: bool) -> list[GateCo
                 "tests/pipeline/test_manual_eval_row_generator.py",
                 "tests/pipeline/test_notation_generation.py",
                 "tests/pipeline/test_midi_inspection.py",
+                "tests/pipeline/test_candidate_recommendation.py",
+                "tests/pipeline/test_local_runner.py",
                 "tests/pipeline/test_release_gate_scripts.py",
                 "tests/pipeline/test_local_launch_scripts.py",
                 "tests/pipeline/test_review_packet_export.py",

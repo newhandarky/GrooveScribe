@@ -137,6 +137,25 @@ curl http://127.0.0.1:8000/api/v1/runtime/preflight
 
 API response 只應提供 redacted diagnostics，不暴露完整本機路徑、raw stderr 或 traceback。
 
+## 多候選轉譜與品質校準
+
+UI 的 True-AI V1 preset 預設依序比較 threshold `0.3`、`0.4`、`0.5`、`0.6`。Demucs 只執行一次；每組候選會各自執行 ADTOF、後處理、notation 與 MusicXML 驗證，因此 CPU 執行時間會比單次分析增加。
+
+推薦規則固定先拒絕未完成、MusicXML 不可讀、kick/snare 缺失及阻擋性品質旗標，再依分離鼓聲 onset 對齊、鼓件比例、每小節密度、譜面可讀性與 performance gate 排序。真實使用者音檔不是 ground truth，不會用來調整門檻。
+
+要以合法的配對音訊與 ground-truth MIDI 重跑校準，使用 repository 內的程式生成 benchmark；它會在 repo 外輸出 manifest、音訊與 MIDI：
+
+```bash
+PYTHONPATH=. .venv-ai/bin/python scripts/generate_realistic_performance_benchmark.py \
+  --output-dir /tmp/groovescribe-candidate-calibration \
+  --soundfont "$GROOVESCRIBE_BENCHMARK_SOUNDFONT"
+PYTHONPATH=. .venv-ai/bin/python scripts/run_performance_benchmark.py \
+  --manifest /tmp/groovescribe-candidate-calibration/realistic_performance_benchmark_manifest.json \
+  --output-dir /tmp/groovescribe-candidate-calibration/results
+```
+
+校準只能改變推薦分數與門檻；未通過結構驗證的候選不可被推薦。SoundFont、生成音訊、MIDI、stems 與報告均不進 git。
+
 ## Opt-in True AI Smoke
 
 只有在 preflight 顯示 `true_ai_ready=true` 後才執行：

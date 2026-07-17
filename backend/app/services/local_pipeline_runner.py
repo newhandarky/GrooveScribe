@@ -156,7 +156,9 @@ class LocalMockPipelineRunner:
             job.audio_file.normalized_storage_key = ref.storage_key
             return {ArtifactType.NORMALIZED_AUDIO: ref}
         if stage == PipelineStage.SOURCE_SEPARATION:
-            return {ArtifactType.DRUMS_STEM: self._put_text(job.id, ArtifactType.DRUMS_STEM, "mock drums stem\n")}
+            return {
+                ArtifactType.DRUMS_STEM: self._put_text(job.id, ArtifactType.DRUMS_STEM, "mock drums stem\n"),
+            }
         if stage == PipelineStage.DRUM_TRANSCRIPTION:
             events = {
                 "schema_version": "1.0",

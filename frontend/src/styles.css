@@ -140,6 +140,99 @@ input {
   text-align: right;
 }
 
+.candidateAnalysisPanel,
+.practicePlaybackPanel {
+  border: 1px solid #cfd8dd;
+  margin: 16px 0;
+  padding: 14px;
+}
+
+.candidateAnalysisPanel.recommended_for_practice {
+  background: #edf7f0;
+  border-color: #9bc9aa;
+}
+
+.candidateAnalysisPanel.reference_with_caveats {
+  background: #fff8df;
+  border-color: #dec064;
+}
+
+.candidateAnalysisPanel.reanalyze_recommended {
+  background: #fff0ed;
+  border-color: #d9988e;
+}
+
+.candidateButtons,
+.practiceModes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.candidateButton,
+.practiceModes button {
+  background: #fff;
+  border: 1px solid #c8d3d9;
+  border-radius: 6px;
+  color: #243841;
+  cursor: pointer;
+  min-width: 130px;
+  padding: 9px 11px;
+  text-align: left;
+}
+
+.candidateButton {
+  display: grid;
+  gap: 3px;
+}
+
+.candidateButton.selected,
+.practiceModes button.selected {
+  border-color: #235265;
+  box-shadow: inset 0 0 0 1px #235265;
+}
+
+.candidateButton:disabled,
+.practiceModes button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.candidateButton small,
+.candidateReasons,
+.candidateDiagnostics {
+  color: #62706e;
+}
+
+.candidateReasons {
+  margin: 10px 0;
+  padding-left: 20px;
+}
+
+.candidateDiagnostics {
+  border-top: 1px solid #cfd8dd;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.candidateDiagnostics p {
+  margin: 8px 0 0;
+}
+
+.practicePlaybackPanel {
+  background: #f7fafb;
+}
+
+.practiceModes button {
+  font-weight: 700;
+  text-align: center;
+}
+
+.practiceControls {
+  align-items: end;
+}
+
 .leftPane {
   display: grid;
   gap: 18px;

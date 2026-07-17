@@ -3,12 +3,17 @@ import { describe, expect, it } from 'vitest';
 
 import {
   App,
+  cleanupFailedChartStart,
+  elapsedPlaybackSeconds,
   drumPreviewIntensity,
   JobHistoryPanel,
+  isCurrentPlaybackSession,
   JobStatusCard,
   LocalDataPanel,
   measureIndexForPlaybackTime,
   PerformancePlaybackPanel,
+  preferredPracticeMode,
+  PracticePlaybackPanel,
   ResultCard,
   RuntimePanel,
   ScorePreviewSection,
@@ -264,6 +269,48 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
   };
 }
 
+function candidateResultFixture(): TranscriptionResultResponse {
+  const base = resultFixture();
+  const candidateTimeline = {
+    ...base.review_timeline!,
+    audio_sources: [
+      ...base.review_timeline!.audio_sources,
+      { kind: 'accompaniment', label: '去鼓後伴奏', available: true, playback_url: '/api/v1/transcriptions/job-1/review-audio/accompaniment' },
+    ],
+  };
+  return resultFixture({
+    pipeline: {
+      ...base.pipeline!,
+      mode: 'true_ai',
+      candidate_analysis: {
+        schema_version: '1.0',
+        status: 'completed',
+        recommended_candidate_id: 'threshold_0_4',
+        candidates: [
+          {
+            candidate_id: 'threshold_0_4',
+            rank: 1,
+            position: 2,
+            status: 'completed',
+            selected: true,
+            config: { threshold: 0.4, adtof_threshold_preset: 'separated_v1', tom_filter_preset: 'tom_guard_v1' },
+            recommendation: { score: 82, recommendation: 'recommended_for_practice', reasons: ['節奏與譜面結構相對穩定'], rejected: false },
+            preview: { musicxml_url: '/api/v1/transcriptions/job-1/candidates/threshold_0_4/download/musicxml' },
+            exports: [
+              { type: 'midi', status: 'available', download_url: '/api/v1/transcriptions/job-1/candidates/threshold_0_4/download/midi' },
+              { type: 'musicxml', status: 'available', download_url: '/api/v1/transcriptions/job-1/candidates/threshold_0_4/download/musicxml' },
+              { type: 'pdf', status: 'failed', download_url: null },
+            ],
+            quality: base.pipeline!.quality!,
+            validation: base.pipeline!.validation!,
+            review_timeline: candidateTimeline,
+          },
+        ],
+      },
+    },
+  });
+}
+
 function jobSummaryFixture(overrides: Partial<TranscriptionJobSummary> = {}): TranscriptionJobSummary {
   return {
     job_id: 'job-1',
@@ -500,6 +547,139 @@ describe('local app smoke rendering', () => {
     expectPublicSafe(html);
   });
 
+  it('renders the beginner candidate recommendation and synchronized practice modes', () => {
+    const result = candidateResultFixture();
+    const html = renderToStaticMarkup(<ResultCard result={result} selectedCandidateId="threshold_0_4" />);
+    const playbackHtml = renderToStaticMarkup(<PracticePlaybackPanel timeline={result.pipeline!.candidate_analysis!.candidates[0].review_timeline} />);
+
+    expect(html).toContain('推薦用於練習');
+    expect(html).toContain('版本 1');
+    expect(html).toContain('技術診斷');
+    expect(html).toContain('/candidates/threshold_0_4/download/midi');
+    expect(playbackHtml).toContain('原曲');
+    expect(playbackHtml).toContain('鼓譜單獨');
+    expect(playbackHtml).toContain('伴奏加鼓譜');
+    expect(playbackHtml).toContain('播放位置');
+    expectPublicSafe(html);
+    expectPublicSafe(playbackHtml);
+  });
+
+  it('keeps a hard-rejected canonical candidate inspectable without presenting it as recommended', () => {
+    const result = candidateResultFixture();
+    const analysis = result.pipeline!.candidate_analysis!;
+    analysis.recommended_candidate_id = null;
+    analysis.canonical_candidate_id = 'threshold_0_4';
+    analysis.candidates[0].selected = true;
+    analysis.candidates[0].recommendation = {
+      score: 0,
+      recommendation: 'reanalyze_recommended',
+      reasons: ['自動檢查未達適合練習的門檻'],
+      rejected: true,
+    };
+    analysis.candidates[0].validation = {
+      musicxml: { available: true, parseable: true, error_code: null, warnings: ['candidate_preview_only'] },
+      pdf: { available: false, optional: true, openable: null, error_code: 'pdf_unavailable', warnings: [] },
+    };
+
+    const html = renderToStaticMarkup(<ResultCard result={result} selectedCandidateId={null} />);
+    const previewHtml = renderToStaticMarkup(<ScorePreviewSection result={result} selectedCandidateId={null} />);
+
+    expect(html).toContain('不建議使用，建議重新分析');
+    expect(html).toContain('/candidates/threshold_0_4/download/midi');
+    expect(html).not.toContain('推薦用於練習');
+    expect(previewHtml).toContain('候選 1 · 不建議使用，建議重新分析');
+    expect(previewHtml).toContain('candidate_preview_only');
+  });
+
+  it('keeps practice playback useful when an accompaniment stem is unavailable', () => {
+    const html = renderToStaticMarkup(
+      <PracticePlaybackPanel
+        timeline={{
+          ...resultFixture().review_timeline!,
+          audio_sources: [{ kind: 'original', label: '原始音訊', available: true, playback_url: '/api/v1/transcriptions/job-1/review-audio/original' }],
+        }}
+      />,
+    );
+
+    expect(html).toContain('伴奏 stem 未取得');
+    expect(html).toContain('原曲');
+    expect(html).toContain('鼓譜單獨');
+    expectPublicSafe(html);
+  });
+
+  it('defaults legacy audio-only results to the original track instead of silent chart playback', () => {
+    const timeline = {
+      ...resultFixture().review_timeline!,
+      performance_playback: { available: false, event_count: 0, events: [] },
+      audio_sources: [{ kind: 'original', label: '原始音訊', available: true, playback_url: '/api/v1/transcriptions/job-1/review-audio/original' }],
+    };
+    const html = renderToStaticMarkup(<PracticePlaybackPanel timeline={timeline} />);
+
+    expect(preferredPracticeMode(false, true)).toBe('original');
+    expect(preferredPracticeMode(true, true)).toBe('chart');
+    expect(html).toContain('class="selected">原曲');
+    expect(html).toContain('播放');
+  });
+
+  it('keeps an expired playback session from cleaning up the active session', () => {
+    expect(isCurrentPlaybackSession(4, 4)).toBe(true);
+    expect(isCurrentPlaybackSession(5, 4)).toBe(false);
+  });
+
+  it('does not let a delayed old audio-context failure clean up a newer playback session', async () => {
+    let rejectOldResume: ((reason?: unknown) => void) | undefined;
+    const oldResume = new Promise<void>((_resolve, reject) => { rejectOldResume = reject; });
+    let activeSession = 1;
+    let oldCloseCount = 0;
+    let newCloseCount = 0;
+    let clearCount = 0;
+    let pauseCount = 0;
+    let releaseCount = 0;
+    const oldContext = { close: async () => { oldCloseCount += 1; } } as Pick<AudioContext, 'close'>;
+    const newContext = { close: async () => { newCloseCount += 1; } } as Pick<AudioContext, 'close'>;
+
+    const oldFailure = oldResume.catch(() => cleanupFailedChartStart({
+      activeSession,
+      failedSession: 1,
+      failedContext: oldContext,
+      activeContext: newContext,
+      clearScheduled: () => { clearCount += 1; },
+      releaseActiveContext: () => { releaseCount += 1; },
+      pauseAudio: () => { pauseCount += 1; },
+    }));
+    activeSession = 2;
+    rejectOldResume?.(new Error('resume rejected'));
+
+    await expect(oldFailure).resolves.toBe(false);
+    expect(oldCloseCount).toBe(1);
+    expect(newCloseCount).toBe(0);
+    expect(clearCount).toBe(0);
+    expect(pauseCount).toBe(0);
+    expect(releaseCount).toBe(0);
+  });
+
+  it('cleans up audio and scheduling when the current chart session cannot start', () => {
+    let closeCount = 0;
+    let clearCount = 0;
+    let pauseCount = 0;
+    let releaseCount = 0;
+    const context = { close: async () => { closeCount += 1; } } as Pick<AudioContext, 'close'>;
+
+    expect(cleanupFailedChartStart({
+      activeSession: 3,
+      failedSession: 3,
+      failedContext: context,
+      activeContext: context,
+      clearScheduled: () => { clearCount += 1; },
+      releaseActiveContext: () => { releaseCount += 1; },
+      pauseAudio: () => { pauseCount += 1; },
+    })).toBe(true);
+    expect(closeCount).toBe(1);
+    expect(clearCount).toBe(1);
+    expect(pauseCount).toBe(1);
+    expect(releaseCount).toBe(1);
+  });
+
   it('keeps browser playback mute and measure helpers predictable', () => {
     const measures = resultFixture().review_timeline!.measures;
 
@@ -509,6 +689,8 @@ describe('local app smoke rendering', () => {
     expect(measureIndexForPlaybackTime(measures, 0.5)).toBe(1);
     expect(measureIndexForPlaybackTime(measures, 2.5)).toBe(2);
     expect(measureIndexForPlaybackTime([], 2.5)).toBeNull();
+    expect(elapsedPlaybackSeconds(12_000, 12_750)).toBe(0.75);
+    expect(elapsedPlaybackSeconds(12_000, 11_000)).toBe(0);
   });
 
   it('renders score preview in a full-width section with validation fallback', () => {

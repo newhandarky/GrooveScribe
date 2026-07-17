@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -174,6 +175,89 @@ class PipelineValidationSummary(BaseModel):
     visual_qa: PipelineVisualQaSummary | None = None
 
 
+class ReviewAudioSource(BaseModel):
+    kind: str
+    label: str
+    available: bool
+    playback_url: str | None = None
+
+
+class ReviewTimelineMeasure(BaseModel):
+    measure_index: int
+    start_seconds: float | None = None
+    end_seconds: float | None = None
+    render_kind: str
+    drum_counts: dict[str, int] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class PerformancePlaybackEvent(BaseModel):
+    time_seconds: float
+    drum: str
+    velocity: int
+
+
+class PerformancePlaybackSummary(BaseModel):
+    available: bool = False
+    event_count: int = 0
+    events: list[PerformancePlaybackEvent] = Field(default_factory=list)
+
+
+class ReviewTimelineSummary(BaseModel):
+    schema_version: str = "1.0"
+    timing_source: str = "unavailable"
+    tempo_bpm: float | None = None
+    audio_sources: list[ReviewAudioSource] = Field(default_factory=list)
+    measures: list[ReviewTimelineMeasure] = Field(default_factory=list)
+    performance_playback: PerformancePlaybackSummary | None = None
+
+
+class CandidateExportResult(BaseModel):
+    type: Literal["midi", "musicxml", "pdf"]
+    status: str
+    download_url: str | None = None
+
+
+class CandidateConfigSummary(BaseModel):
+    threshold: float | None = None
+    adtof_threshold_preset: str | None = None
+    tom_filter_preset: str | None = None
+
+
+class CandidateRecommendationSummary(BaseModel):
+    score: int | None = None
+    recommendation: Literal["recommended_for_practice", "reference_with_caveats", "reanalyze_recommended"]
+    reasons: list[str] = Field(default_factory=list)
+    rejected: bool = False
+
+
+class CandidatePreviewResult(BaseModel):
+    musicxml_url: str | None = None
+
+
+class PipelineCandidateResult(BaseModel):
+    candidate_id: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
+    rank: int | None = None
+    position: int | None = None
+    status: str
+    selected: bool = False
+    config: CandidateConfigSummary = Field(default_factory=CandidateConfigSummary)
+    recommendation: CandidateRecommendationSummary
+    preview: CandidatePreviewResult = Field(default_factory=CandidatePreviewResult)
+    exports: list[CandidateExportResult] = Field(default_factory=list)
+    quality: PipelineQualitySummary | None = None
+    validation: PipelineValidationSummary | None = None
+    review_timeline: ReviewTimelineSummary = Field(default_factory=ReviewTimelineSummary)
+
+
+class PipelineCandidateAnalysis(BaseModel):
+    schema_version: str = "1.0"
+    status: str = "unknown"
+    recommended_candidate_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]+$")
+    canonical_candidate_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]+$")
+    candidates: list[PipelineCandidateResult] = Field(default_factory=list)
+
+
 class PipelineSummaryResult(BaseModel):
     mode: str
     status: str | None = None
@@ -184,6 +268,7 @@ class PipelineSummaryResult(BaseModel):
     quality: PipelineQualitySummary | None = None
     validation: PipelineValidationSummary | None = None
     pipeline_log_available: bool = False
+    candidate_analysis: PipelineCandidateAnalysis | None = None
 
 
 class TranscriptionResultResponse(BaseModel):
@@ -199,7 +284,7 @@ class TranscriptionResultResponse(BaseModel):
     preview: PreviewResult
     exports: list[ExportFileResult]
     pipeline: PipelineSummaryResult | None = None
-    review_timeline: dict = Field(default_factory=dict)
+    review_timeline: ReviewTimelineSummary = Field(default_factory=ReviewTimelineSummary)
     source_result_summary: dict | None = None
 
 
