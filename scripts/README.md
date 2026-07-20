@@ -2,6 +2,10 @@
 
 本目錄保留本地開發與 pipeline POC scripts。
 
+## 品質驗證政策
+
+GrooveScribe 的產品品質 gate 採 automation-only：repo 內 generated fixtures 用於快速 regression，repo 外授權音檔與 ground-truth MIDI manifest 用於 True-AI benchmark。人工評分、人工校準與 manual-eval CSV 僅保留為 legacy diagnostics，不可用來通過或放寬產品品質 gate。
+
 ## 已建立
 
 - `run_local_pipeline.py`：串接本地 POC pipeline；支援 dry-run 與 `--mock-ai` smoke test。
@@ -132,6 +136,22 @@ PYTHONPATH=. "$PYTHON" scripts/run_true_ai_quality_matrix.py \
 ```bash
 export GROOVESCRIBE_AUTHORIZED_REAL_DRUM_FIXTURE="/path/to/authorized_real_drum.wav"
 ```
+
+## 自動化 ground-truth benchmark
+
+使用 repo 外、已授權的音檔與對應 MIDI ground truth manifest，可全自動比較每個 `0.3 / 0.4 / 0.5 / 0.6` 候選。每個項目只執行一次前處理與 Demucs；報告會輸出候選的整體／各鼓件 F1、時序誤差、core-groove 對齊、譜面 performance gate 與推薦是否未劣於 ground-truth 最佳候選。
+
+```bash
+PYTHONPATH=. "$PYTHON" scripts/run_performance_benchmark.py \
+  --manifest /path/outside-repo/performance_manifest.json \
+  --output-dir /tmp/groovescribe-performance-benchmark \
+  --candidate-thresholds 0.3,0.4,0.5,0.6 \
+  --demucs-device cpu \
+  --adtof-command-template "$GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE" \
+  --adtof-device cpu
+```
+
+未設定 manifest 時，工具會明確回報 `skipped`，不影響一般 CI。設定 manifest 後，缺少可量測 ground truth、未通過參考 acceptance，或推薦候選的品質劣於同組最佳候選時，工具會以非零結束碼失敗。音檔、MIDI、manifest 與 reports 必須留在 repo 外；JSON/CSV 僅輸出固定白名單欄位，不含本機路徑或 raw command。
 
 真實音檔 pilot 會同時產出 V1 eval 與 threshold matrix 摘要：
 

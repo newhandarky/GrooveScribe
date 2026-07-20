@@ -9,6 +9,11 @@ from ai_pipeline.local_runner import LocalPipelineConfig, LocalPipelineRunner
 from ai_pipeline.runner import build_pipeline_plan
 from ai_pipeline.transcription.adtof import resolve_class_thresholds
 
+try:
+    from scripts.true_ai_runtime_defaults import default_adtof_command_template
+except ModuleNotFoundError:  # pragma: no cover - direct script execution
+    from true_ai_runtime_defaults import default_adtof_command_template
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the GrooveScribe local pipeline POC")
@@ -38,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--demucs-timeout-seconds", type=int, default=1_800)
     parser.add_argument(
         "--adtof-command-template",
-        default=os.environ.get("GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE"),
+        default=os.environ.get("GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE") or default_adtof_command_template(),
     )
     parser.add_argument(
         "--adtof-checkpoint",
@@ -46,6 +51,7 @@ def parse_args() -> argparse.Namespace:
         default=_optional_path(os.environ.get("GROOVESCRIBE_ADTOF_CHECKPOINT")),
     )
     parser.add_argument("--adtof-device", default=os.environ.get("GROOVESCRIBE_ADTOF_DEVICE", "cpu"))
+    parser.add_argument("--transcription-backend", choices=("adtof", "spectral_onset_v1"), default="adtof")
     parser.add_argument(
         "--adtof-threshold",
         type=float,
@@ -122,6 +128,7 @@ def main() -> int:
         adtof_command_template=args.adtof_command_template,
         adtof_checkpoint_path=args.adtof_checkpoint,
         adtof_device=args.adtof_device,
+        transcription_backend=args.transcription_backend,
         adtof_threshold=args.adtof_threshold,
         adtof_class_thresholds=resolve_class_thresholds(
             args.adtof_class_thresholds,

@@ -19,6 +19,7 @@ def compare_drum_midi(
     ground_truth_path: Path,
     *,
     timing_offset_ticks: int = 0,
+    round_digits: int | None = 4,
 ) -> dict[str, Any]:
     """Compare normalized drum onsets on a shared 480-PPQ timing grid.
 
@@ -48,10 +49,10 @@ def compare_drum_midi(
             "tp": tp,
             "fp": fp,
             "fn": fn,
-            "precision": round(precision, 4),
-            "recall": round(recall, 4),
-            "f1": round(f1, 4),
-            "mean_timing_error_ticks": round(sum(errors) / len(errors), 3) if errors else None,
+            "precision": _rounded(precision, round_digits),
+            "recall": _rounded(recall, round_digits),
+            "f1": _rounded(f1, round_digits),
+            "mean_timing_error_ticks": _rounded(sum(errors) / len(errors), 3 if round_digits is not None else None) if errors else None,
         }
         all_errors.extend(errors)
     scored_drums = [
@@ -72,12 +73,16 @@ def compare_drum_midi(
         },
         "timing_offset_ticks": timing_offset_ticks,
         "per_drum": per_drum,
-        "f1": round(macro_f1, 4),
+        "f1": _rounded(macro_f1, round_digits),
         "scored_drum_classes": scored_drums,
         "excluded_empty_drum_classes": [drum for drum in DRUMS if drum not in scored_drums],
-        "mean_timing_error_ticks": round(sum(all_errors) / len(all_errors), 3) if all_errors else None,
+        "mean_timing_error_ticks": _rounded(sum(all_errors) / len(all_errors), 3 if round_digits is not None else None) if all_errors else None,
         "confusion_matrix": _confusion_matrix(predicted, expected),
     }
+
+
+def _rounded(value: float, digits: int | None) -> float:
+    return value if digits is None else round(value, digits)
 
 
 def audit_drum_midi_contract(predicted_path: Path, ground_truth_path: Path) -> dict[str, Any]:

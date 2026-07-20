@@ -11,7 +11,12 @@ from app.core.errors import ApiErrorException, ErrorCode
 from app.models import ExportFile, TranscriptionJob
 from app.models.enums import ExportFileStatus, ExportFileType, JobStatus
 from app.storage.base import StorageAdapter
-from app.storage.errors import ArtifactNotFoundError, PathTraversalRejectedError
+from app.storage.errors import (
+    ArtifactInvalidError,
+    ArtifactNotFoundError,
+    PathTraversalRejectedError,
+    StorageReadFailedError,
+)
 from app.storage.keys import build_candidate_artifact_key, build_job_artifact_key, sanitize_filename
 from app.storage.types import ArtifactType, CONTENT_TYPE_BY_ARTIFACT_TYPE
 
@@ -60,7 +65,7 @@ class DownloadService:
 
         try:
             reader = self.storage.open_reader(export_file.storage_key)
-        except ArtifactNotFoundError as exc:
+        except _UNAVAILABLE_ARTIFACT_ERRORS as exc:
             raise ApiErrorException(
                 ErrorCode.EXPORT_NOT_FOUND,
                 details={"job_id": job_id, "type": normalized_type.value},
@@ -98,7 +103,7 @@ class DownloadService:
             raise ApiErrorException(ErrorCode.EXPORT_NOT_FOUND, details={"job_id": job_id, "type": audio_kind})
         try:
             reader = self.storage.open_reader(storage_key)
-        except ArtifactNotFoundError as exc:
+        except _UNAVAILABLE_ARTIFACT_ERRORS as exc:
             raise ApiErrorException(ErrorCode.EXPORT_NOT_FOUND, details={"job_id": job_id, "type": audio_kind}) from exc
         return DownloadArtifact(reader=reader, content_type=content_type, filename=filename)
 
@@ -121,7 +126,7 @@ class DownloadService:
         try:
             storage_key = build_candidate_artifact_key(job_id, candidate_id, artifact_type)
             reader = self.storage.open_reader(storage_key)
-        except (ArtifactNotFoundError, PathTraversalRejectedError, ValueError) as exc:
+        except (*_UNAVAILABLE_ARTIFACT_ERRORS, ValueError) as exc:
             raise ApiErrorException(ErrorCode.EXPORT_NOT_FOUND, details={"job_id": job_id, "type": normalized_type.value}) from exc
         return DownloadArtifact(
             reader=reader,
@@ -133,7 +138,7 @@ class DownloadService:
         try:
             with self.storage.open_reader(build_job_artifact_key(job_id, ArtifactType.PIPELINE_LOG)) as reader:
                 payload = json.loads(reader.read().decode("utf-8"))
-        except (ArtifactNotFoundError, UnicodeDecodeError, json.JSONDecodeError, OSError):
+        except (*_UNAVAILABLE_ARTIFACT_ERRORS, UnicodeDecodeError, json.JSONDecodeError, OSError):
             return False
         analysis = payload.get("candidate_analysis") if isinstance(payload, dict) else None
         candidates = analysis.get("candidates") if isinstance(analysis, dict) else None
@@ -167,3 +172,11 @@ def _download_filename(export_file: ExportFile) -> str:
     if export_file.type == ExportFileType.MUSICXML and stored_name == "performance_score.musicxml":
         return stored_name
     return _FILENAME_BY_EXPORT_TYPE[export_file.type]
+
+
+_UNAVAILABLE_ARTIFACT_ERRORS = (
+    ArtifactInvalidError,
+    ArtifactNotFoundError,
+    PathTraversalRejectedError,
+    StorageReadFailedError,
+)

@@ -51,3 +51,7 @@ backend/storage/
 # Generated pipeline outputs
 outputs/
 work/
+
+# Local-only ground-truth benchmark manifests and reports
+benchmarks/performance/*.local.json
+benchmarks/performance/*.local.csv

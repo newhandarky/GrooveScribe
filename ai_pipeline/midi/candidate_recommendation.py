@@ -8,6 +8,7 @@ _BLOCKING_FLAGS = {
     "mostly_tom_output",
     "no_snare_detected",
 }
+_PROFILE = "practice_coverage_v2"
 
 
 def evaluate_candidate_recommendation(
@@ -42,8 +43,14 @@ def evaluate_candidate_recommendation(
         score += round(min(1.0, alignment) * 25)
         reasons.append("鼓點與分離鼓聲的對齊較佳" if alignment >= 0.7 else "鼓點對齊仍需保留參考")
     hihat = sum(_positive(counts.get(name)) for name in ("closed_hat", "open_hat", "pedal_hat"))
-    if hihat:
+    notation = _dict(quality.get("notation_readability"))
+    measure_count = max(1, _positive(notation.get("measure_count")))
+    minimum_hihat_events = max(2, measure_count * 4)
+    if hihat >= minimum_hihat_events:
         score += 12
+    elif hihat:
+        score -= 10
+        reasons.insert(0, "hi-hat 節奏覆蓋偏少")
     else:
         score -= 12
         reasons.append("hi-hat 細節可能不完整")
@@ -55,11 +62,12 @@ def evaluate_candidate_recommendation(
         score -= 10
         reasons.append("tom 事件比例偏高")
     verdict = str(gate.get("verdict") or "")
-    if verdict in {"performance_ready", "playable_but_low_confidence"}:
+    if verdict == "performance_ready":
         score += 15
+    elif verdict == "playable_but_low_confidence":
+        score += 4
     elif verdict:
-        score -= 8
-    notation = _dict(quality.get("notation_readability"))
+        score -= 4
     if _positive(notation.get("dense_measure_count")) == 0:
         score += 8
     score -= min(15, len(flags) * 4)
@@ -77,6 +85,7 @@ def evaluate_candidate_recommendation(
 def _result(score: int, recommendation: str, reasons: list[str], *, rejected: bool) -> dict[str, Any]:
     return {
         "schema_version": "1.0",
+        "profile": _PROFILE,
         "score": score,
         "recommendation": recommendation,
         "reasons": reasons,

@@ -137,13 +137,13 @@ curl http://127.0.0.1:8000/api/v1/runtime/preflight
 
 API response 只應提供 redacted diagnostics，不暴露完整本機路徑、raw stderr 或 traceback。
 
-## 多候選轉譜與品質校準
+## 多候選轉譜與自動化品質驗證
 
 UI 的 True-AI V1 preset 預設依序比較 threshold `0.3`、`0.4`、`0.5`、`0.6`。Demucs 只執行一次；每組候選會各自執行 ADTOF、後處理、notation 與 MusicXML 驗證，因此 CPU 執行時間會比單次分析增加。
 
 推薦規則固定先拒絕未完成、MusicXML 不可讀、kick/snare 缺失及阻擋性品質旗標，再依分離鼓聲 onset 對齊、鼓件比例、每小節密度、譜面可讀性與 performance gate 排序。真實使用者音檔不是 ground truth，不會用來調整門檻。
 
-要以合法的配對音訊與 ground-truth MIDI 重跑校準，使用 repository 內的程式生成 benchmark；它會在 repo 外輸出 manifest、音訊與 MIDI：
+要以合法的配對音訊與 ground-truth MIDI 驗證候選推薦，使用 repository 內的工具在 repo 外建立或指定 private manifest。每個 item 會共用 preprocessing 與 Demucs，再比較 `0.3,0.4,0.5,0.6` 候選的 overall/per-drum F1、timing、core groove、MusicXML、可讀性與 performance gate：
 
 ```bash
 PYTHONPATH=. .venv-ai/bin/python scripts/generate_realistic_performance_benchmark.py \
@@ -151,10 +151,11 @@ PYTHONPATH=. .venv-ai/bin/python scripts/generate_realistic_performance_benchmar
   --soundfont "$GROOVESCRIBE_BENCHMARK_SOUNDFONT"
 PYTHONPATH=. .venv-ai/bin/python scripts/run_performance_benchmark.py \
   --manifest /tmp/groovescribe-candidate-calibration/realistic_performance_benchmark_manifest.json \
-  --output-dir /tmp/groovescribe-candidate-calibration/results
+  --output-dir /tmp/groovescribe-candidate-calibration/results \
+  --candidate-thresholds 0.3,0.4,0.5,0.6
 ```
 
-校準只能改變推薦分數與門檻；未通過結構驗證的候選不可被推薦。SoundFont、生成音訊、MIDI、stems 與報告均不進 git。
+品質 profile 為版本化且決定性的規則；未通過結構驗證的候選不可被推薦。設定 manifest 後，缺少 artifact、checksum/provenance 失敗、reference acceptance 未通過或推薦劣於同組最佳候選都會以非零結束。未設定 manifest 時只會回報 `skipped`，不影響一般 CI。private manifest、SoundFont、音訊、MIDI、stems 與報告均必須留在 repo 外，也不進 git。
 
 ## Opt-in True AI Smoke
 
@@ -218,7 +219,7 @@ pilot 預設會：
 - 用 `separated_v1` + `tom_guard_v1` 跑 V1 true-AI eval。
 - 跑 threshold matrix：`0.3`、`0.4`、`0.5`、`0.6`。
 - 輸出 `pilot_report.json`、`pilot_handoff.md`、`v1_eval/v1_eval_report.json`、`quality_matrix/matrix_report.json`。
-- 產出 manual eval seed；人工分數仍由 reviewer 填。
+- legacy manual-eval seed 可供診斷；它不參與 automation-only 品質驗收，也不能用來調整或放寬候選規則。
 
 如果 report 顯示 `completed_with_blockers`，代表 pipeline 有完成 artifacts，但還不能交付。請看 `primary_blocker`，常見情況：
 
