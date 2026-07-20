@@ -431,6 +431,65 @@ def test_alternative_candidate_rejects_core_false_positive_or_gate_regression(tm
     }
 
     assert script._is_integration_candidate([{"status": "completed"}], comparison) is False
+    evaluation = script._integration_evaluation([{"status": "completed"}], comparison)
+    assert evaluation == {
+        "status": "rejected",
+        "reason_codes": [
+            "drum_only_core_false_positive_regression",
+            "full_mix_core_false_positive_regression",
+        ],
+    }
+
+
+def test_alternative_candidate_reports_missing_full_mix_metrics() -> None:
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("alternative_evaluation", root / "scripts" / "run_alternative_drum_backend_spike.py")
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+
+    evaluation = script._integration_evaluation([{"status": "completed"}], {"drum_only": {"chart_f1_delta": 0.1, "per_drum": {}, "core_groove_f1": {}, "core_fp_total": {}, "gate_verdicts": {}}})
+
+    assert evaluation["status"] == "rejected"
+    assert "full_mix_metrics_missing" in evaluation["reason_codes"]
+
+
+def test_alternative_gate_regression_is_scoped_to_its_input_type() -> None:
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("alternative_gate_scope", root / "scripts" / "run_alternative_drum_backend_spike.py")
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    passing = {
+        "chart_f1_delta": 0.1,
+        "per_drum": {drum: {"delta": 0.1} for drum in ("kick", "snare", "closed_hat")},
+        "core_groove_f1": {"alternative": 0.8, "adtof": 0.7},
+        "core_fp_total": {"alternative": 1, "adtof": 1},
+        "gate_verdicts": {"alternative": {}, "adtof": {}},
+    }
+    runs = [
+        {"status": "completed", "input_type": "drum_only", "performance_gate": {"verdict": "performance_ready"}, "adtof_performance_gate": {"verdict": "performance_ready"}},
+        {"status": "completed", "input_type": "full_mix", "performance_gate": {"verdict": "not_ready"}, "adtof_performance_gate": {"verdict": "performance_ready"}},
+    ]
+
+    evaluation = script._integration_evaluation(runs, {"drum_only": passing, "full_mix": passing})
+
+    assert evaluation["reason_codes"] == ["full_mix_performance_gate_regression"]
+
+
+def test_alternative_spike_public_report_strips_unsafe_metrics_and_diagnostics() -> None:
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("alternative_public_report", root / "scripts" / "run_alternative_drum_backend_spike.py")
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+
+    report = script._public_report({"status": "completed", "backend": "spectral_onset_spike", "runs": [{"id": "x", "status": "completed", "input_type": "drum_only", "raw_metrics": {"status": "measured", "f1": 0.5, "stdout": "/tmp/private"}, "performance_gate": {"verdict": "not_ready", "command": "secret"}}], "comparison_to_adtof": {}, "integration_evaluation": {"status": "rejected", "reason_codes": ["stdout_private"]}})
+
+    serialized = json.dumps(report)
+    assert "/tmp/" not in serialized
+    assert "stdout" not in serialized
+    assert "command" not in serialized
 
 
 def test_comparison_exposes_raw_processed_and_chart_stage_metrics() -> None:
@@ -460,6 +519,34 @@ def test_comparison_exposes_raw_processed_and_chart_stage_metrics() -> None:
     assert comparison["drum_only"]["stages"]["processed"]["per_drum"]["snare"]["delta"] == 0.0
 
 
+def test_alternative_backend_uses_canonical_candidate_artifacts(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("alternative_canonical", root / "scripts" / "run_alternative_drum_backend_spike.py")
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+
+    source, quality = script._canonical_adtof_source(
+        tmp_path,
+        {
+            "quality": {"performance_gate": {"verdict": "not_ready"}},
+            "candidate_analysis": {
+                "canonical_candidate_id": "threshold_0_3",
+                "candidates": [
+                    {
+                        "candidate_id": "threshold_0_3",
+                        "status": "completed",
+                        "quality": {"performance_gate": {"verdict": "playable_but_low_confidence"}},
+                    }
+                ],
+            },
+        },
+    )
+
+    assert source == tmp_path / "candidates" / "threshold_0_3"
+    assert quality == {"performance_gate": {"verdict": "playable_but_low_confidence"}}
+
+
 def test_error_breakdown_skips_unverified_provenance(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[2]
     spec = importlib.util.spec_from_file_location("breakdown", root / "scripts" / "run_performance_error_breakdown.py")
@@ -474,3 +561,27 @@ def test_error_breakdown_skips_unverified_provenance(tmp_path: Path) -> None:
 
     assert result["status"] == "skipped"
     assert result["reason"] == "benchmark_provenance_invalid"
+
+
+def test_error_breakdown_uses_canonical_candidate_artifacts(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("breakdown_canonical", root / "scripts" / "run_performance_error_breakdown.py")
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    run = tmp_path / "run"
+    pipeline = run / "logs" / "pipeline.json"
+    pipeline.parent.mkdir(parents=True)
+    pipeline.write_text(
+        json.dumps(
+            {
+                "candidate_analysis": {
+                    "canonical_candidate_id": "threshold_0_3",
+                    "candidates": [{"candidate_id": "threshold_0_3", "status": "completed"}],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert script._canonical_candidate_root(run) == run / "candidates" / "threshold_0_3"

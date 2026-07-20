@@ -93,8 +93,22 @@ test('candidate practice workspace defaults to a recommendation and exposes safe
     'href',
     /\/api\/v1\/transcriptions\/job-browser-smoke\/candidates\/threshold_0_4\/download\/midi$/,
   );
+  const practice = page.locator('.practicePlaybackPanel');
+  await practice.getByRole('button', { name: '原曲' }).click();
+  await expect(practice.getByRole('button', { name: '原曲' })).toHaveClass(/selected/);
+  await practice.getByRole('button', { name: '伴奏加鼓譜' }).click();
+  await expect(practice.getByRole('button', { name: '伴奏加鼓譜' })).toHaveClass(/selected/);
+  await practice.getByRole('button', { name: '鼓譜單獨' }).click();
+  await expect(practice.getByRole('button', { name: '鼓譜單獨' })).toHaveClass(/selected/);
+  await practice.locator('audio').evaluate((audio) => audio.dispatchEvent(new Event('error')));
+  await expect(practice.getByText('音訊載入失敗；請改用其他播放模式或下載 MIDI。')).toBeVisible();
+  await expect(practice.getByText('待播放')).toBeVisible();
   await page.getByRole('button', { name: /版本 2/ }).click();
   await expect(page.getByText('可作為參考，細節可能不準').first()).toBeVisible();
+  await expect(page.getByRole('link', { name: /MIDI.*此候選版本/i })).toHaveAttribute(
+    'href',
+    /\/api\/v1\/transcriptions\/job-browser-smoke\/candidates\/threshold_0_5\/download\/midi$/,
+  );
   await expectPublicSafe(page);
 });
 

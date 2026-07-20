@@ -149,6 +149,15 @@ def test_local_pipeline_reads_private_adtof_runtime_environment(monkeypatch) -> 
     assert args.adtof_threshold == 0.06
 
 
+def test_local_pipeline_uses_the_same_adtof_template_default_as_true_ai_doctor(monkeypatch) -> None:
+    monkeypatch.delenv("GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE", raising=False)
+    monkeypatch.setattr(sys, "argv", ["pipeline", "--dry-run"])
+
+    args = run_local_pipeline.parse_args()
+
+    assert args.adtof_command_template == run_local_pipeline.default_adtof_command_template()
+
+
 def test_local_dev_launcher_formats_blocked_port_failure_without_raw_diagnostics() -> None:
     setup = {
         "status": "failed",

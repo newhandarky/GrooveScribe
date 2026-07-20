@@ -159,6 +159,12 @@ def _create_job(
     return job
 
 
+def _write_empty_artifact(tmp_path, storage_key: str) -> None:
+    artifact_path = tmp_path / storage_key
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_bytes(b"")
+
+
 def test_job_status_service_returns_stage_message() -> None:
     with _session() as session:
         _create_job(session)
@@ -655,6 +661,68 @@ def test_review_audio_exposes_only_a_real_accompaniment_stem(tmp_path) -> None:
         assert artifact.reader.read() == b"real-no-drums-stem"
     finally:
         artifact.reader.close()
+
+
+def test_download_service_maps_empty_available_export_to_not_found(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    _write_empty_artifact(tmp_path, "jobs/job-1/midi/processed_drum.mid")
+    with _session() as session:
+        _create_job(
+            session,
+            status=JobStatus.COMPLETED,
+            stage=PipelineStage.COMPLETED,
+            export_status=ExportFileStatus.AVAILABLE,
+        )
+        try:
+            DownloadService(storage=storage).open_export(session, job_id="job-1", export_type="midi")
+        except ApiErrorException as exc:
+            assert exc.code == ErrorCode.EXPORT_NOT_FOUND
+            assert "/" not in json.dumps(exc.details)
+        else:
+            raise AssertionError("expected empty export artifact to remain unavailable")
+
+
+def test_review_audio_maps_empty_accompaniment_to_not_found(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    _write_empty_artifact(tmp_path, build_job_artifact_key("job-1", ArtifactType.ACCOMPANIMENT_STEM))
+    with _session() as session:
+        _create_job(session, status=JobStatus.COMPLETED, stage=PipelineStage.COMPLETED)
+        try:
+            DownloadService(storage=storage).open_review_audio(session, job_id="job-1", audio_kind="accompaniment")
+        except ApiErrorException as exc:
+            assert exc.code == ErrorCode.EXPORT_NOT_FOUND
+            assert "/" not in json.dumps(exc.details)
+        else:
+            raise AssertionError("expected empty accompaniment artifact to remain unavailable")
+
+
+def test_candidate_export_maps_empty_published_artifact_to_not_found(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    _write_empty_artifact(
+        tmp_path,
+        build_candidate_artifact_key("job-1", "threshold_0_4", ArtifactType.PERFORMANCE_MIDI),
+    )
+    storage.put_bytes(
+        json.dumps(
+            {"candidate_analysis": {"candidates": [{"candidate_id": "threshold_0_4", "status": "completed"}]}},
+        ).encode("utf-8"),
+        build_job_artifact_key("job-1", ArtifactType.PIPELINE_LOG),
+        "application/json",
+    )
+    with _session() as session:
+        _create_job(session, status=JobStatus.COMPLETED, stage=PipelineStage.COMPLETED)
+        try:
+            DownloadService(storage=storage).open_candidate_export(
+                session,
+                job_id="job-1",
+                candidate_id="threshold_0_4",
+                export_type="midi",
+            )
+        except ApiErrorException as exc:
+            assert exc.code == ErrorCode.EXPORT_NOT_FOUND
+            assert "/" not in json.dumps(exc.details)
+        else:
+            raise AssertionError("expected empty candidate artifact to remain unavailable")
 
 
 def test_result_service_keeps_legacy_pipeline_log_without_validation_graceful(tmp_path) -> None:

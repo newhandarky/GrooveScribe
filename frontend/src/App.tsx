@@ -1445,7 +1445,15 @@ export function PracticePlaybackPanel({
   };
   return (
     <section className="practicePlaybackPanel">
-      <audio ref={audioRef} onEnded={stop} preload="metadata" />
+      <audio
+        ref={audioRef}
+        onEnded={stop}
+        onError={() => {
+          stop();
+          setAudioError('音訊載入失敗；請改用其他播放模式或下載 MIDI。');
+        }}
+        preload="metadata"
+      />
       <div className="qualityStatusHeader">
         <div><strong>同步練習 / 瀏覽器內試聽</strong><span>原曲不疊鼓；伴奏模式會使用去鼓後伴奏加上鼓譜。</span></div>
         <div className="playbackActions">

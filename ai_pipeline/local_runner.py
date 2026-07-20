@@ -23,6 +23,7 @@ from ai_pipeline.preprocessing import FfmpegAudioNormalizer
 from ai_pipeline.source_separation import DemucsSourceSeparator
 from ai_pipeline.transcription import AdtofDrumTranscriber
 from ai_pipeline.transcription.adtof import class_thresholds_for_preset
+from ai_pipeline.transcription.benchmark_backends import SpectralOnsetDrumBackend
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,7 @@ class LocalPipelineConfig:
     adtof_command_template: str | None = None
     adtof_checkpoint_path: Path | None = None
     adtof_device: str = "cpu"
+    transcription_backend: str = "adtof"
     adtof_threshold: float = 0.5
     adtof_class_thresholds: dict[str, float] | None = None
     adtof_threshold_preset: str | None = None
@@ -77,6 +79,8 @@ class LocalPipelineRunner:
     def run(self, input_path: Path, output_dir: Path) -> LocalPipelineResult:
         if not input_path.exists():
             raise FileNotFoundError(f"input file does not exist: {input_path}")
+        if self.config.candidate_thresholds and self.config.transcription_backend != "adtof":
+            raise ValueError("candidate_thresholds_require_adtof_backend")
 
         output_dir.mkdir(parents=True, exist_ok=True)
         if self.config.candidate_thresholds and not self.config.mock_ai:
@@ -205,6 +209,25 @@ class LocalPipelineRunner:
                 "event_count": len(events),
                 "warnings": ["mock_ai_enabled"],
             }
+
+        if self.config.transcription_backend == "spectral_onset_v1":
+            result = SpectralOnsetDrumBackend().transcribe(
+                artifacts["drums_stem"], raw_midi_path, tempo_bpm=self.config.tempo_bpm or 120.0
+            )
+            if result.get("status") != "completed":
+                raise RuntimeError(str(result.get("reason_code") or "spectral_onset_unavailable"))
+            return {"raw_midi": raw_midi_path}, {
+                "transcriber": "spectral_onset_v1",
+                "model_name": "spectral_onset_v1",
+                "device": "cpu",
+                "threshold": None,
+                "threshold_preset": None,
+                "class_thresholds": {},
+                "event_count": result.get("event_count", 0),
+                "warnings": [],
+            }
+        if self.config.transcription_backend != "adtof":
+            raise ValueError("unsupported_transcription_backend")
 
         class_thresholds = self.config.adtof_class_thresholds or class_thresholds_for_preset(
             self.config.adtof_threshold_preset

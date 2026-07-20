@@ -2,7 +2,7 @@
 
 GrooveScribe 是一個 local-first 的完整 V1 產品，目標是在使用者自己的電腦上完成音訊轉鼓譜流程。使用者啟動本機服務後，透過瀏覽器開啟 `localhost` 介面，上傳單首 MP3 / WAV 音檔，系統在本機執行 ffmpeg、Demucs、ADTOF-pytorch、MIDI 後處理、MusicXML 與 PDF export，產生可預覽、可下載、可人工修正的鼓譜草稿。
 
-V1 不以「先快速跑通 MVP」為目標，而是以 production-ready local-first app 為目標：安裝與啟動流程要可重現，任務狀態要可追蹤，失敗要可診斷，artifact 要可管理，輸出品質要有 fixture test 與人工評估支撐。
+V1 不以「先快速跑通 MVP」為目標，而是以 production-ready local-first app 為目標：安裝與啟動流程要可重現，任務狀態要可追蹤，失敗要可診斷，artifact 要可管理，輸出品質要有 generated fixture regression 與 repo 外授權 ground-truth benchmark 支撐；產品品質 gate 不使用人工評分或人工校準。
 
 ## V1 產品方向
 
@@ -19,7 +19,7 @@ V1 不以「先快速跑通 MVP」為目標，而是以 production-ready local-f
 
 Local-first V1 主線已收斂到 SQLite + local job queue + local filesystem storage。FastAPI backend 已提供 runtime preflight、upload、job status、result、download、job history、retry/rerun 與 local data summary API；React localhost UI 已可上傳音檔、查看近期任務、追蹤 queued / processing / completed / failed / interrupted、重試或重新執行 job、預覽 MusicXML fallback、下載 MIDI / MusicXML，並清楚標示 PDF optional 狀態。
 
-Release readiness 也已建立 deterministic gate：backend targeted tests、pipeline fast tests、frontend test/lint/build、Playwright desktop/mobile browser smoke、manual eval CSV gate、cleanup/reset dry-run、artifact hygiene 與 redaction matrix。`scripts/generate_v1_release_evidence.py` 可產生 repo 外 JSON / Markdown evidence，`scripts/run_v1_rc_pilot.py` 與 `scripts/check_v1_rc_handoff.py` 可產生並驗證 final RC handoff bundle。
+Release readiness 也已建立 deterministic gate：backend targeted tests、pipeline fast tests、frontend test/lint/build、Playwright desktop/mobile browser smoke、cleanup/reset dry-run、artifact hygiene、redaction matrix，以及 opt-in ground-truth candidate benchmark。既有 manual eval CSV 工具僅保留作相容性診斷，不構成品質驗收。`scripts/generate_v1_release_evidence.py` 可產生 repo 外 JSON / Markdown evidence，`scripts/run_v1_rc_pilot.py` 與 `scripts/check_v1_rc_handoff.py` 可產生並驗證 final RC handoff bundle。
 
 true AI runtime 仍是 opt-in。若 Demucs / ADTOF 尚未 ready，V1 仍可使用 mock flow 完成 upload -> result -> download；true AI blocked reason 與 baseline 流程記錄於 runtime guide。
 
@@ -31,7 +31,7 @@ backend/      本機 FastAPI service，負責 upload/status/result/download API
 worker/       既有 worker / orchestration 實作；V1 需收斂成本機 job manager 主線
 ai_pipeline/  音訊處理、Demucs / ADTOF adapter、MIDI / notation modules
 storage/      本機 artifacts 儲存目錄
-tests/        跨模組測試、pipeline fixtures、人工評估
+tests/        跨模組測試、pipeline fixtures、legacy manual-eval diagnostics
 scripts/      本地開發與 pipeline runtime scripts
 infra/        optional deployment / packaging / environment references
 docs/         產品、架構、規格、任務與決策文件
