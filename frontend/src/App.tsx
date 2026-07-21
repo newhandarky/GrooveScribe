@@ -892,8 +892,13 @@ export function ResultCard({
       <QualityStatusPanel pipeline={result.pipeline} />
       <PerformanceDeliveryPanel pipeline={result.pipeline} />
       <PracticePlaybackPanel
-        key={selectedCandidate?.candidate_id ?? 'canonical'}
         timeline={selectedCandidate?.review_timeline ?? result.review_timeline}
+        sessionKey={`${result.job_id}:${selectedCandidate?.candidate_id ?? 'canonical'}`}
+        baseBpm={practiceBaseBpm(
+          selectedCandidate?.review_timeline ?? result.review_timeline,
+          result.pipeline?.quality?.tempo_bpm,
+          result.drum_track?.estimated_bpm,
+        )}
       />
 
       {result.drum_track?.warnings.length ? (
@@ -1299,16 +1304,23 @@ function isVerifiedPerformanceScore(gate: PerformanceGate | null | undefined): b
 
 export function PracticePlaybackPanel({
   timeline,
+  sessionKey,
+  baseBpm,
 }: {
   timeline: TranscriptionResultResponse['review_timeline'];
+  sessionKey?: string;
+  baseBpm?: number | null;
 }) {
   const events = timeline?.performance_playback?.events ?? [];
   const audioSources = timeline?.audio_sources ?? [];
   const original = audioSources.find((source) => source.kind === 'original');
+  const drumsStem = audioSources.find((source) => source.kind === 'drums_stem');
   const accompaniment = audioSources.find((source) => source.kind === 'accompaniment');
   const hasChart = Boolean(timeline?.performance_playback?.available && events.length);
-  const [mode, setMode] = useState<'original' | 'chart' | 'accompaniment'>(() => preferredPracticeMode(hasChart, Boolean(original?.available)));
+  const availableModes = practiceModes({ original: Boolean(original?.available), drums: Boolean(drumsStem?.available), accompaniment: Boolean(accompaniment?.available), hasChart });
+  const [mode, setMode] = useState<'original' | 'chart' | 'accompaniment'>(() => availableModes[0] ?? 'original');
   const [playing, setPlaying] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
   const [audioVolume, setAudioVolume] = useState(75);
   const [drumVolume, setDrumVolume] = useState(45);
   const [currentTime, setCurrentTime] = useState(0);
@@ -1318,7 +1330,8 @@ export function PracticePlaybackPanel({
   const timers = useRef<number[]>([]);
   const animationFrame = useRef<number | null>(null);
   const playbackSession = useRef(0);
-  const activeAudio = mode === 'original' ? original : mode === 'accompaniment' ? accompaniment : null;
+  const rateRef = useRef(playbackRate);
+  const activeAudio = mode === 'original' ? original : mode === 'chart' ? drumsStem : accompaniment;
   const duration = Math.max(events.at(-1)?.time_seconds ?? 0, timeline?.measures.at(-1)?.end_seconds ?? 0);
 
   const clearScheduled = () => {
@@ -1327,17 +1340,17 @@ export function PracticePlaybackPanel({
     if (animationFrame.current !== null) window.cancelAnimationFrame(animationFrame.current);
     animationFrame.current = null;
   };
-  const stop = () => {
+  const stop = (resetPosition = true) => {
     playbackSession.current += 1;
     clearScheduled();
     if (audioRef.current) {
       audioRef.current.pause();
-      audioRef.current.currentTime = 0;
+      if (resetPosition) audioRef.current.currentTime = 0;
     }
     void contextRef.current?.close();
     contextRef.current = null;
     setPlaying(false);
-    setCurrentTime(0);
+    if (resetPosition) setCurrentTime(0);
   };
   useEffect(() => () => {
     playbackSession.current += 1;
@@ -1346,18 +1359,49 @@ export function PracticePlaybackPanel({
     void contextRef.current?.close();
   }, []);
 
-  if (!hasChart && !original?.available) return null;
+  useEffect(() => {
+    // Candidate/mode/job transitions are atomic: invalidate callbacks first, then reset UI.
+    stop();
+    const nextMode = availableModes.includes(mode) ? mode : availableModes[0] ?? 'original';
+    setMode(nextMode);
+  }, [sessionKey]);
+
+  const previousJobRef = useRef<string | null>(null);
+  useEffect(() => {
+    const jobId = sessionKey?.split(':', 1)[0] ?? null;
+    if (previousJobRef.current !== null && jobId !== previousJobRef.current) setPlaybackRate(1);
+    previousJobRef.current = jobId;
+  }, [sessionKey]);
+
+  useEffect(() => {
+    if (availableModes.includes(mode)) return;
+    stop();
+    setMode(availableModes[0] ?? 'original');
+  }, [availableModes.join(','), mode]);
+
+  useEffect(() => {
+    rateRef.current = playbackRate;
+    const audio = audioRef.current;
+    if (audio) applyPlaybackRate(audio, playbackRate);
+  }, [playbackRate]);
+
+  if (!availableModes.length) return <section className="practicePlaybackPanel"><p className="previewFallback">同步練習音源目前不可用。</p></section>;
   const currentMeasure = measureIndexForPlaybackTime(timeline?.measures ?? [], currentTime);
-  const scheduleChart = (context: AudioContext, startAt: number) => {
+  const scheduleChart = (context: AudioContext, startAt: number, rate: number) => {
     for (const event of events) {
       if (event.time_seconds < startAt) continue;
       const timer = window.setTimeout(() => {
         playDrumPreview(context, context.currentTime + 0.01, event.drum, event.velocity, drumVolume / 100);
-      }, Math.max(0, (event.time_seconds - startAt) * 1000));
+      }, Math.max(0, (event.time_seconds - startAt) * 1000 / rate));
       timers.current.push(timer);
     }
   };
-  const playFrom = async (requestedStartAt: number) => {
+  const playFrom = async (
+    requestedStartAt: number,
+    requestedRate = playbackRate,
+    expectedSession?: number,
+  ) => {
+    if (expectedSession !== undefined && playbackSession.current !== expectedSession) return;
     clearScheduled();
     setAudioError(null);
     const startAt = Math.max(0, Math.min(duration, requestedStartAt));
@@ -1367,6 +1411,7 @@ export function PracticePlaybackPanel({
       if (!audio) return;
       audio.src = downloadUrl(activeAudio.playback_url);
       audio.volume = audioVolume / 100;
+      applyPlaybackRate(audio, requestedRate);
       audio.currentTime = startAt;
       try {
         await audio.play();
@@ -1398,7 +1443,7 @@ export function PracticePlaybackPanel({
           void context.close();
           return;
         }
-        scheduleChart(context, startAt);
+        scheduleChart(context, startAt, requestedRate);
       } catch {
         const cleanedCurrentSession = cleanupFailedChartStart({
           activeSession: playbackSession.current,
@@ -1419,7 +1464,7 @@ export function PracticePlaybackPanel({
     const updateTime = () => {
       const nextTime = activeAudio?.playback_url && audioRef.current
         ? audioRef.current.currentTime
-        : startAt + elapsedPlaybackSeconds(startedAt, performance.now());
+        : startAt + playbackElapsedSeconds(startedAt, performance.now(), rateRef.current);
       setCurrentTime(duration > 0 ? Math.min(duration, nextTime) : nextTime);
       const audioStillPlaying = Boolean(
         activeAudio?.playback_url && audioRef.current && !audioRef.current.paused && !audioRef.current.ended,
@@ -1433,7 +1478,7 @@ export function PracticePlaybackPanel({
     };
     animationFrame.current = window.requestAnimationFrame(updateTime);
     if (!activeAudio?.playback_url && duration > 0) {
-      timers.current.push(window.setTimeout(stop, Math.max(0, duration - startAt) * 1000 + 600));
+      timers.current.push(window.setTimeout(stop, Math.max(0, duration - startAt) * 1000 / requestedRate + 600));
     }
     setPlaying(true);
   };
@@ -1443,11 +1488,25 @@ export function PracticePlaybackPanel({
     if (playing) stop();
     setCurrentTime(next);
   };
+  const changeRate = (nextRate: number) => {
+    const normalized = nearestPlaybackRate(nextRate);
+    if (!playing) {
+      setPlaybackRate(normalized);
+      return;
+    }
+    const position = audioRef.current?.currentTime ?? currentTime;
+    stop(false);
+    rateRef.current = normalized;
+    setPlaybackRate(normalized);
+    const resumeSession = playbackSession.current;
+    timers.current.push(window.setTimeout(() => void playFrom(position, normalized, resumeSession), 0));
+  };
+  const effectiveBpm = baseBpm ? formatEffectiveBpm(baseBpm, playbackRate) : null;
   return (
     <section className="practicePlaybackPanel">
       <audio
         ref={audioRef}
-        onEnded={stop}
+        onEnded={() => stop()}
         onError={() => {
           stop();
           setAudioError('音訊載入失敗；請改用其他播放模式或下載 MIDI。');
@@ -1457,17 +1516,24 @@ export function PracticePlaybackPanel({
       <div className="qualityStatusHeader">
         <div><strong>同步練習 / 瀏覽器內試聽</strong><span>原曲不疊鼓；伴奏模式會使用去鼓後伴奏加上鼓譜。</span></div>
         <div className="playbackActions">
-          <button type="button" className="secondaryButton compactButton" onClick={playing ? stop : play}>{playing ? '停止' : mode === 'chart' ? '播放鼓譜' : '播放'}</button>
-          <button type="button" className="secondaryButton compactButton" onClick={() => { stop(); window.setTimeout(() => void playFrom(0), 0); }}>重播</button>
+          <button type="button" className="secondaryButton compactButton" onClick={() => playing ? stop() : play()}>{playing ? '停止' : mode === 'chart' ? '播放鼓譜' : '播放'}</button>
+          <button type="button" className="secondaryButton compactButton" onClick={() => { stop(); const replaySession = playbackSession.current; timers.current.push(window.setTimeout(() => void playFrom(0, playbackRate, replaySession), 0)); }}>重播</button>
         </div>
       </div>
       <div className="practiceModes" role="group" aria-label="練習播放模式">
-        <button type="button" className={mode === 'original' ? 'selected' : ''} onClick={() => { stop(); setMode('original'); }} disabled={!original?.available}>原曲</button>
-        <button type="button" className={mode === 'chart' ? 'selected' : ''} onClick={() => { stop(); setMode('chart'); }} disabled={!hasChart}>鼓譜單獨</button>
-        <button type="button" className={mode === 'accompaniment' ? 'selected' : ''} onClick={() => { stop(); setMode('accompaniment'); }} disabled={!accompaniment?.available}>伴奏加鼓譜</button>
+        <button type="button" className={mode === 'original' ? 'selected' : ''} onClick={() => { stop(); setMode('original'); }} disabled={!availableModes.includes('original')}>原曲</button>
+        <button type="button" className={mode === 'chart' ? 'selected' : ''} onClick={() => { stop(); setMode('chart'); }} disabled={!availableModes.includes('chart')}>鼓譜單獨</button>
+        <button type="button" className={mode === 'accompaniment' ? 'selected' : ''} onClick={() => { stop(); setMode('accompaniment'); }} disabled={!availableModes.includes('accompaniment')}>伴奏加鼓譜</button>
       </div>
       {!accompaniment?.available ? <p className="previewFallback">伴奏 stem 未取得；仍可使用原曲或鼓譜單獨模式。</p> : null}
       <div className="playbackControls practiceControls">
+        <div className="practiceTempo" aria-label="練習速度">
+          <strong>{baseBpm ? `基準 ${baseBpm.toFixed(1).replace(/\.0$/, '')} BPM` : '速度資訊不可用'}</strong>
+          <span>{effectiveBpm ? `有效 ${effectiveBpm} BPM` : `${playbackRate.toFixed(2).replace(/0$/, '')}×`}</span>
+          <button type="button" onClick={() => changeRate(playbackRate - 0.25)} aria-label="放慢速度">−</button>
+          {[0.5, 0.75, 1, 1.25, 1.5].map((rate) => <button type="button" key={rate} className={playbackRate === rate ? 'selected' : ''} onClick={() => changeRate(rate)}>{rate}×</button>)}
+          <button type="button" onClick={() => changeRate(playbackRate + 0.25)} aria-label="加快速度">+</button>
+        </div>
         <label><span>{mode === 'chart' ? '鼓譜音量' : '原曲／伴奏音量'}</span><input type="range" min="0" max="100" value={mode === 'chart' ? drumVolume : audioVolume} onChange={(event) => mode === 'chart' ? setDrumVolume(Number(event.currentTarget.value)) : setAudioVolume(Number(event.currentTarget.value))} /><strong>{mode === 'chart' ? drumVolume : audioVolume}%</strong></label>
         {mode === 'accompaniment' ? <label><span>鼓譜音量</span><input type="range" min="0" max="100" value={drumVolume} onChange={(event) => setDrumVolume(Number(event.currentTarget.value))} /><strong>{drumVolume}%</strong></label> : null}
         {duration > 0 ? <label><span>播放位置</span><input type="range" min="0" max={duration} step="0.1" value={Math.min(duration, currentTime)} onChange={(event) => seek(Number(event.currentTarget.value))} /><strong>{formatPlaybackTime(currentTime)}</strong></label> : null}
@@ -1491,6 +1557,53 @@ export function isCurrentPlaybackSession(activeSession: number, session: number)
 
 export function elapsedPlaybackSeconds(startedAtMs: number, nowMs: number): number {
   return Math.max(0, (nowMs - startedAtMs) / 1000);
+}
+
+export function playbackElapsedSeconds(startedAtMs: number, nowMs: number, playbackRate: number): number {
+  return elapsedPlaybackSeconds(startedAtMs, nowMs) * playbackRate;
+}
+
+export function practiceModes({
+  original,
+  drums,
+  accompaniment,
+  hasChart,
+}: {
+  original: boolean;
+  drums: boolean;
+  accompaniment: boolean;
+  hasChart: boolean;
+}): Array<'original' | 'chart' | 'accompaniment'> {
+  return [
+    ...(drums && hasChart ? ['chart' as const] : []),
+    ...(original ? ['original' as const] : []),
+    ...(accompaniment && hasChart ? ['accompaniment' as const] : []),
+  ];
+}
+
+export function nearestPlaybackRate(value: number): number {
+  return [0.5, 0.75, 1, 1.25, 1.5].reduce((best, candidate) => Math.abs(candidate - value) < Math.abs(best - value) ? candidate : best, 1);
+}
+
+export function formatEffectiveBpm(baseBpm: number, playbackRate: number): string {
+  return (Math.round(baseBpm * playbackRate * 10) / 10).toFixed(1).replace(/\.0$/, '');
+}
+
+export function practiceBaseBpm(
+  timeline: TranscriptionResultResponse['review_timeline'],
+  qualityTempo?: number | null,
+  estimatedBpm?: number | null,
+): number | null {
+  const values = [timeline?.tempo_bpm, qualityTempo, estimatedBpm];
+  const bpm = values.find((value) => typeof value === 'number' && Number.isFinite(value) && value > 0);
+  return typeof bpm === 'number' ? bpm : null;
+}
+
+export function applyPlaybackRate(audio: HTMLAudioElement, playbackRate: number): void {
+  audio.playbackRate = playbackRate;
+  const pitchAudio = audio as HTMLAudioElement & { preservesPitch?: boolean; webkitPreservesPitch?: boolean };
+  if ('preservesPitch' in pitchAudio) pitchAudio.preservesPitch = true;
+  if ('webkitPreservesPitch' in pitchAudio) pitchAudio.webkitPreservesPitch = true;
 }
 
 type ClosableAudioContext = Pick<AudioContext, 'close'>;
