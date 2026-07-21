@@ -19,6 +19,7 @@ from app.storage.errors import (
 )
 from app.storage.keys import build_candidate_artifact_key, build_job_artifact_key, sanitize_filename
 from app.storage.types import ArtifactType, CONTENT_TYPE_BY_ARTIFACT_TYPE
+from app.services.artifact_integrity_service import ArtifactIntegrityService
 
 _FILENAME_BY_EXPORT_TYPE: dict[ExportFileType, str] = {
     ExportFileType.MIDI: "processed_drum.mid",
@@ -37,6 +38,7 @@ class DownloadArtifact:
 class DownloadService:
     def __init__(self, *, storage: StorageAdapter) -> None:
         self.storage = storage
+        self.integrity = ArtifactIntegrityService(storage=storage)
 
     def open_export(self, db: Session, *, job_id: str, export_type: str) -> DownloadArtifact:
         normalized_type = self._parse_export_type(export_type)
@@ -62,6 +64,14 @@ class DownloadService:
                 ErrorCode.EXPORT_NOT_READY,
                 details={"job_id": job_id, "type": normalized_type.value, "status": export_file.status.value},
             )
+        artifact_type = _artifact_type_for_export(normalized_type)
+        if not self.integrity.check(
+            storage_key=export_file.storage_key,
+            artifact_type=artifact_type,
+            content_type=export_file.content_type,
+            checksum=export_file.checksum,
+        ).available:
+            raise ApiErrorException(ErrorCode.EXPORT_NOT_FOUND, details={"job_id": job_id, "type": normalized_type.value})
 
         try:
             reader = self.storage.open_reader(export_file.storage_key)
@@ -101,6 +111,15 @@ class DownloadService:
             filename = "no_drums.wav"
         else:
             raise ApiErrorException(ErrorCode.EXPORT_NOT_FOUND, details={"job_id": job_id, "type": audio_kind})
+        artifact_type = {
+            "original": ArtifactType.ORIGINAL_AUDIO,
+            "drums_stem": ArtifactType.DRUMS_STEM,
+            "accompaniment": ArtifactType.ACCOMPANIMENT_STEM,
+        }.get(audio_kind)
+        if artifact_type is None or not self.integrity.check(
+            storage_key=storage_key, artifact_type=artifact_type, content_type=content_type
+        ).available:
+            raise ApiErrorException(ErrorCode.EXPORT_NOT_FOUND, details={"job_id": job_id, "type": audio_kind})
         try:
             reader = self.storage.open_reader(storage_key)
         except _UNAVAILABLE_ARTIFACT_ERRORS as exc:
@@ -125,6 +144,8 @@ class DownloadService:
             raise ApiErrorException(ErrorCode.EXPORT_NOT_FOUND, details={"job_id": job_id, "type": normalized_type.value})
         try:
             storage_key = build_candidate_artifact_key(job_id, candidate_id, artifact_type)
+            if not self.integrity.check(storage_key=storage_key, artifact_type=artifact_type).available:
+                raise ArtifactNotFoundError("candidate artifact unavailable")
             reader = self.storage.open_reader(storage_key)
         except (*_UNAVAILABLE_ARTIFACT_ERRORS, ValueError) as exc:
             raise ApiErrorException(ErrorCode.EXPORT_NOT_FOUND, details={"job_id": job_id, "type": normalized_type.value}) from exc
@@ -172,6 +193,14 @@ def _download_filename(export_file: ExportFile) -> str:
     if export_file.type == ExportFileType.MUSICXML and stored_name == "performance_score.musicxml":
         return stored_name
     return _FILENAME_BY_EXPORT_TYPE[export_file.type]
+
+
+def _artifact_type_for_export(export_type: ExportFileType) -> ArtifactType:
+    return {
+        ExportFileType.MIDI: ArtifactType.PROCESSED_MIDI,
+        ExportFileType.MUSICXML: ArtifactType.MUSICXML,
+        ExportFileType.PDF: ArtifactType.PDF,
+    }[export_type]
 
 
 _UNAVAILABLE_ARTIFACT_ERRORS = (

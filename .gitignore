@@ -55,3 +55,6 @@ work/
 # Local-only ground-truth benchmark manifests and reports
 benchmarks/performance/*.local.json
 benchmarks/performance/*.local.csv
+# Local reliability maintenance output (must remain outside the repository).
+cleanup_backup_manifest.json
+cleanup_report.json

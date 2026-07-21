@@ -370,3 +370,15 @@ tag 前最後 sign-off 入口仍是 RC pilot：
 ```
 
 release notes / tag prep 是 docs-only finalization；不要在這一步改 public API、UI、pipeline behavior 或新增 dependency。true-AI 仍是 opt-in，PDF renderer 仍不是一般 tag blocker。
+# Local reliability maintenance
+
+`cleanup_orphan_job_artifacts.py` is an internal, opt-in local-storage tool. It defaults to a non-mutating dry run and only accepts repo-external SQLite DB, storage, and report paths:
+
+```bash
+PYTHONPATH=backend backend/.venv/bin/python scripts/cleanup_orphan_job_artifacts.py \
+  --storage-root /outside/storage \
+  --database-url sqlite+pysqlite:////outside/groovescribe.db \
+  --output-dir /outside/cleanup-reports
+```
+
+Use `--apply` only after inspecting the dry run. It removes only whole `jobs/<id>` directories that have no database job record and writes a backup manifest before deletion.

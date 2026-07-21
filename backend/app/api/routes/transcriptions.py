@@ -306,13 +306,13 @@ def _build_result_response(
         exports=[
             ExportFileResult(
                 type=export.type.value,
-                status=export.status.value,
+                status=export.status.value if result_service.export_available(export) else "unavailable",
                 content_type=export.content_type,
                 file_size_bytes=export.file_size_bytes,
                 checksum=export.checksum,
                 download_url=(
                     result_service.download_url(job.id, export.type.value)
-                    if export.status == ExportFileStatus.AVAILABLE
+                    if result_service.export_available(export)
                     else None
                 ),
             )
