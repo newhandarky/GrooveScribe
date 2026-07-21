@@ -94,6 +94,11 @@ test('candidate practice workspace defaults to a recommendation and exposes safe
     /\/api\/v1\/transcriptions\/job-browser-smoke\/candidates\/threshold_0_4\/download\/midi$/,
   );
   const practice = page.locator('.practicePlaybackPanel');
+  await expect(practice.getByText('基準 120 BPM')).toBeVisible();
+  await expect(practice.getByText('有效 120 BPM')).toBeVisible();
+  await practice.getByRole('button', { name: '0.75×' }).click();
+  await expect(practice.getByRole('button', { name: '0.75×' })).toHaveClass(/selected/);
+  await expect(practice.getByText('有效 90 BPM')).toBeVisible();
   await practice.getByRole('button', { name: '原曲' }).click();
   await expect(practice.getByRole('button', { name: '原曲' })).toHaveClass(/selected/);
   await practice.getByRole('button', { name: '伴奏加鼓譜' }).click();
@@ -109,6 +114,7 @@ test('candidate practice workspace defaults to a recommendation and exposes safe
     'href',
     /\/api\/v1\/transcriptions\/job-browser-smoke\/candidates\/threshold_0_5\/download\/midi$/,
   );
+  await expect(practice.getByRole('button', { name: '0.75×' })).toHaveClass(/selected/);
   await expectPublicSafe(page);
 });
 

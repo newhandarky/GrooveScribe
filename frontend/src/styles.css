@@ -970,6 +970,39 @@ input {
   margin-top: 12px;
 }
 
+.practiceTempo {
+  align-items: center;
+  display: flex;
+  flex: 1 1 280px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.practiceTempo strong,
+.practiceTempo span {
+  color: #243841;
+  font-size: 13px;
+}
+
+.practiceTempo span {
+  color: #69736d;
+}
+
+.practiceTempo button {
+  border: 1px solid #9aafb8;
+  border-radius: 4px;
+  background: #fff;
+  color: #243841;
+  cursor: pointer;
+  padding: 4px 7px;
+}
+
+.practiceTempo button.selected {
+  background: #235265;
+  border-color: #235265;
+  color: #fff;
+}
+
 .playbackControls label {
   align-items: center;
   display: flex;

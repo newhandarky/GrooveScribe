@@ -5,6 +5,11 @@ import {
   App,
   cleanupFailedChartStart,
   elapsedPlaybackSeconds,
+  playbackElapsedSeconds,
+  formatEffectiveBpm,
+  nearestPlaybackRate,
+  practiceBaseBpm,
+  practiceModes,
   drumPreviewIntensity,
   JobHistoryPanel,
   isCurrentPlaybackSession,
@@ -691,6 +696,23 @@ describe('local app smoke rendering', () => {
     expect(measureIndexForPlaybackTime([], 2.5)).toBeNull();
     expect(elapsedPlaybackSeconds(12_000, 12_750)).toBe(0.75);
     expect(elapsedPlaybackSeconds(12_000, 11_000)).toBe(0);
+  });
+
+  it('derives safe BPM and deterministic practice speed values', () => {
+    const timeline = resultFixture().review_timeline!;
+
+    expect(practiceBaseBpm(timeline, 90, 80)).toBe(120);
+    expect(practiceBaseBpm({ ...timeline, tempo_bpm: null }, 90, 80)).toBe(90);
+    expect(formatEffectiveBpm(120, 0.75)).toBe('90');
+    expect(formatEffectiveBpm(123, 1.25)).toBe('153.8');
+    expect(nearestPlaybackRate(1.1)).toBe(1);
+    expect(playbackElapsedSeconds(1000, 3000, 1.5)).toBe(3);
+  });
+
+  it('keeps only artifact-complete practice modes enabled', () => {
+    expect(practiceModes({ original: true, drums: true, accompaniment: true, hasChart: true })).toEqual(['chart', 'original', 'accompaniment']);
+    expect(practiceModes({ original: true, drums: false, accompaniment: true, hasChart: true })).toEqual(['original', 'accompaniment']);
+    expect(practiceModes({ original: false, drums: true, accompaniment: true, hasChart: false })).toEqual([]);
   });
 
   it('renders score preview in a full-width section with validation fallback', () => {
