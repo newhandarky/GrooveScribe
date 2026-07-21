@@ -960,6 +960,29 @@ def test_download_service_maps_missing_storage_artifact_to_export_not_found(tmp_
             raise AssertionError("expected EXPORT_NOT_FOUND")
 
 
+def test_download_service_rejects_checksum_or_content_type_mismatch(tmp_path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    storage.put_bytes(b"midi", "jobs/job-1/midi/processed_drum.mid", "audio/midi")
+    with _session() as session:
+        job = _create_job(
+            session,
+            status=JobStatus.COMPLETED,
+            stage=PipelineStage.COMPLETED,
+            export_status=ExportFileStatus.AVAILABLE,
+        )
+        export = job.export_files[0]
+        export.checksum = "0" * 64
+        session.commit()
+
+        try:
+            DownloadService(storage=storage).open_export(session, job_id="job-1", export_type="midi")
+        except ApiErrorException as exc:
+            assert exc.code == ErrorCode.EXPORT_NOT_FOUND
+            assert "jobs/" not in str(exc.details)
+        else:
+            raise AssertionError("expected EXPORT_NOT_FOUND")
+
+
 def test_review_packet_service_builds_public_safe_packet_and_zip(tmp_path) -> None:
     storage = LocalStorageAdapter(tmp_path)
     storage.put_bytes(b"midi", "jobs/job-1/midi/processed_drum.mid", "audio/midi")

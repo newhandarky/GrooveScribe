@@ -15,6 +15,7 @@ from app.services.review_timeline_service import ReviewTimelineService
 from app.storage.base import StorageAdapter
 from app.storage.keys import build_candidate_artifact_key, build_job_artifact_key
 from app.storage.types import ArtifactType
+from app.services.artifact_integrity_service import ArtifactIntegrityService
 from app.storage.errors import ArtifactInvalidError, ArtifactNotFoundError, StorageReadFailedError
 
 _QUALITY_FLAG_CODES = {
@@ -113,9 +114,24 @@ class ResultService:
             ),
             None,
         )
-        if export_file is None:
+        if export_file is None or not self.export_available(export_file):
             return None
         return self.download_url(job.id, ExportFileType.MUSICXML.value)
+
+    def export_available(self, export_file) -> bool:
+        if export_file.status != ExportFileStatus.AVAILABLE or self.storage is None:
+            return export_file.status == ExportFileStatus.AVAILABLE and self.storage is None
+        artifact_type = {
+            ExportFileType.MIDI: ArtifactType.PROCESSED_MIDI,
+            ExportFileType.MUSICXML: ArtifactType.MUSICXML,
+            ExportFileType.PDF: ArtifactType.PDF,
+        }[export_file.type]
+        return ArtifactIntegrityService(storage=self.storage).check(
+            storage_key=export_file.storage_key,
+            artifact_type=artifact_type,
+            content_type=export_file.content_type,
+            checksum=export_file.checksum,
+        ).available
 
     def download_url(self, job_id: str, export_type: str) -> str:
         return f"{self.settings.api_v1_prefix}/transcriptions/{job_id}/download/{export_type}"
@@ -132,7 +148,12 @@ class ResultService:
         else:
             return None
         try:
-            if not storage_key or not self.storage.exists(storage_key):
+            artifact_type = {
+                "original": ArtifactType.ORIGINAL_AUDIO,
+                "drums_stem": ArtifactType.DRUMS_STEM,
+                "accompaniment": ArtifactType.ACCOMPANIMENT_STEM,
+            }[audio_kind]
+            if not ArtifactIntegrityService(storage=self.storage).check(storage_key=storage_key, artifact_type=artifact_type).available:
                 return None
         except Exception:
             return None
@@ -189,9 +210,9 @@ class ResultService:
             "artifacts": [
                 {
                     "type": export.type.value,
-                    "available": export.status == ExportFileStatus.AVAILABLE,
+                    "available": self.export_available(export),
                     "file_size_bytes": export.file_size_bytes,
-                    "status": export.status.value,
+                    "status": export.status.value if self.export_available(export) else "unavailable",
                 }
                 for export in sorted(job.export_files, key=lambda item: item.type.value)
             ],
@@ -713,7 +734,10 @@ def _candidate_artifacts(
         available = False
         if candidate_status == "completed" and storage is not None:
             try:
-                available = storage.exists(build_candidate_artifact_key(job_id, candidate_id, artifact_type))
+                available = ArtifactIntegrityService(storage=storage).check(
+                    storage_key=build_candidate_artifact_key(job_id, candidate_id, artifact_type),
+                    artifact_type=artifact_type,
+                ).available
             except Exception:
                 available = False
         result[export_type] = {
