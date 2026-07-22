@@ -8,7 +8,7 @@ _BLOCKING_FLAGS = {
     "mostly_tom_output",
     "no_snare_detected",
 }
-_PROFILE = "practice_coverage_v2"
+_PROFILE = "practice_coverage_v4"
 
 
 def evaluate_candidate_recommendation(
@@ -22,6 +22,7 @@ def evaluate_candidate_recommendation(
     counts = _dict(quality.get("processed_drum_counts"))
     flags = {str(value) for value in _list(quality.get("quality_flags"))}
     gate = _dict(quality.get("performance_gate"))
+    playability = _dict(gate.get("playability"))
     musicxml = _dict(validation.get("musicxml"))
     hard_reasons: list[str] = []
     if status != "completed":
@@ -62,17 +63,29 @@ def evaluate_candidate_recommendation(
         score -= 10
         reasons.append("tom 事件比例偏高")
     verdict = str(gate.get("verdict") or "")
+    gate_allows_practice = verdict in {"performance_ready", "playable_but_low_confidence", ""}
     if verdict == "performance_ready":
         score += 15
     elif verdict == "playable_but_low_confidence":
         score += 4
     elif verdict:
-        score -= 4
+        score -= 12
+        reasons.insert(0, "自動可演奏檢查尚未通過")
     if _positive(notation.get("dense_measure_count")) == 0:
         score += 8
+    core_groove_stable = playability.get("core_groove_stable")
+    if core_groove_stable is False:
+        score -= 12
+        reasons.insert(0, "核心節奏結構仍不穩定")
     score -= min(15, len(flags) * 4)
     score = max(0, min(100, score))
-    recommendation = "recommended_for_practice" if score >= 70 else "reference_with_caveats" if score >= 42 else "reanalyze_recommended"
+    recommendation = (
+        "recommended_for_practice"
+        if score >= 70 and core_groove_stable is not False and gate_allows_practice
+        else "reference_with_caveats"
+        if score >= 42
+        else "reanalyze_recommended"
+    )
     if recommendation == "recommended_for_practice":
         reasons = ["節奏與譜面結構相對穩定", *reasons]
     elif recommendation == "reference_with_caveats":

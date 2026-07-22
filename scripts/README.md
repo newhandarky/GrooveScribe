@@ -151,7 +151,34 @@ PYTHONPATH=. "$PYTHON" scripts/run_performance_benchmark.py \
   --adtof-device cpu
 ```
 
-未設定 manifest 時，工具會明確回報 `skipped`，不影響一般 CI。設定 manifest 後，缺少可量測 ground truth、未通過參考 acceptance，或推薦候選的品質劣於同組最佳候選時，工具會以非零結束碼失敗。音檔、MIDI、manifest 與 reports 必須留在 repo 外；JSON/CSV 僅輸出固定白名單欄位，不含本機路徑或 raw command。
+未設定 manifest 時，工具會明確回報 `skipped`，不影響一般 CI。設定 manifest 後，缺少可量測 ground truth、未通過參考 acceptance，或推薦候選的品質劣於同組最佳候選時，工具會以非零結束碼失敗。中斷後可直接重跑相同命令：預設只會重用完整且與四個 threshold profile 相符的項目；`--no-resume` 才會強制重跑。音檔、MIDI、manifest 與 reports 必須留在 repo 外；JSON/CSV 僅輸出固定白名單欄位，不含本機路徑或 raw command。
+
+## Raw-model attribution
+
+以下工具只讀取既有 benchmark pipeline artifact，不會重新執行 Demucs 或 ADTOF。它為每個 threshold 輸出 raw／processed／chart MIDI 的 F1、precision、recall、timing，以及候選失敗的固定 stage/category/reason 摘要；GMD drum-only 與 full-mix 會分開彙總：
+
+```bash
+PYTHONPATH=. "$PYTHON" scripts/run_raw_model_attribution.py \
+  --manifest /path/outside-repo/performance_manifest.json \
+  --benchmark-dir /tmp/groovescribe-performance-benchmark \
+  --output-dir /tmp/groovescribe-raw-model-attribution
+```
+
+要判定 Demucs 是否造成品質下降，manifest 必須另提供 repo 外、可驗證的 `reference_drums_audio_path`，並保留 reference-drums → ADTOF 與 Demucs-drums → ADTOF 的配對 artifact。沒有該音源時，report 必須回報 `reference_drums_audio_unavailable`；不得以 MIDI F1 偽造 SNR 或 stem quality 結論。`benchmark_split` 需明確標為 `development` 或 `holdout`；未同時具備兩者時，report 會回報 `holdout_insufficient`，不可將 development 資料當成唯一泛化 acceptance 證據。
+
+### Reference-drums controlled comparison
+
+當公開 manifest 的 full-mix item 已提供 checksum 驗證的 `reference_drums_audio_path` 時，可用下列工具量測 `reference-drums → ADTOF` 與既有 `full-mix → Demucs → ADTOF`。輸出只保留 F1、timing、per-drum 與 SNR 摘要，所有路徑及 command 都不會寫進 report：
+
+```bash
+PYTHONPATH=. "$PYTHON" scripts/run_reference_drums_controlled_benchmark.py \
+  --manifest /path/outside-repo/performance_manifest.json \
+  --benchmark-dir /path/outside-repo/performance-benchmark \
+  --output-dir /path/outside-repo/reference-drums-control \
+  --threshold 0.3
+```
+
+實驗先加 `--benchmark-split development` 選擇方向，再以 `--benchmark-split holdout` 做一次驗證。四個固定 scalar 候選（0.3 / 0.4 / 0.5 / 0.6）維持 `--candidate-strategy-profile scalar_v1`；若 development 確有改善，才可用 `--candidate-strategy-profile scalar_plus_separated_v1` 把 `separated_v1` 作為獨立 `preset_separated_v1` 候選比較。它絕不偽裝成 scalar threshold，也不會套用到 scalar 候選。這個 opt-in profile 的 holdout 必須提供同一 manifest 的 development report：`--development-evidence-report /path/outside-repo/performance_benchmark_report.json`；report 需要有 measured improvement，而且該 evidence 只可消費一次。`--adtof-threshold-preset separated_v1` 仍是單次 ADTOF 對照選項，主 scalar benchmark 會明確拒絕其混用，而不是靜默忽略 preset。reference-drums controlled benchmark 也會在 preset 時只配對 `preset_separated_v1` artifacts，避免把 ADTOF preset 差異誤歸因為 Demucs。即使實驗改善，未通過 fixtures 與可用公開 benchmark 的嚴格 acceptance 前，也不得把 preset 策略升為預設 `recommended_for_practice` 來源。Demo 預設與一般 CI 不受影響。
 
 真實音檔 pilot 會同時產出 V1 eval 與 threshold matrix 摘要：
 

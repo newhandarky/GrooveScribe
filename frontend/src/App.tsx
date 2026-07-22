@@ -1015,7 +1015,7 @@ function CandidateAnalysisPanel({
           >
             <span>版本 {candidate.rank ?? candidate.position ?? '-'}</span>
             <strong>{practiceRecommendationLabel(candidate.recommendation.recommendation)}</strong>
-            <small>{candidate.config.threshold !== null ? `靈敏度 ${candidate.config.threshold}` : candidate.status}</small>
+            <small>{candidateStrategyLabel(candidate.config.strategy, candidate.config.threshold, candidate.config.adtof_threshold_preset, candidate.status)}</small>
           </button>
         ))}
       </div>
@@ -1046,6 +1046,12 @@ function practiceRecommendationLabel(value: string): string {
   if (value === 'recommended_for_practice') return '推薦用於練習';
   if (value === 'reference_with_caveats') return '可作為參考，細節可能不準';
   return '不建議使用，建議重新分析';
+}
+
+function candidateStrategyLabel(strategy: string | null | undefined, threshold: number | null, preset: string | null, status: string): string {
+  if (strategy === 'scalar_threshold_v1' && threshold !== null) return `Scalar 靈敏度 ${threshold}`;
+  if (strategy === 'adtof_preset_v1' && preset === 'separated_v1') return 'separated_v1 preset';
+  return status;
 }
 
 function ResultModeGuidance({ pipeline }: { pipeline: TranscriptionResultResponse['pipeline'] }) {

@@ -296,13 +296,14 @@ export interface TranscriptionResultResponse {
         status: string;
         recommended_candidate_id: string | null;
         canonical_candidate_id?: string | null;
+        strategy_profile?: { schema_version: string; families: string[] };
       candidates: Array<{
         candidate_id: string;
         rank: number | null;
         position: number | null;
         status: string;
         selected: boolean;
-        config: { threshold: number | null; adtof_threshold_preset: string | null; tom_filter_preset: string | null };
+        config: { threshold: number | null; adtof_threshold_preset: string | null; strategy?: string | null; tom_filter_preset: string | null };
         recommendation: { score: number | null; recommendation: 'recommended_for_practice' | 'reference_with_caveats' | 'reanalyze_recommended'; reasons: string[]; rejected: boolean };
         preview: { musicxml_url: string | null };
         exports: Array<{ type: string; status: string; download_url: string | null }>;

@@ -35,8 +35,19 @@ _CANDIDATE_REASON_TEXTS = {
     "hi-hat 細節可能不完整",
     "tom 事件比例偏高",
     "節奏與譜面結構相對穩定",
+    "自動可演奏檢查尚未通過",
     "可用於跟練，但部分細節可能不準",
     "自動檢查未達適合練習的門檻",
+    "核心節奏結構仍不穩定",
+}
+_CANDIDATE_REANALYZE_ACTIONS = {
+    "candidate_not_completed": "候選分析未完成，請重新分析音檔。",
+    "musicxml_unparseable": "鼓譜產生不完整，請重新分析音檔。",
+    "kick_missing": "未偵測到大鼓，請使用鼓聲更清楚的音檔重新分析。",
+    "no_snare_detected": "未偵測到小鼓，請使用鼓聲更清楚的音檔重新分析。",
+    "too_few_events": "偵測到的鼓點過少，請使用節奏更清楚的音檔重新分析。",
+    "sparse_transcription": "鼓點覆蓋不足，請使用節奏更清楚的音檔重新分析。",
+    "mostly_tom_output": "Tom 判定比例過高，請使用鼓聲更清楚的音檔重新分析。",
 }
 _DRUM_COUNT_KEYS = {"kick", "snare", "closed_hat", "open_hat", "pedal_hat", "tom", "cymbal"}
 _PERFORMANCE_GATE_ISSUES = {
@@ -691,6 +702,7 @@ def _candidate_analysis_summary(
                     "adtof_threshold_preset": _safe_code(
                         config.get("base_threshold_preset") or config.get("adtof_threshold_preset")
                     ),
+                    "strategy": _safe_candidate_strategy(config.get("strategy") or config.get("threshold_strategy")),
                     "tom_filter_preset": _safe_code(config.get("tom_filter_preset")),
                 },
                 "recommendation": {
@@ -714,6 +726,7 @@ def _candidate_analysis_summary(
         "status": _safe_code(raw.get("status")) or "unknown",
         "recommended_candidate_id": recommended_candidate_id if recommended_candidate_id in candidate_ids else None,
         "canonical_candidate_id": canonical_candidate_id if canonical_candidate_id in candidate_ids else None,
+        "strategy_profile": _safe_candidate_strategy_profile(raw.get("strategy_profile")),
         "candidates": sorted(items, key=lambda item: (item["rank"] is None, item["rank"] or 999)),
     }
 
@@ -760,6 +773,19 @@ def _safe_candidate_id(value: object) -> str | None:
     return code if code and re.fullmatch(r"[A-Za-z0-9_-]+", code) else None
 
 
+def _safe_candidate_strategy(value: object) -> str | None:
+    return value if value in {"scalar_threshold_v1", "adtof_preset_v1"} else None
+
+
+def _safe_candidate_strategy_profile(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    families = source.get("families") if isinstance(source.get("families"), list) else []
+    return {
+        "schema_version": "1.0",
+        "families": [family for family in families if family in {"scalar_threshold_v1", "adtof_preset_v1"}],
+    }
+
+
 def _bool_or_none(value: object) -> bool | None:
     return value if isinstance(value, bool) else None
 
@@ -804,7 +830,14 @@ def _safe_drum_counts(value: object) -> dict[str, int]:
 def _candidate_reasons(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
-    return [item for item in value if isinstance(item, str) and item in _CANDIDATE_REASON_TEXTS]
+    reasons: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        public_text = _CANDIDATE_REANALYZE_ACTIONS.get(item, item if item in _CANDIDATE_REASON_TEXTS else None)
+        if public_text and public_text not in reasons:
+            reasons.append(public_text)
+    return reasons
 
 
 def _sanitize_postprocess_filters(value: object) -> dict[str, dict]:

@@ -13,7 +13,7 @@ from app.models.enums import ExportFileStatus, ExportFileType, JobStatus, Pipeli
 from app.schemas.transcriptions import PipelineSummaryResult, TranscriptionResultResponse
 from app.services.download_service import DownloadService
 from app.services.job_query_service import JobQueryService
-from app.services.result_service import ResultService, _sanitize_performance_gate, _sanitize_validation_summary
+from app.services.result_service import ResultService, _candidate_reasons, _sanitize_performance_gate, _sanitize_validation_summary
 from app.services.review_packet_service import ReviewPacketService
 from app.storage.keys import build_candidate_artifact_key, build_job_artifact_key
 from app.storage.local import LocalStorageAdapter
@@ -99,6 +99,19 @@ def test_performance_gate_keeps_needs_better_source_without_leaking_runtime_deta
     assert gate["delivery_allowed"] is False
     assert gate["blocking_issues"] == ["source_signal_insufficient"]
     assert gate["audio_alignment"] == {"status": "unavailable"}
+
+
+def test_candidate_reanalyze_reason_codes_become_safe_actionable_guidance() -> None:
+    reasons = _candidate_reasons(
+        ["kick_missing", "自動可演奏檢查尚未通過", "sparse_transcription", "stdout /tmp/private", "kick_missing"]
+    )
+
+    assert reasons == [
+        "未偵測到大鼓，請使用鼓聲更清楚的音檔重新分析。",
+        "自動可演奏檢查尚未通過",
+        "鼓點覆蓋不足，請使用節奏更清楚的音檔重新分析。",
+    ]
+    assert not any(token.lower() in str(reasons).lower() for token in UNSAFE_TOKENS)
 
 
 def _session():

@@ -49,6 +49,10 @@ class LocalPipelineConfig:
     pdf_renderer: str | None = None
     performance_gate_calibration: dict | None = None
     candidate_thresholds: tuple[float, ...] = ()
+    # Candidate families are deliberately explicit.  A scalar candidate must not
+    # silently inherit a class preset, while a preset candidate records the
+    # preset that actually produced its artifacts.
+    candidate_threshold_presets: tuple[str, ...] = ()
 
 
 @dataclass
@@ -79,11 +83,14 @@ class LocalPipelineRunner:
     def run(self, input_path: Path, output_dir: Path) -> LocalPipelineResult:
         if not input_path.exists():
             raise FileNotFoundError(f"input file does not exist: {input_path}")
-        if self.config.candidate_thresholds and self.config.transcription_backend != "adtof":
-            raise ValueError("candidate_thresholds_require_adtof_backend")
+        if (self.config.candidate_thresholds or self.config.candidate_threshold_presets) and self.config.transcription_backend != "adtof":
+            raise ValueError("candidate_strategies_require_adtof_backend")
+        unsupported_candidate_presets = set(self.config.candidate_threshold_presets) - {"separated_v1"}
+        if unsupported_candidate_presets:
+            raise ValueError("unsupported_candidate_threshold_preset")
 
         output_dir.mkdir(parents=True, exist_ok=True)
-        if self.config.candidate_thresholds and not self.config.mock_ai:
+        if (self.config.candidate_thresholds or self.config.candidate_threshold_presets) and not self.config.mock_ai:
             return self._run_candidate_analysis(input_path, output_dir)
         artifacts: dict[str, Path] = {"original_audio": input_path}
         stage_logs: list[StageLog] = []
@@ -416,22 +423,23 @@ class LocalPipelineRunner:
 
         candidates: list[dict] = []
         successful: list[tuple[dict, dict[str, Path], list[StageLog]]] = []
-        for index, threshold in enumerate(self.config.candidate_thresholds, start=1):
-            candidate_id = f"threshold_{str(threshold).replace('.', '_')}"
+        for index, candidate_spec in enumerate(self._candidate_specs(), start=1):
+            candidate_id = candidate_spec["candidate_id"]
             candidate_artifacts = dict(artifacts)
             candidate_logs: list[StageLog] = []
             candidate_dir = output_dir / "candidates" / candidate_id
             failed_stage = None
             # ADTOF accepts either its per-class threshold preset or a scalar threshold.
-            # Candidate analysis compares scalar thresholds, so the preset must not mask
-            # every candidate with the same --thresholds argument.
+            # Each candidate declares exactly one strategy, so a scalar candidate
+            # cannot be silently masked by a class-preset candidate.
             candidate_runner = LocalPipelineRunner(
                 replace(
                     self.config,
-                    adtof_threshold=threshold,
+                    adtof_threshold=candidate_spec["threshold"] if candidate_spec["threshold"] is not None else self.config.adtof_threshold,
                     adtof_class_thresholds=None,
-                    adtof_threshold_preset=None,
+                    adtof_threshold_preset=candidate_spec["adtof_threshold_preset"],
                     candidate_thresholds=(),
+                    candidate_threshold_presets=(),
                 )
             )
             for stage_name, stage_fn in (
@@ -468,12 +476,13 @@ class LocalPipelineRunner:
                 "position": index,
                 "status": "failed" if failed_stage else "completed",
                 "config": {
-                    "threshold": threshold,
-                    "base_threshold_preset": self.config.adtof_threshold_preset,
-                    "threshold_strategy": "scalar_candidate",
+                    "threshold": candidate_spec["threshold"],
+                    "adtof_threshold_preset": candidate_spec["adtof_threshold_preset"],
+                    "strategy": candidate_spec["strategy"],
                     "tom_filter_preset": self.config.tom_filter_preset,
                 },
                 "failed_stage": failed_stage,
+                "failure_reason_code": _candidate_failure_reason_code(failed_stage),
                 "artifacts": {name: str(path) for name, path in candidate_artifacts.items() if name not in {"original_audio", "normalized_audio", "drums_stem", "accompaniment_stem"}},
                 "quality": quality,
                 "validation": validation,
@@ -511,14 +520,45 @@ class LocalPipelineRunner:
         }
         final_logs = [*shared_logs, *selected_logs]
         analysis = {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "status": "completed",
+            "strategy_profile": self._candidate_strategy_profile(),
             "recommended_candidate_id": candidate_id if ranked else None,
             "canonical_candidate_id": candidate_id,
             "candidates": candidates,
         }
         self._write_log(log_path, input_path, output_dir, "completed", final_logs, final_artifacts, analysis)
         return LocalPipelineResult("completed", output_dir, log_path, final_artifacts)
+
+    def _candidate_specs(self) -> tuple[dict[str, object], ...]:
+        scalar = tuple(
+            {
+                "candidate_id": f"threshold_{str(threshold).replace('.', '_')}",
+                "threshold": threshold,
+                "adtof_threshold_preset": None,
+                "strategy": "scalar_threshold_v1",
+            }
+            for threshold in self.config.candidate_thresholds
+        )
+        presets = tuple(
+            {
+                "candidate_id": f"preset_{preset}",
+                "threshold": None,
+                "adtof_threshold_preset": preset,
+                "strategy": "adtof_preset_v1",
+            }
+            for preset in self.config.candidate_threshold_presets
+        )
+        return scalar + presets
+
+    def _candidate_strategy_profile(self) -> dict[str, object]:
+        return {
+            "schema_version": "1.0",
+            "families": [
+                *(["scalar_threshold_v1"] if self.config.candidate_thresholds else []),
+                *(["adtof_preset_v1"] if self.config.candidate_threshold_presets else []),
+            ],
+        }
 
 
 def _now_iso() -> str:
@@ -531,6 +571,16 @@ def _serialize_error(exc: Exception) -> dict[str, str]:
         "code": getattr(exc, "code", exc.__class__.__name__),
         "message": str(exc),
     }
+
+
+def _candidate_failure_reason_code(failed_stage: str | None) -> str | None:
+    """Keep candidate failures actionable without forwarding runtime diagnostics."""
+
+    return {
+        "drum_transcription": "candidate_transcription_failed",
+        "midi_post_processing": "candidate_postprocess_failed",
+        "notation_generation": "candidate_notation_failed",
+    }.get(failed_stage)
 
 
 def _build_quality_summary(stage_logs: list[StageLog]) -> dict | None:

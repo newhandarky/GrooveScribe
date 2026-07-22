@@ -585,3 +585,160 @@ def test_error_breakdown_uses_canonical_candidate_artifacts(tmp_path: Path) -> N
     )
 
     assert script._canonical_candidate_root(run) == run / "candidates" / "threshold_0_3"
+
+
+def test_raw_model_attribution_reports_safe_stage_metrics_and_holdout_contract(tmp_path: Path, monkeypatch) -> None:
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("raw_model_attribution", root / "scripts" / "run_raw_model_attribution.py")
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"audio")
+    truth = _midi(
+        tmp_path / "truth.mid",
+        (ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),),
+    )
+    benchmark_dir = tmp_path / "benchmark"
+    notation = benchmark_dir / "runs" / "safe-item" / "candidates" / "threshold_0_3" / "notation"
+    midi = benchmark_dir / "runs" / "safe-item" / "candidates" / "threshold_0_3" / "midi"
+    _midi(midi / "raw_drum.mid", (ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),))
+    _midi(midi / "processed_drum.mid", (ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),))
+    _midi(notation / "performance_score.mid", (ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),))
+    log = benchmark_dir / "runs" / "safe-item" / "logs" / "pipeline.json"
+    log.parent.mkdir(parents=True)
+    log.write_text(
+        json.dumps(
+            {
+                "candidate_analysis": {
+                    "candidates": [
+                        {"candidate_id": "threshold_0_3", "status": "completed", "config": {"threshold": 0.3}},
+                        {
+                            "candidate_id": "threshold_0_6",
+                            "status": "failed",
+                            "failed_stage": "drum_transcription",
+                            "failure_reason_code": "candidate_transcription_failed",
+                            "config": {"threshold": 0.6},
+                        },
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"items": [{"id": "safe-item", "audio_path": str(audio), "ground_truth_midi_path": str(truth), "input_type": "full_mix"}]}), encoding="utf-8")
+    monkeypatch.setattr(script, "validate_item_provenance", lambda *_args, **_kwargs: None)
+
+    report = script.run_attribution(type("Config", (), {"manifest": manifest, "benchmark_dir": benchmark_dir, "output_dir": tmp_path / "report"})())
+
+    candidate = report["items"][0]["candidates"][0]
+    assert candidate["stages"]["raw"]["per_drum"]["kick"] == {"precision": 1.0, "recall": 1.0, "f1": 1.0}
+    failed = report["items"][0]["candidates"][1]
+    assert failed["failure_category"] == "transcription"
+    assert failed["failure_reason_code"] == "candidate_transcription_failed"
+    assert report["data_split"]["status"] == "holdout_insufficient"
+    assert report["separation_attribution"] == {
+        "status": "unavailable",
+        "reason": "reference_drums_audio_unavailable",
+        "reference_drums_item_count": 0,
+        "snr": {"status": "unavailable"},
+    }
+    assert "/tmp/" not in json.dumps(report)
+
+
+def test_reference_drums_controlled_benchmark_compares_paired_inputs_without_diagnostics(tmp_path: Path, monkeypatch) -> None:
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("reference_drums_controlled", root / "scripts" / "run_reference_drums_controlled_benchmark.py")
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+
+    class FakeTranscriber:
+        def transcribe(self, _audio: Path, output_dir: Path) -> None:
+            _midi(output_dir / "raw_drum.mid", (ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),))
+
+    class FakeFactory:
+        @staticmethod
+        def from_command_template_string(*_args, **_kwargs) -> FakeTranscriber:
+            return FakeTranscriber()
+
+    monkeypatch.setattr(script, "AdtofDrumTranscriber", FakeFactory)
+    monkeypatch.setattr(script, "validate_item_provenance", lambda *_args, **_kwargs: None)
+    items = []
+    benchmark_dir = tmp_path / "benchmark"
+    for item_id, split in (("development-item", "development"), ("holdout-item", "holdout")):
+        audio = tmp_path / f"{item_id}-mix.wav"
+        reference = tmp_path / f"{item_id}-drums.wav"
+        audio.write_bytes(b"mix")
+        reference.write_bytes(b"drums")
+        truth = _midi(tmp_path / f"{item_id}-truth.mid", (ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),))
+        raw = benchmark_dir / "runs" / item_id / "candidates" / "threshold_0_3" / "midi" / "raw_drum.mid"
+        _midi(raw, (ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),))
+        items.append({"id": item_id, "input_type": "full_mix", "audio_path": str(audio), "ground_truth_midi_path": str(truth), "reference_drums_audio_path": str(reference), "benchmark_split": split})
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"items": items}), encoding="utf-8")
+
+    report = script.run_controlled_benchmark(
+        type("Config", (), {"manifest": manifest, "benchmark_dir": benchmark_dir, "output_dir": tmp_path / "report", "threshold": 0.3, "adtof_command_template": "safe", "adtof_device": "cpu", "adtof_timeout_seconds": 1, "no_resume": False})()
+    )
+
+    assert report["status"] == "completed"
+    assert report["summary"]["measured_item_count"] == 2
+    assert report["items"][0]["reference_drums_adtof"]["f1"] == 1.0
+    assert report["items"][0]["full_mix_demucs_adtof"]["f1"] == 1.0
+    assert report["experiment_decision"] == {"status": "not_selected", "reason": "evidence_inconclusive"}
+    assert "/tmp/" not in json.dumps(report)
+
+
+def test_reference_drums_controlled_benchmark_pairs_separated_preset_artifacts(tmp_path: Path, monkeypatch) -> None:
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("reference_drums_controlled_preset", root / "scripts" / "run_reference_drums_controlled_benchmark.py")
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    monkeypatch.setattr(script, "validate_item_provenance", lambda *_args, **_kwargs: None)
+    item_id = "preset-item"
+    benchmark_dir = tmp_path / "benchmark"
+    raw = benchmark_dir / "runs" / item_id / "candidates" / "preset_separated_v1" / "midi" / "raw_drum.mid"
+    _midi(raw, (ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),))
+    truth = _midi(tmp_path / "truth.mid", (ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),))
+    reference = tmp_path / "reference.wav"
+    reference.write_bytes(b"drums")
+
+    assert script._candidate_id(0.3, "separated_v1") == "preset_separated_v1"
+    assert script._candidate_raw_midi(benchmark_dir, item_id, script._candidate_id(0.3, "separated_v1")) == raw
+    assert script._candidate_raw_midi(benchmark_dir, item_id, "threshold_0_3") is None
+
+
+def test_reference_drums_controlled_benchmark_separates_reference_artifacts_by_strategy(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("reference_drums_controlled_strategy_paths", root / "scripts" / "run_reference_drums_controlled_benchmark.py")
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+
+    output = tmp_path / "report"
+    scalar = output / "items" / "item" / "reference_drums_adtof" / script._candidate_id(0.3, None) / "raw_drum.mid"
+    preset = output / "items" / "item" / "reference_drums_adtof" / script._candidate_id(0.3, "separated_v1") / "raw_drum.mid"
+
+    assert scalar != preset
+    assert scalar.parent.name == "threshold_0_3"
+    assert preset.parent.name == "preset_separated_v1"
+
+
+def test_raw_model_attribution_whitelists_preset_candidate_strategy() -> None:
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("raw_model_attribution_preset", root / "scripts" / "run_raw_model_attribution.py")
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+
+    public = script._public_candidate({"candidate_id": "preset_separated_v1", "threshold": None, "strategy": "adtof_preset_v1", "adtof_threshold_preset": "separated_v1", "status": "completed", "stages": {}})
+
+    assert public["strategy"] == "adtof_preset_v1"
+    assert public["adtof_threshold_preset"] == "separated_v1"
+
+    inconsistent = script._public_candidate({"candidate_id": "invalid", "strategy": "scalar_threshold_v1", "adtof_threshold_preset": "separated_v1", "status": "completed", "stages": {}})
+    assert inconsistent["strategy"] == "scalar_threshold_v1"
+    assert inconsistent["adtof_threshold_preset"] is None
