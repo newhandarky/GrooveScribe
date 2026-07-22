@@ -2,6 +2,9 @@
   "schema_version": "1.0",
   "description": "External authorized performance benchmark manifest. Audio and MIDI paths are local-only and are never copied into reports.",
   "required_item_fields": ["id", "audio_path", "ground_truth_midi_path", "tempo_bpm", "time_signature", "input_type", "license", "license_url", "source", "source_release", "renderer", "sha256", "usage_scope", "calibration_eligible", "ground_truth_verified", "synthetic_full_mix", "acceptance"],
+  "optional_item_fields": ["reference_drums_audio_path", "benchmark_split"],
+  "benchmark_split_values": ["development", "holdout"],
+  "reference_drums_audio_path_note": "External-only verified isolated drums audio. Required before separation attribution or SNR can be measured; never copied into reports.",
   "input_type_values": ["drum_only", "full_mix"],
   "acceptance_fields": ["minimum_f1", "minimum_per_drum_f1", "minimum_core_groove_accuracy", "maximum_mean_timing_error_ticks"],
   "renderer_values": ["soundfont", "sampled_drum_renderer", "synthetic_signal"]

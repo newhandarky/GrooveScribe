@@ -31,15 +31,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-manifest", type=Path, required=True)
     parser.add_argument("--gmd-limit", type=int, default=12)
     parser.add_argument("--slakh-limit", type=int, default=12)
+    parser.add_argument(
+        "--slakh-holdout-count",
+        type=int,
+        default=1,
+        help="Reserve this many selected BabySlakh tracks for holdout (minimum 1 when at least 2 tracks are selected).",
+    )
     return parser.parse_args()
 
 
 def bootstrap(config: argparse.Namespace) -> dict[str, Any]:
     gmd_items, gmd_reason = _collect_gmd(config.gmd_root, limit=config.gmd_limit)
-    slakh_items, slakh_reason = _collect_slakh(config.slakh_root, limit=config.slakh_limit)
+    slakh_items, slakh_reason = _collect_slakh(
+        config.slakh_root,
+        limit=config.slakh_limit,
+        holdout_count=config.slakh_holdout_count,
+    )
     status = "completed" if len(gmd_items) >= config.gmd_limit and len(slakh_items) >= config.slakh_limit else "blocked"
     manifest = {
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "kind": "external_licensed_performance_benchmark",
         "private_manifest": True,
         "items": [*gmd_items, *slakh_items],
@@ -98,18 +108,19 @@ def _collect_gmd(root: Path, *, limit: int) -> tuple[list[dict[str, Any]], str |
                     "source_id": source_id,
                 },
                 synthetic_full_mix=False,
+                benchmark_split="development",
             )
         )
     return items, None if len(items) >= limit else "gmd_insufficient_valid_pairs"
 
 
-def _collect_slakh(root: Path, *, limit: int) -> tuple[list[dict[str, Any]], str | None]:
+def _collect_slakh(root: Path, *, limit: int, holdout_count: int = 1) -> tuple[list[dict[str, Any]], str | None]:
     try:
         import yaml
     except ImportError:
         return [], "slakh_yaml_parser_unavailable"
     tracks = sorted(path for path in root.rglob("metadata.yaml") if path.parent.name.startswith("Track"))
-    items = []
+    candidates: list[tuple[Path, Path, Path | None, list[str], str, float, str]] = []
     for metadata_path in tracks:
         track = metadata_path.parent
         mix = _find_one(track, "mix.wav") or _find_one(track, "mix.flac")
@@ -123,12 +134,24 @@ def _collect_slakh(root: Path, *, limit: int) -> tuple[list[dict[str, Any]], str
         if not drum_stems:
             continue
         midi_paths = [track / "MIDI" / f"{stem}.mid" for stem in drum_stems]
-        if not all(path.exists() for path in midi_paths):
+        stem_paths = [track / "stems" / f"{stem}.wav" for stem in drum_stems]
+        if not all(path.exists() for path in midi_paths) or not all(path.is_file() for path in stem_paths):
             continue
+        # The controlled comparison needs a single reference waveform. Multi-stem
+        # drum kits remain valid benchmark items, but are deliberately not mixed
+        # here because generated mixtures would add an untracked transformation.
+        reference_drums = stem_paths[0] if len(stem_paths) == 1 else None
         merged = track / ".groovescribe-benchmark-drums.mid"
         _merge_drum_midis(midi_paths, merged)
         tempo, time_signature = _midi_timing(merged)
         track_id = track.name
+        candidates.append((mix, merged, reference_drums, drum_stems, track_id, tempo, time_signature))
+        if len(candidates) >= limit:
+            break
+    items = []
+    selected_holdout_count = min(max(0, holdout_count), max(0, len(candidates) - 1))
+    holdout_start = len(candidates) - selected_holdout_count
+    for index, (mix, merged, reference_drums, drum_stems, track_id, tempo, time_signature) in enumerate(candidates):
         items.append(
             _item(
                 item_id=f"slakh-{track_id.lower()}",
@@ -145,10 +168,10 @@ def _collect_slakh(root: Path, *, limit: int) -> tuple[list[dict[str, Any]], str
                 tags=["synthetic_full_mix"],
                 metadata={"source_id": track_id, "drum_stem_ids": drum_stems},
                 synthetic_full_mix=True,
+                reference_drums_audio=reference_drums,
+                benchmark_split="holdout" if index >= holdout_start else "development",
             )
         )
-        if len(items) >= limit:
-            break
     return items, None if len(items) >= limit else "slakh_insufficient_valid_pairs"
 
 
@@ -168,8 +191,10 @@ def _item(
     tags: list[str],
     metadata: dict[str, Any],
     synthetic_full_mix: bool,
+    reference_drums_audio: Path | None = None,
+    benchmark_split: str = "development",
 ) -> dict[str, Any]:
-    return {
+    item = {
         "id": item_id,
         "audio_path": str(audio.resolve()),
         "ground_truth_midi_path": str(midi.resolve()),
@@ -187,6 +212,7 @@ def _item(
         "ground_truth_verified": True,
         "synthetic_full_mix": synthetic_full_mix,
         "real_audio_verified": not synthetic_full_mix,
+        "benchmark_split": benchmark_split,
         "selection_tags": tags,
         "source_metadata": metadata,
         "acceptance": {
@@ -196,6 +222,10 @@ def _item(
             "maximum_mean_timing_error_ticks": 72,
         },
     }
+    if reference_drums_audio is not None:
+        item["reference_drums_audio_path"] = str(reference_drums_audio.resolve())
+        item["sha256"]["reference_drums_audio"] = _sha256(reference_drums_audio)
+    return item
 
 
 def _gmd_tags(midi_path: Path, tempo: float) -> list[str]:

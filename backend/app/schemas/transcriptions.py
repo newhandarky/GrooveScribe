@@ -221,6 +221,7 @@ class CandidateExportResult(BaseModel):
 class CandidateConfigSummary(BaseModel):
     threshold: float | None = None
     adtof_threshold_preset: str | None = None
+    strategy: str | None = None
     tom_filter_preset: str | None = None
 
 
@@ -255,6 +256,7 @@ class PipelineCandidateAnalysis(BaseModel):
     status: str = "unknown"
     recommended_candidate_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]+$")
     canonical_candidate_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]+$")
+    strategy_profile: dict = Field(default_factory=dict)
     candidates: list[PipelineCandidateResult] = Field(default_factory=list)
 
 

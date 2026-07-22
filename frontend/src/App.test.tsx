@@ -578,7 +578,7 @@ describe('local app smoke rendering', () => {
     analysis.candidates[0].recommendation = {
       score: 0,
       recommendation: 'reanalyze_recommended',
-      reasons: ['自動檢查未達適合練習的門檻'],
+      reasons: ['未偵測到大鼓，請使用鼓聲更清楚的音檔重新分析。'],
       rejected: true,
     };
     analysis.candidates[0].validation = {
@@ -592,6 +592,7 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('不建議使用，建議重新分析');
     expect(html).toContain('/candidates/threshold_0_4/download/midi');
     expect(html).not.toContain('推薦用於練習');
+    expect(html).toContain('未偵測到大鼓，請使用鼓聲更清楚的音檔重新分析。');
     expect(previewHtml).toContain('候選 1 · 不建議使用，建議重新分析');
     expect(previewHtml).toContain('candidate_preview_only');
   });

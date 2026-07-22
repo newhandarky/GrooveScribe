@@ -79,6 +79,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional comma-separated true-AI candidate thresholds, e.g. 0.3,0.4,0.5,0.6",
     )
+    parser.add_argument(
+        "--candidate-threshold-presets",
+        default=None,
+        help="Optional comma-separated opt-in candidate presets; currently only separated_v1 is supported.",
+    )
     return parser.parse_args()
 
 
@@ -141,6 +146,7 @@ def main() -> int:
         pdf_renderer=args.pdf_renderer,
         performance_gate_calibration=_load_json(args.performance_gate_calibration),
         candidate_thresholds=_parse_thresholds(args.candidate_thresholds),
+        candidate_threshold_presets=_parse_candidate_presets(args.candidate_threshold_presets),
     )
     result = LocalPipelineRunner(config).run(args.input, args.output_dir)
     print(
@@ -180,6 +186,15 @@ def _parse_thresholds(value: str | None) -> tuple[float, ...]:
     if not thresholds or any(item <= 0 or item > 1 for item in thresholds):
         raise SystemExit("--candidate-thresholds must contain values between 0 and 1")
     return thresholds
+
+
+def _parse_candidate_presets(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    presets = tuple(item.strip() for item in value.split(",") if item.strip())
+    if len(set(presets)) != len(presets) or any(preset != "separated_v1" for preset in presets):
+        raise SystemExit("--candidate-threshold-presets currently supports separated_v1 only")
+    return presets
 
 
 if __name__ == "__main__":

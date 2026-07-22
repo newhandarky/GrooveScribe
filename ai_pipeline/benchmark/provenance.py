@@ -65,6 +65,19 @@ def validate_item_provenance(
         return "benchmark_artifact_must_be_outside_repo"
     if checksums.get("audio") != sha256(audio) or checksums.get("ground_truth_midi") != sha256(ground_truth):
         return "benchmark_checksum_mismatch"
+    reference_drums = _optional_path(item.get("reference_drums_audio_path"))
+    if reference_drums is not None:
+        if not reference_drums.is_file():
+            return "benchmark_artifact_missing"
+        if repository_root is not None and _is_within(reference_drums, repository_root):
+            return "benchmark_artifact_must_be_outside_repo"
+        if checksums.get("reference_drums_audio") != sha256(reference_drums):
+            return "benchmark_checksum_mismatch"
+    elif "reference_drums_audio_path" in item or "reference_drums_audio" in checksums:
+        return "benchmark_provenance_invalid"
+    split = item.get("benchmark_split")
+    if split is not None and split not in {"development", "holdout"}:
+        return "benchmark_provenance_invalid"
     return None
 
 
@@ -82,6 +95,10 @@ def _is_within(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _optional_path(value: object) -> Path | None:
+    return Path(value).expanduser() if isinstance(value, str) and value else None
 
 
 def _is_finite_number(value: object) -> bool:

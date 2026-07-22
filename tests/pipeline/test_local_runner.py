@@ -4,7 +4,7 @@ import struct
 import wave
 from pathlib import Path
 
-from ai_pipeline.local_runner import LocalPipelineConfig, LocalPipelineRunner
+from ai_pipeline.local_runner import LocalPipelineConfig, LocalPipelineRunner, _candidate_failure_reason_code
 
 
 def _write_wav(path: Path) -> None:
@@ -63,6 +63,13 @@ def test_local_runner_records_failed_stage(tmp_path) -> None:
     except FileNotFoundError:
         return
     raise AssertionError("expected FileNotFoundError")
+
+
+def test_candidate_failure_reason_codes_are_fixed_and_do_not_forward_runtime_messages() -> None:
+    assert _candidate_failure_reason_code("drum_transcription") == "candidate_transcription_failed"
+    assert _candidate_failure_reason_code("midi_post_processing") == "candidate_postprocess_failed"
+    assert _candidate_failure_reason_code("notation_generation") == "candidate_notation_failed"
+    assert _candidate_failure_reason_code("stdout /tmp/private") is None
 
 
 def test_true_ai_candidate_analysis_reuses_preprocessing_and_separation_once(tmp_path, monkeypatch) -> None:
@@ -201,3 +208,47 @@ def test_candidate_analysis_keeps_a_canonical_artifact_without_recommending_hard
     assert analysis["canonical_candidate_id"] == "threshold_0_3"
     assert [candidate.get("rank") for candidate in analysis["candidates"]] == [None, None]
     assert [candidate["selected"] for candidate in analysis["candidates"]] == [True, False]
+
+
+def test_candidate_analysis_records_separated_preset_as_a_distinct_strategy(tmp_path, monkeypatch) -> None:
+    input_path = tmp_path / "input.wav"
+    _write_wav(input_path)
+    transcriber_configs: list[tuple[float, str | None]] = []
+
+    def write(path, content=b"artifact"):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        return path
+
+    def preprocess(_self, _artifacts, output_dir):
+        return {"normalized_audio": write(output_dir / "audio" / "normalized.wav")}, {}
+
+    def separate(_self, _artifacts, output_dir):
+        return {"drums_stem": write(output_dir / "stems" / "drums.wav")}, {}
+
+    def transcribe(self, _artifacts, output_dir):
+        transcriber_configs.append((self.config.adtof_threshold, self.config.adtof_threshold_preset))
+        return {"raw_midi": write(output_dir / "midi" / "raw_drum.mid")}, {}
+
+    def postprocess(_self, _artifacts, output_dir):
+        return {"processed_midi": write(output_dir / "midi" / "processed.mid"), "drum_events": write(output_dir / "midi" / "events.json", b"{}")}, {"input_event_count": 12, "output_event_count": 12, "processed_drum_counts": {"kick": 3, "snare": 3, "closed_hat": 6}, "quality_flags": [], "warnings": []}
+
+    def notation(_self, _artifacts, output_dir):
+        return {"musicxml": write(output_dir / "notation" / "score.musicxml"), "performance_midi": write(output_dir / "notation" / "performance_score.mid"), "chart_events": write(output_dir / "notation" / "chart_events.json", b"{}")}, {"validation": {"musicxml": {"available": True, "parseable": True, "warnings": []}}, "readability": {"dense_measure_count": 0}, "performance_gate": {"verdict": "playable_but_low_confidence"}}
+
+    monkeypatch.setattr(LocalPipelineRunner, "_run_audio_preprocessing", preprocess)
+    monkeypatch.setattr(LocalPipelineRunner, "_run_source_separation", separate)
+    monkeypatch.setattr(LocalPipelineRunner, "_run_drum_transcription", transcribe)
+    monkeypatch.setattr(LocalPipelineRunner, "_run_midi_post_processing", postprocess)
+    monkeypatch.setattr(LocalPipelineRunner, "_run_notation_generation", notation)
+
+    result = LocalPipelineRunner(LocalPipelineConfig(candidate_thresholds=(0.4,), candidate_threshold_presets=("separated_v1",))).run(input_path, tmp_path / "job")
+
+    analysis = json.loads(result.log_path.read_text(encoding="utf-8"))["candidate_analysis"]
+    assert result.status == "completed"
+    assert transcriber_configs == [(0.4, None), (0.5, "separated_v1")]
+    assert analysis["strategy_profile"] == {"schema_version": "1.0", "families": ["scalar_threshold_v1", "adtof_preset_v1"]}
+    assert [(candidate["candidate_id"], candidate["config"]["strategy"], candidate["config"]["threshold"]) for candidate in analysis["candidates"]] == [
+        ("threshold_0_4", "scalar_threshold_v1", 0.4),
+        ("preset_separated_v1", "adtof_preset_v1", None),
+    ]

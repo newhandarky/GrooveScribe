@@ -35,7 +35,7 @@ def test_candidate_recommendation_promotes_a_structurally_sound_practice_draft()
     assert result["recommendation"] == "recommended_for_practice"
     assert result["score"] >= 70
     assert result["rejected"] is False
-    assert result["profile"] == "practice_coverage_v2"
+    assert result["profile"] == "practice_coverage_v4"
 
 
 def test_candidate_recommendation_rejects_missing_snare_or_blocking_flags() -> None:
@@ -47,7 +47,7 @@ def test_candidate_recommendation_rejects_missing_snare_or_blocking_flags() -> N
 
     assert result == {
         "schema_version": "1.0",
-        "profile": "practice_coverage_v2",
+        "profile": "practice_coverage_v4",
         "score": 0,
         "recommendation": "reanalyze_recommended",
         "reasons": ["no_snare_detected", "sparse_transcription"],
@@ -79,4 +79,21 @@ def test_candidate_recommendation_prefers_complete_hihat_coverage_over_low_confi
     )
 
     assert complete["score"] > sparse["score"]
+    assert complete["recommendation"] == "reference_with_caveats"
+    assert "自動可演奏檢查尚未通過" in complete["reasons"]
     assert "hi-hat 節奏覆蓋偏少" in sparse["reasons"]
+
+
+def test_candidate_recommendation_does_not_promote_an_unstable_core_groove() -> None:
+    quality = _quality()
+    quality["performance_gate"]["playability"] = {"core_groove_stable": False}
+
+    result = evaluate_candidate_recommendation(
+        status="completed",
+        quality=quality,
+        validation=_validation(),
+    )
+
+    assert result["recommendation"] == "reference_with_caveats"
+    assert result["rejected"] is False
+    assert "核心節奏結構仍不穩定" in result["reasons"]

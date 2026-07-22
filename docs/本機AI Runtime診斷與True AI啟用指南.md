@@ -155,7 +155,15 @@ PYTHONPATH=. .venv-ai/bin/python scripts/run_performance_benchmark.py \
   --candidate-thresholds 0.3,0.4,0.5,0.6
 ```
 
-品質 profile 為版本化且決定性的規則；未通過結構驗證的候選不可被推薦。設定 manifest 後，缺少 artifact、checksum/provenance 失敗、reference acceptance 未通過或推薦劣於同組最佳候選都會以非零結束。未設定 manifest 時只會回報 `skipped`，不影響一般 CI。private manifest、SoundFont、音訊、MIDI、stems 與報告均必須留在 repo 外，也不進 git。
+品質 profile 為版本化且決定性的規則；未通過結構驗證的候選不可被推薦。設定 manifest 後，缺少 artifact、checksum/provenance 失敗、reference acceptance 未通過或推薦劣於同組最佳候選都會以非零結束。未設定 manifest 時只會回報 `skipped`，不影響一般 CI。benchmark 預設會安全重用「已完成、四個 threshold 完整匹配，且每個成功候選的 MIDI／timeline 都存在」的項目；明確記錄的候選失敗也會保留為量測結果，讓中斷後續跑不會重做前處理、Demucs 或 ADTOF。傳入 `--no-resume` 才會強制重跑。private manifest、SoundFont、音訊、MIDI、stems 與報告均必須留在 repo 外，也不進 git。
+
+### Raw-model attribution 與實驗前提
+
+`scripts/run_raw_model_attribution.py` 只量測既有 benchmark artifact，不會重新跑 Demucs／ADTOF。報告固定輸出每個 threshold 的 raw、processed、chart MIDI 指標與候選 failure category；不會輸出路徑、command 或 diagnostics。
+
+raw MIDI F1 低只代表「Demucs 或 raw model」尚未被分離，不能單獨判定 Demucs 有問題。只有 manifest 提供 repo 外、可驗證的 `reference_drums_audio_path`，且具備 reference-drums → ADTOF、Demucs-drums → ADTOF、full-mix → Demucs → ADTOF 的配對結果時，才可比較分離造成的損失；SNR 同樣僅在這種 reference drum audio 存在時量測。否則 report 必須為 `reference_drums_audio_unavailable`。
+
+manifest 也必須用 `benchmark_split: development | holdout` 區隔調整依據與最終 acceptance。缺少任一 split 時固定回報 `holdout_insufficient`，不會阻擋一般 CI，但不能宣告泛化品質已驗證。任何 Demucs／ADTOF 實驗 preset 都必須保持 True-AI opt-in，並先通過 generated fixtures 與 public benchmark 的非回歸比較；目前沒有因 attribution 不足而保留模型 preset。
 
 ## Opt-in True AI Smoke
 

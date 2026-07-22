@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import os
@@ -12,14 +13,24 @@ from typing import Any
 from ai_pipeline.notation.gate_calibration import apply_gate_calibration, calibrate_gate
 from ai_pipeline.benchmark.metrics import compare_drum_midi
 from ai_pipeline.benchmark.provenance import validate_item_provenance
+from ai_pipeline.midi.candidate_recommendation import evaluate_candidate_recommendation
 from ai_pipeline.midi.mapping import map_to_general_midi_drum
 from ai_pipeline.midi.simple_midi import parse_midi
+
+try:
+    from scripts.true_ai_runtime_defaults import default_adtof_command_template
+except ModuleNotFoundError:  # pragma: no cover - direct script execution
+    from true_ai_runtime_defaults import default_adtof_command_template
 
 
 _ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_PYTHON = _ROOT / ".venv-ai" / "bin" / "python"
 _UNSAFE = ("/Users/", "/tmp/", "/private/tmp/", "/var/folders/", "Traceback", "stdout", "stderr", "command_template")
 _DEFAULT_CANDIDATE_THRESHOLDS = ("0.3", "0.4", "0.5", "0.6")
+_CANDIDATE_STRATEGY_PROFILES = {
+    "scalar_v1": (),
+    "scalar_plus_separated_v1": ("separated_v1",),
+}
 _QUALITY_PROFILE = {
     "schema_version": "1.0",
     "name": "ground_truth_candidate_v1",
@@ -58,7 +69,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--python", type=Path, default=_DEFAULT_PYTHON)
     parser.add_argument(
         "--adtof-command-template",
-        default=os.environ.get("GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE"),
+        default=os.environ.get("GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE") or default_adtof_command_template(),
     )
     parser.add_argument("--adtof-device", default="cpu")
     parser.add_argument("--demucs-model-name", default="htdemucs")
@@ -76,6 +87,31 @@ def parse_args() -> argparse.Namespace:
         default=os.environ.get("GROOVESCRIBE_CANDIDATE_THRESHOLDS", ",".join(_DEFAULT_CANDIDATE_THRESHOLDS)),
         help="Comma-separated candidate thresholds evaluated from one shared preprocessing/Demucs run.",
     )
+    parser.add_argument(
+        "--candidate-strategy-profile",
+        choices=tuple(_CANDIDATE_STRATEGY_PROFILES),
+        default=os.environ.get("GROOVESCRIBE_CANDIDATE_STRATEGY_PROFILE", "scalar_v1"),
+        help="Versioned candidate family: scalar_v1 or the opt-in scalar_plus_separated_v1 experiment.",
+    )
+    parser.add_argument(
+        "--benchmark-split",
+        choices=("development", "holdout"),
+        default=None,
+        help="Run one manifest split. Run development before any holdout validation for an opt-in strategy.",
+    )
+    parser.add_argument(
+        "--development-evidence-report",
+        type=Path,
+        default=None,
+        help="Required for scalar_plus_separated_v1 holdout: matching development report with measured improvement.",
+    )
+    parser.add_argument(
+        "--no-resume",
+        action="store_false",
+        dest="resume",
+        help="Re-run every item instead of safely reusing completed matching candidate outputs.",
+    )
+    parser.set_defaults(resume=True)
     parser.add_argument("--mock-ai", action="store_true", help="Test-only: do not use as true-AI evidence")
     return parser.parse_args()
 
@@ -89,43 +125,61 @@ def run_benchmark(config: argparse.Namespace, *, process_runner=subprocess.run) 
     candidate_thresholds = _candidate_thresholds(getattr(config, "candidate_thresholds", None))
     if candidate_thresholds != _DEFAULT_CANDIDATE_THRESHOLDS:
         return _write_reports(config.output_dir, _blocked_report("candidate_thresholds_must_match_quality_profile"))
+    if getattr(config, "adtof_threshold_preset", None):
+        # Candidate analysis deliberately compares scalar thresholds. Passing a
+        # class preset here would otherwise be silently removed for each
+        # candidate, producing a report whose command line is semantically false.
+        return _write_reports(config.output_dir, _blocked_report("candidate_threshold_preset_requires_controlled_experiment"))
+    strategy_profile = _candidate_strategy_profile(getattr(config, "candidate_strategy_profile", None))
+    if strategy_profile is None:
+        return _write_reports(config.output_dir, _blocked_report("candidate_strategy_profile_invalid"))
     manifest = _load_manifest(config.manifest)
     if manifest is None:
         report = _skipped_report("benchmark_manifest_not_provided")
         return _write_reports(config.output_dir, report)
     items = manifest.get("items") if isinstance(manifest.get("items"), list) else []
+    requested_split = getattr(config, "benchmark_split", None)
+    if requested_split is not None:
+        items = [item for item in items if isinstance(item, dict) and item.get("benchmark_split") == requested_split]
     if not items:
         return _write_reports(config.output_dir, _skipped_report("benchmark_manifest_empty"))
+    reservation_path, holdout_reason = _reserve_holdout_evidence(config, strategy_profile, config.manifest, requested_split)
+    if holdout_reason is not None:
+        return _write_reports(config.output_dir, _blocked_report(holdout_reason))
 
-    runs: list[dict[str, Any]] = []
-    for raw in items:
-        if not isinstance(raw, dict):
-            continue
-        runs.append(_run_item(raw, config, process_runner))
-    calibration = calibrate_gate(runs)
-    for run in runs:
-        gate = run.get("performance_gate")
-        if isinstance(gate, dict):
-            calibrated_gate = apply_gate_calibration(gate, calibration)
-            calibrated_gate["ground_truth_verified"] = bool(run.get("ground_truth_verified"))
-            run["calibrated_gate"] = _public_calibrated_gate(calibrated_gate)
-            run["performance_gate"] = _public_performance_gate(gate)
-    recommendation_failures = sum(
-        run.get("candidate_recommendation_validation", {}).get("status") == "failed" for run in runs
-    )
-    reference_failures = sum(
-        run.get("status") == "completed" and run.get("ground_truth_passed") is False for run in runs
-    )
-    measured_count = sum(run.get("ground_truth_eval", {}).get("status") == "measured" for run in runs)
-    report = {
+    try:
+        runs: list[dict[str, Any]] = []
+        for raw in items:
+            if not isinstance(raw, dict):
+                continue
+            runs.append(_run_item(raw, config, process_runner))
+        calibration = calibrate_gate(runs)
+        for run in runs:
+            gate = run.get("performance_gate")
+            if isinstance(gate, dict):
+                calibrated_gate = apply_gate_calibration(gate, calibration)
+                calibrated_gate["ground_truth_verified"] = bool(run.get("ground_truth_verified"))
+                run["calibrated_gate"] = _public_calibrated_gate(calibrated_gate)
+                run["performance_gate"] = _public_performance_gate(gate)
+        recommendation_failures = sum(
+            run.get("candidate_recommendation_validation", {}).get("status") == "failed" for run in runs
+        )
+        reference_failures = sum(
+            run.get("status") == "completed" and run.get("ground_truth_passed") is False for run in runs
+        )
+        measured_count = sum(run.get("ground_truth_eval", {}).get("status") == "measured" for run in runs)
+        report = {
         "schema_version": "1.0",
         "status": _benchmark_status(runs, measured_count=measured_count, reference_failures=reference_failures, recommendation_failures=recommendation_failures),
-        "quality_profile": _QUALITY_PROFILE,
+        "quality_profile": {**_QUALITY_PROFILE, "candidate_strategy_profile": strategy_profile},
+        "benchmark_split": requested_split,
+        "manifest_sha256": _file_sha256(config.manifest),
         "ground_truth_verified": any(run.get("ground_truth_verified") is True for run in runs),
         "real_audio_verified": any(run.get("real_audio_verified") is True for run in runs),
         "synthetic_full_mix_present": any(run.get("synthetic_full_mix") is True for run in runs),
         "runs": runs,
         "gate_calibration": calibration,
+        "strategy_comparison": _strategy_comparison(runs),
         "summary": {
             "run_count": len(runs),
             "measured_count": measured_count,
@@ -134,8 +188,13 @@ def run_benchmark(config: argparse.Namespace, *, process_runner=subprocess.run) 
             "reference_failure_count": reference_failures,
             "candidate_recommendation_failure_count": recommendation_failures,
         },
-    }
-    return _write_reports(config.output_dir, report)
+        }
+        written = _write_reports(config.output_dir, report)
+        _finalize_holdout_reservation(reservation_path, measured_count > 0)
+        return written
+    except Exception:
+        _finalize_holdout_reservation(reservation_path, False)
+        raise
 
 
 def _run_item(item: dict[str, Any], config: argparse.Namespace, process_runner) -> dict[str, Any]:
@@ -163,12 +222,21 @@ def _run_item(item: dict[str, Any], config: argparse.Namespace, process_runner) 
     candidate_thresholds = _candidate_thresholds(getattr(config, "candidate_thresholds", None))
     if candidate_thresholds and not config.mock_ai:
         command.extend(["--candidate-thresholds", ",".join(candidate_thresholds)])
+    candidate_presets = _CANDIDATE_STRATEGY_PROFILES[_candidate_strategy_profile(getattr(config, "candidate_strategy_profile", None)) or "scalar_v1"]
+    if candidate_presets and not config.mock_ai:
+        command.extend(["--candidate-threshold-presets", ",".join(candidate_presets)])
     if isinstance(item.get("tempo_bpm"), (int, float)):
         command.extend(["--tempo-bpm", str(item["tempo_bpm"])])
-    completed = process_runner(command, cwd=str(_ROOT), capture_output=True, text=True, check=False)
-    if completed.returncode != 0:
-        return {**base, "status": "failed", "reason": "pipeline_failed", "ground_truth_verified": False}
-    pipeline = _json_file(output_dir / "logs" / "pipeline.json")
+    pipeline = _completed_pipeline_for_resume(
+        output_dir,
+        strategy_profile=_candidate_strategy_profile(getattr(config, "candidate_strategy_profile", None)) or "scalar_v1",
+    ) if getattr(config, "resume", True) else None
+    pipeline_reused = pipeline is not None
+    if pipeline is None:
+        completed = process_runner(command, cwd=str(_ROOT), capture_output=True, text=True, check=False)
+        if completed.returncode != 0:
+            return {**base, "status": "failed", "reason": "pipeline_failed", "ground_truth_verified": False}
+        pipeline = _json_file(output_dir / "logs" / "pipeline.json")
     quality = pipeline.get("quality") if isinstance(pipeline.get("quality"), dict) else {}
     gate = quality.get("performance_gate") if isinstance(quality.get("performance_gate"), dict) else {}
     acceptance = item.get("acceptance") if isinstance(item.get("acceptance"), dict) else {}
@@ -207,7 +275,47 @@ def _run_item(item: dict[str, Any], config: argparse.Namespace, process_runner) 
         "artifacts": {"ref": f"benchmark:{item_id}", "performance_midi": True, "performance_musicxml": True},
         "candidate_evaluation": candidate_evaluation["candidates"],
         "candidate_recommendation_validation": candidate_evaluation["validation"],
+        "pipeline_reused": pipeline_reused,
     }
+
+
+def _completed_pipeline_for_resume(output_dir: Path, *, strategy_profile: str = "scalar_v1") -> dict[str, Any] | None:
+    """Return only a complete, profile-matching result that is safe to measure again.
+
+    A partial pipeline is never resumed at an arbitrary stage.  Re-running it is
+    safer than mixing artifacts from different executions, while a completed
+    four-candidate result (including an explicitly recorded failed candidate)
+    can be measured again without repeating preprocessing, Demucs, or ADTOF.
+    """
+    pipeline = _json_file(output_dir / "logs" / "pipeline.json")
+    if pipeline.get("status") != "completed":
+        return None
+    analysis = pipeline.get("candidate_analysis")
+    candidates = analysis.get("candidates") if isinstance(analysis, dict) else None
+    expected_presets = _CANDIDATE_STRATEGY_PROFILES.get(strategy_profile)
+    if expected_presets is None or not isinstance(candidates, list) or len(candidates) != len(_DEFAULT_CANDIDATE_THRESHOLDS) + len(expected_presets):
+        return None
+    expected = {float(value) for value in _DEFAULT_CANDIDATE_THRESHOLDS}
+    observed: set[float] = set()
+    observed_presets: set[str] = set()
+    for candidate in candidates:
+        if not isinstance(candidate, dict) or candidate.get("status") not in {"completed", "failed"}:
+            return None
+        config = candidate.get("config")
+        threshold = config.get("threshold") if isinstance(config, dict) else None
+        preset = config.get("adtof_threshold_preset") if isinstance(config, dict) else None
+        if isinstance(threshold, (int, float)):
+            observed.add(float(threshold))
+        elif isinstance(preset, str) and preset in expected_presets:
+            observed_presets.add(preset)
+        else:
+            return None
+        candidate_id = _safe_id(candidate.get("candidate_id"))
+        if candidate.get("status") == "completed":
+            notation = output_dir / "candidates" / candidate_id / "notation"
+            if not (notation / "performance_score.mid").is_file() or not (notation / "chart_events.json").is_file():
+                return None
+    return pipeline if observed == expected and observed_presets == set(expected_presets) else None
 
 
 def _benchmark_status(
@@ -238,6 +346,93 @@ def _candidate_thresholds(value: object) -> tuple[str, ...]:
     return _DEFAULT_CANDIDATE_THRESHOLDS
 
 
+def _candidate_strategy_profile(value: object) -> str | None:
+    profile = "scalar_v1" if value is None else value
+    return profile if profile in _CANDIDATE_STRATEGY_PROFILES else None
+
+
+def _holdout_evidence_reason(config: argparse.Namespace, strategy_profile: str, manifest_path: Path | None, split: object) -> str | None:
+    if strategy_profile != "scalar_plus_separated_v1" or split != "holdout":
+        return None
+    evidence_path = getattr(config, "development_evidence_report", None)
+    if not isinstance(evidence_path, Path) or _is_within_repo(evidence_path) or not evidence_path.is_file():
+        return "development_evidence_required"
+    evidence = _json_file(evidence_path)
+    comparison = evidence.get("strategy_comparison") if isinstance(evidence.get("strategy_comparison"), dict) else {}
+    quality_profile = evidence.get("quality_profile") if isinstance(evidence.get("quality_profile"), dict) else {}
+    if (
+        evidence.get("benchmark_split") != "development"
+        or evidence.get("manifest_sha256") != _file_sha256(manifest_path)
+        or quality_profile.get("candidate_strategy_profile") != strategy_profile
+        or comparison.get("status") != "measured"
+        or comparison.get("improved") is not True
+    ):
+        return "development_evidence_invalid"
+    return None
+
+
+def _reserve_holdout_evidence(
+    config: argparse.Namespace, strategy_profile: str, manifest_path: Path | None, split: object
+) -> tuple[Path | None, str | None]:
+    reason = _holdout_evidence_reason(config, strategy_profile, manifest_path, split)
+    if reason is not None:
+        return None, reason
+    if strategy_profile != "scalar_plus_separated_v1" or split != "holdout":
+        return None, None
+    evidence_path = getattr(config, "development_evidence_report", None)
+    if not isinstance(evidence_path, Path):
+        return None, "development_evidence_required"
+    reservation_path = evidence_path.with_name(f"{evidence_path.stem}.holdout-reservation.json")
+    consumed_path = evidence_path.with_name(f"{evidence_path.stem}.holdout-consumed.json")
+    if consumed_path.exists():
+        return None, "holdout_evidence_already_consumed"
+    try:
+        with reservation_path.open("x", encoding="utf-8") as handle:
+            json.dump({"schema_version": "1.0", "status": "reserved"}, handle)
+            handle.write("\n")
+    except FileExistsError:
+        return None, "holdout_evidence_already_consumed"
+    except OSError:
+        return None, "holdout_evidence_reservation_failed"
+    return reservation_path, None
+
+
+def _finalize_holdout_reservation(reservation_path: Path | None, measured: bool) -> None:
+    if reservation_path is None:
+        return
+    try:
+        if measured:
+            reservation_path.replace(reservation_path.with_name(reservation_path.name.replace("-reservation", "-consumed")))
+        elif reservation_path.exists():
+            reservation_path.unlink()
+    except OSError:
+        # Keep the reservation in place on an ambiguous finalize failure: this
+        # fails closed rather than permitting an accidental second holdout run.
+        return
+
+
+def _file_sha256(path: Path | None) -> str | None:
+    if path is None or not path.is_file():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _strategy_comparison(runs: list[dict[str, Any]]) -> dict[str, object]:
+    pairs: list[tuple[float, float]] = []
+    for run in runs:
+        candidates = run.get("candidate_evaluation") if isinstance(run.get("candidate_evaluation"), list) else []
+        scalar = [candidate.get("ground_truth_eval", {}).get("f1") for candidate in candidates if isinstance(candidate, dict) and candidate.get("strategy") == "scalar_threshold_v1"]
+        preset = next((candidate.get("ground_truth_eval", {}).get("f1") for candidate in candidates if isinstance(candidate, dict) and candidate.get("candidate_id") == "preset_separated_v1"), None)
+        scalar_values = [float(value) for value in scalar if isinstance(value, (int, float)) and not isinstance(value, bool)]
+        if scalar_values and isinstance(preset, (int, float)) and not isinstance(preset, bool):
+            pairs.append((max(scalar_values), float(preset)))
+    if not pairs:
+        return {"status": "unavailable", "scalar_macro_f1": None, "separated_macro_f1": None, "improved": False}
+    scalar_macro = sum(scalar for scalar, _preset_value in pairs) / len(pairs)
+    preset_macro = sum(preset for _scalar, preset in pairs) / len(pairs)
+    return {"status": "measured", "scalar_macro_f1": round(scalar_macro, 4), "separated_macro_f1": round(preset_macro, 4), "improved": preset_macro > scalar_macro}
+
+
 def _evaluate_candidates(
     analysis: dict[str, Any], *, output_dir: Path, ground_truth: Path, acceptance: dict
 ) -> dict[str, Any]:
@@ -247,14 +442,19 @@ def _evaluate_candidates(
         for candidate in raw_candidates
         if isinstance(candidate, dict)
     ]
-    recommended_id = analysis.get("recommended_candidate_id") if isinstance(analysis.get("recommended_candidate_id"), str) else None
     measured = [candidate for candidate in candidates if candidate.get("ground_truth_eval", {}).get("status") == "measured"]
-    recommended = next((candidate for candidate in measured if candidate["candidate_id"] == recommended_id), None)
     eligible = [candidate for candidate in measured if candidate.get("eligible_for_recommendation")]
     if not raw_candidates:
         return {"candidates": [], "validation": {"status": "not_applicable", "reason": "candidate_analysis_unavailable"}}
-    if not eligible or recommended is None:
+    if not eligible:
         return {"candidates": [_public_candidate_evaluation(candidate) for candidate in candidates], "validation": {"status": "not_applicable", "reason": "no_measured_recommended_candidate"}}
+    # Re-evaluate existing artifacts with the current deterministic profile. This
+    # makes a resumed benchmark measure the rule that new jobs would use, rather
+    # than silently trusting a recommendation serialized by an older profile.
+    recommended = min(
+        eligible,
+        key=lambda candidate: (-int(candidate["recommendation"].get("score") or 0), int(candidate.get("_position") or 0)),
+    )
     best = max(eligible, key=_candidate_quality_key)
     passed = _recommendation_is_non_regressing(recommended, best)
     return {
@@ -276,10 +476,17 @@ def _evaluate_candidate(candidate: dict[str, Any], *, output_dir: Path, ground_t
     metrics = compare_drum_midi(midi, ground_truth, round_digits=None)
     core = _core_groove_accuracy(chart, ground_truth, round_digits=None) if chart.exists() else {"status": "unavailable", "accuracy": None}
     quality = candidate.get("quality") if isinstance(candidate.get("quality"), dict) else {}
-    recommendation = candidate.get("recommendation") if isinstance(candidate.get("recommendation"), dict) else {}
+    validation = candidate.get("validation") if isinstance(candidate.get("validation"), dict) else {}
+    recommendation = evaluate_candidate_recommendation(
+        status="completed" if candidate.get("status") == "completed" else "failed",
+        quality=quality,
+        validation=validation,
+    )
     return {
         "candidate_id": candidate_id,
+        "_position": int(candidate.get("position") or 0),
         "threshold": _public_threshold(candidate.get("config")),
+        "strategy": _public_candidate_strategy(candidate.get("config")),
         "status": "completed" if candidate.get("status") == "completed" else "failed",
         "selected": candidate.get("selected") is True,
         "eligible_for_recommendation": candidate.get("status") == "completed" and recommendation.get("rejected") is not True,
@@ -332,6 +539,16 @@ def _public_threshold(config: object) -> float | None:
         return None
     value = config.get("threshold")
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 < float(value) <= 1 else None
+
+
+def _public_candidate_strategy(config: object) -> str:
+    source = config if isinstance(config, dict) else {}
+    strategy = source.get("strategy") or source.get("threshold_strategy")
+    if strategy == "scalar_threshold_v1":
+        return strategy
+    if strategy == "adtof_preset_v1" and source.get("adtof_threshold_preset") == "separated_v1":
+        return strategy
+    return "unknown"
 
 
 def _public_counts(value: object) -> dict[str, int]:

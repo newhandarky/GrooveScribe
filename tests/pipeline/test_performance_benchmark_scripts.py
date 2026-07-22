@@ -41,6 +41,7 @@ def test_external_bootstrap_blocks_cleanly_when_roots_are_missing(tmp_path: Path
             "output_manifest": tmp_path / "private_manifest.json",
             "gmd_limit": 1,
             "slakh_limit": 1,
+            "slakh_holdout_count": 1,
         },
     )()
 
@@ -70,7 +71,9 @@ def test_external_bootstrap_writes_private_licensed_manifest_with_checksum_metad
         encoding="utf-8",
     )
     (slakh_track / "MIDI").mkdir(parents=True)
+    (slakh_track / "stems").mkdir(parents=True)
     (slakh_track / "mix.wav").write_bytes(b"slakh-mix")
+    (slakh_track / "stems" / "S00.wav").write_bytes(b"slakh-drums")
     write_drum_midi(
         slakh_track / "MIDI" / "S00.mid",
         (ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),),
@@ -89,6 +92,7 @@ def test_external_bootstrap_writes_private_licensed_manifest_with_checksum_metad
             "output_manifest": tmp_path / "private_manifest.json",
             "gmd_limit": 1,
             "slakh_limit": 1,
+            "slakh_holdout_count": 1,
         },
     )()
 
@@ -102,13 +106,16 @@ def test_external_bootstrap_writes_private_licensed_manifest_with_checksum_metad
         assert item["license"] == "CC BY 4.0"
         assert item["license_url"].startswith("https://")
         assert item["source_release"]
-        assert set(item["sha256"]) == {"audio", "ground_truth_midi"}
+        assert {"audio", "ground_truth_midi"}.issubset(item["sha256"])
         assert len(item["sha256"]["audio"]) == 64
         assert item["usage_scope"]
         assert item["ground_truth_verified"] is True
     slakh = next(item for item in manifest["items"] if item["input_type"] == "full_mix")
     assert slakh["synthetic_full_mix"] is True
     assert slakh["real_audio_verified"] is False
+    assert slakh["benchmark_split"] == "development"
+    assert slakh["reference_drums_audio_path"].endswith("S00.wav")
+    assert len(slakh["sha256"]["reference_drums_audio"]) == 64
     gmd = next(item for item in manifest["items"] if item["input_type"] == "drum_only")
     assert gmd["time_signature"] == "4/4"
 
@@ -130,6 +137,84 @@ def test_benchmark_parser_uses_configured_adtof_template(monkeypatch, tmp_path: 
     args = script.parse_args()
 
     assert args.adtof_command_template == "adtof --audio {input} --out {output}"
+
+
+def test_benchmark_parser_uses_the_opt_in_local_adapter_when_no_template_is_exported(monkeypatch, tmp_path: Path) -> None:
+    script = _load_script("run_performance_benchmark")
+    monkeypatch.delenv("GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE", raising=False)
+    monkeypatch.setattr(sys, "argv", ["benchmark", "--output-dir", str(tmp_path)])
+
+    assert script.parse_args().adtof_command_template == script.default_adtof_command_template()
+
+
+def test_candidate_benchmark_rejects_a_class_preset_that_scalar_candidates_would_ignore(tmp_path: Path) -> None:
+    script = _load_script("run_performance_benchmark")
+    config = type(
+        "Config",
+        (),
+        {
+            "manifest": None,
+            "output_dir": tmp_path,
+            "candidate_thresholds": "0.3,0.4,0.5,0.6",
+            "adtof_threshold_preset": "separated_v1",
+        },
+    )()
+
+    report = script.run_benchmark(config)
+
+    assert report["status"] == "blocked"
+    assert report["summary"]["reason"] == "candidate_threshold_preset_requires_controlled_experiment"
+
+
+def test_candidate_strategy_profile_exposes_separated_preset_only_as_an_opt_in_experiment() -> None:
+    script = _load_script("run_performance_benchmark")
+
+    assert script._candidate_strategy_profile(None) == "scalar_v1"
+    assert script._candidate_strategy_profile("scalar_plus_separated_v1") == "scalar_plus_separated_v1"
+    assert script._candidate_strategy_profile("separated_v1") is None
+    assert script._CANDIDATE_STRATEGY_PROFILES["scalar_v1"] == ()
+    assert script._CANDIDATE_STRATEGY_PROFILES["scalar_plus_separated_v1"] == ("separated_v1",)
+
+
+def test_benchmark_split_filters_before_any_pipeline_command(tmp_path: Path) -> None:
+    script = _load_script("run_performance_benchmark")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"items": [{"id": "holdout", "benchmark_split": "holdout"}]}), encoding="utf-8")
+    config = type("Config", (), {"manifest": manifest, "output_dir": tmp_path / "out", "candidate_thresholds": "0.3,0.4,0.5,0.6", "adtof_threshold_preset": None, "candidate_strategy_profile": "scalar_plus_separated_v1", "benchmark_split": "development"})()
+
+    report = script.run_benchmark(config, process_runner=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("pipeline must not run")))
+
+    assert report["status"] == "skipped"
+    assert report["summary"]["reason"] == "benchmark_manifest_empty"
+
+
+def test_opt_in_holdout_requires_matching_improved_development_evidence(tmp_path: Path) -> None:
+    script = _load_script("run_performance_benchmark")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"items": []}), encoding="utf-8")
+    config = type("Config", (), {"development_evidence_report": None})()
+
+    assert script._holdout_evidence_reason(config, "scalar_plus_separated_v1", manifest, "holdout") == "development_evidence_required"
+
+    evidence = tmp_path / "development.json"
+    evidence.write_text(json.dumps({
+        "benchmark_split": "development",
+        "manifest_sha256": script._file_sha256(manifest),
+        "quality_profile": {"candidate_strategy_profile": "scalar_plus_separated_v1"},
+        "strategy_comparison": {"status": "measured", "improved": True},
+    }), encoding="utf-8")
+    config.development_evidence_report = evidence
+
+    assert script._holdout_evidence_reason(config, "scalar_plus_separated_v1", manifest, "holdout") is None
+    reservation, reason = script._reserve_holdout_evidence(config, "scalar_plus_separated_v1", manifest, "holdout")
+    assert reason is None and reservation is not None
+    assert script._reserve_holdout_evidence(config, "scalar_plus_separated_v1", manifest, "holdout")[1] == "holdout_evidence_already_consumed"
+    script._finalize_holdout_reservation(reservation, False)
+    assert not reservation.exists()
+    reservation, reason = script._reserve_holdout_evidence(config, "scalar_plus_separated_v1", manifest, "holdout")
+    assert reason is None and reservation is not None
+    script._finalize_holdout_reservation(reservation, True)
+    assert script._reserve_holdout_evidence(config, "scalar_plus_separated_v1", manifest, "holdout")[1] == "holdout_evidence_already_consumed"
 
 
 def test_benchmark_provenance_requires_license_ground_truth_and_matching_checksums(tmp_path: Path) -> None:
@@ -285,6 +370,57 @@ def test_benchmark_parser_accepts_product_preset_and_filter(monkeypatch, tmp_pat
     assert args.tom_filter_preset == "tom_guard_v1"
 
 
+def test_benchmark_parser_resumes_by_default_and_allows_explicit_restart(monkeypatch, tmp_path: Path) -> None:
+    script = _load_script("run_performance_benchmark")
+    monkeypatch.setattr(sys, "argv", ["benchmark", "--output-dir", str(tmp_path)])
+
+    assert script.parse_args().resume is True
+
+    monkeypatch.setattr(sys, "argv", ["benchmark", "--output-dir", str(tmp_path), "--no-resume"])
+    assert script.parse_args().resume is False
+
+
+def test_benchmark_resume_only_reuses_completed_matching_candidate_artifacts(tmp_path: Path) -> None:
+    script = _load_script("run_performance_benchmark")
+    output_dir = tmp_path / "run"
+    events = (ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),)
+    candidates = []
+    for value in (0.3, 0.4, 0.5, 0.6):
+        candidate_id = f"threshold_{str(value).replace('.', '_')}"
+        _write_candidate_score(output_dir, candidate_id, events)
+        candidates.append({"candidate_id": candidate_id, "status": "completed", "config": {"threshold": value}})
+    logs = output_dir / "logs"
+    logs.mkdir(parents=True)
+    (logs / "pipeline.json").write_text(
+        json.dumps({"status": "completed", "candidate_analysis": {"candidates": candidates}}),
+        encoding="utf-8",
+    )
+
+    assert script._completed_pipeline_for_resume(output_dir) is not None
+
+    (output_dir / "candidates" / "threshold_0_6" / "notation" / "chart_events.json").unlink()
+    assert script._completed_pipeline_for_resume(output_dir) is None
+
+
+def test_benchmark_resume_reuses_an_explicitly_failed_candidate_without_its_artifacts(tmp_path: Path) -> None:
+    script = _load_script("run_performance_benchmark")
+    output_dir = tmp_path / "run"
+    candidates = []
+    for value in (0.3, 0.4, 0.5):
+        candidate_id = f"threshold_{str(value).replace('.', '_')}"
+        _write_candidate_score(output_dir, candidate_id, (ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),))
+        candidates.append({"candidate_id": candidate_id, "status": "completed", "config": {"threshold": value}})
+    candidates.append({"candidate_id": "threshold_0_6", "status": "failed", "config": {"threshold": 0.6}})
+    logs = output_dir / "logs"
+    logs.mkdir(parents=True)
+    (logs / "pipeline.json").write_text(
+        json.dumps({"status": "completed", "candidate_analysis": {"candidates": candidates}}),
+        encoding="utf-8",
+    )
+
+    assert script._completed_pipeline_for_resume(output_dir) is not None
+
+
 def test_benchmark_requires_the_versioned_candidate_threshold_profile(tmp_path: Path) -> None:
     script = _load_script("run_performance_benchmark")
     config = type(
@@ -437,6 +573,7 @@ def test_generated_fixture_contract_measures_all_profile_candidates_with_one_pip
                             "audio_alignment": {"onset_alignment_rate": 0.8, "stderr": "private"},
                         },
                     },
+                    "validation": {"musicxml": {"parseable": True}},
                     "recommendation": {
                         "score": 90,
                         "recommendation": "recommended_for_practice",
@@ -656,7 +793,7 @@ def test_candidate_benchmark_rejects_recommendation_that_regresses_from_ground_t
         "best_candidate_id": "threshold_0_4",
         "profile": "ground_truth_candidate_v1",
     }
-    assert result["candidates"][0]["quality_flags"] == ["sparse_transcription"]
+    assert result["candidates"][0]["quality_flags"] == []
     assert "stdout" not in json.dumps(result)
     assert "/tmp/" not in json.dumps(result)
 
@@ -673,7 +810,7 @@ def test_candidate_benchmark_accepts_recommended_ground_truth_best_and_uses_fixe
     _write_candidate_score(tmp_path, "threshold_0_4", events)
     candidate = _candidate("threshold_0_4", 0.4)
     candidate["quality"]["processed_drum_counts"]["untrusted"] = 999
-    candidate["quality"]["quality_flags"] = ["sparse_transcription", "stdout /tmp/unsafe"]
+    candidate["quality"]["quality_flags"] = ["stdout /tmp/unsafe"]
     result = script._evaluate_candidates(
         {"recommended_candidate_id": "threshold_0_4", "candidates": [candidate]},
         output_dir=tmp_path,
@@ -683,7 +820,7 @@ def test_candidate_benchmark_accepts_recommended_ground_truth_best_and_uses_fixe
 
     assert result["validation"]["status"] == "passed"
     assert result["candidates"][0]["processed_drum_counts"] == {"closed_hat": 1, "kick": 1, "snare": 1}
-    assert result["candidates"][0]["quality_flags"] == ["sparse_transcription"]
+    assert result["candidates"][0]["quality_flags"] == []
     assert set(result["candidates"][0]["ground_truth_eval"]) == {
         "status",
         "f1",
@@ -692,6 +829,35 @@ def test_candidate_benchmark_accepts_recommended_ground_truth_best_and_uses_fixe
     }
     assert all(set(metrics) == {"f1"} for metrics in result["candidates"][0]["ground_truth_eval"]["per_drum"].values())
     assert set(result["candidates"][0]["core_groove_accuracy"]) == {"status", "accuracy"}
+
+
+def test_candidate_benchmark_recomputes_recommendation_with_current_profile(tmp_path: Path) -> None:
+    script = _load_script("run_performance_benchmark")
+    ground_truth = tmp_path / "ground_truth.mid"
+    events = (
+        ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),
+        ProcessedDrumEvent(tick=480, note=38, drum="snare", velocity=100),
+        ProcessedDrumEvent(tick=240, note=42, drum="closed_hat", velocity=80),
+    )
+    write_drum_midi(ground_truth, events, ticks_per_beat=480)
+    _write_candidate_score(tmp_path, "threshold_0_3", events)
+    _write_candidate_score(tmp_path, "threshold_0_4", events)
+    stale_practice = _candidate("threshold_0_3", 0.3)
+    stale_practice["quality"]["performance_gate"]["verdict"] = "not_ready"
+    current_practice = _candidate("threshold_0_4", 0.4)
+    result = script._evaluate_candidates(
+        {"recommended_candidate_id": "threshold_0_3", "candidates": [stale_practice, current_practice]},
+        output_dir=tmp_path,
+        ground_truth=ground_truth,
+        acceptance=_candidate_acceptance(),
+    )
+
+    assert result["validation"]["recommended_candidate_id"] == "threshold_0_4"
+    stale = next(candidate for candidate in result["candidates"] if candidate["candidate_id"] == "threshold_0_3")
+    assert stale["recommendation"]["recommendation"] == "reference_with_caveats"
+    assert stale["recommendation"]["score"] < next(
+        candidate for candidate in result["candidates"] if candidate["candidate_id"] == "threshold_0_4"
+    )["recommendation"]["score"]
 
 
 def test_candidate_quality_comparison_uses_raw_precision_but_never_reports_it() -> None:
@@ -733,9 +899,10 @@ def _candidate(candidate_id: str, threshold: float) -> dict:
         "config": {"threshold": threshold},
         "quality": {
             "processed_drum_counts": {"kick": 1, "snare": 1, "closed_hat": 1},
-            "quality_flags": ["sparse_transcription"],
+            "quality_flags": [],
             "performance_gate": {"verdict": "playable_but_low_confidence", "audio_alignment": {"onset_alignment_rate": 0.8}},
         },
+        "validation": {"musicxml": {"parseable": True}},
         "recommendation": {"score": 80, "recommendation": "recommended_for_practice", "rejected": False},
     }
 
