@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ai_pipeline.midi import MidiPostProcessor
 from ai_pipeline.midi.candidate_recommendation import evaluate_candidate_recommendation
+from ai_pipeline.midi.mapping import DRUM_TAXONOMY_ID, normalize_drum_counts
 from ai_pipeline.midi.quality import evaluate_drum_draft_quality, quality_flag_subset
 from ai_pipeline.midi.simple_midi import write_drum_midi
 from ai_pipeline.midi.types import MidiPostProcessConfig, ProcessedDrumEvent
@@ -294,7 +295,8 @@ class LocalPipelineRunner:
             "raw_note_histogram": {
                 str(key): value for key, value in (result.report.raw_note_histogram or {}).items()
             },
-            "processed_drum_counts": result.report.processed_drum_counts or {},
+            "drum_taxonomy": DRUM_TAXONOMY_ID,
+            "processed_drum_counts": normalize_drum_counts(result.report.processed_drum_counts or {}),
             "postprocess_filters": result.report.postprocess_filters or {},
             "quality_flags": quality_flag_subset(result.report.warnings),
         }
@@ -595,7 +597,7 @@ def _build_quality_summary(stage_logs: list[StageLog]) -> dict | None:
     validation = _build_validation_summary(stage_logs) or {}
     musicxml = validation.get("musicxml") if isinstance(validation.get("musicxml"), dict) else {}
     visual_qa = validation.get("visual_qa") if isinstance(validation.get("visual_qa"), dict) else {}
-    processed_counts = _string_int_dict(midi_report.get("processed_drum_counts"))
+    processed_counts = normalize_drum_counts(_string_int_dict(midi_report.get("processed_drum_counts")))
     quality_flags = midi_report.get("quality_flags") or quality_flag_subset(warnings)
     verdict = evaluate_drum_draft_quality(
         processed_drum_counts=processed_counts,
@@ -607,6 +609,7 @@ def _build_quality_summary(stage_logs: list[StageLog]) -> dict | None:
     performance_gate = notation_report.get("performance_gate") if isinstance(notation_report.get("performance_gate"), dict) else {}
     return {
         "schema_version": "1.0",
+        "drum_taxonomy": midi_report.get("drum_taxonomy") or DRUM_TAXONOMY_ID,
         "raw_event_count": midi_report.get("input_event_count"),
         "processed_event_count": midi_report.get("output_event_count"),
         "raw_note_histogram": _string_int_dict(midi_report.get("raw_note_histogram")),

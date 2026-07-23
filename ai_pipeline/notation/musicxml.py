@@ -10,7 +10,7 @@ from pathlib import Path
 from ai_pipeline.notation.errors import MusicXmlInvalidError, NotationGenerationFailedError
 from ai_pipeline.notation.types import MusicXmlResult, NotationConfig
 from ai_pipeline.midi.simple_midi import write_drum_midi
-from ai_pipeline.midi.mapping import normalize_drum_name
+from ai_pipeline.midi.mapping import DRUM_TAXONOMY_ID, canonical_drum_name
 from ai_pipeline.midi.types import ProcessedDrumEvent
 
 HAND_VOICE = "1"
@@ -153,9 +153,9 @@ class MusicXmlGenerator:
 
         normalized_events = []
         for event in events:
-            drum = normalize_drum_name(str(event.get("drum", "snare")))
-            if drum not in DRUM_DISPLAYS:
-                drum = "snare"
+            drum = canonical_drum_name(event.get("drum"))
+            if drum is None:
+                continue
             normalized_events.append(
                 {
                     "tick": int(event.get("tick", 0)),
@@ -599,9 +599,9 @@ def _build_chart_events(
 def _normalize_events(events: list[dict]) -> list[dict]:
     normalized = []
     for event in events:
-        drum = normalize_drum_name(str(event.get("drum", "snare")))
-        if drum not in DRUM_DISPLAYS:
-            drum = "snare"
+        drum = canonical_drum_name(event.get("drum"))
+        if drum is None:
+            continue
         normalized.append(
             {
                 "tick": int(event.get("tick", 0)),
@@ -1074,6 +1074,7 @@ def _write_chart_events(
 ) -> None:
     payload = {
         "schema_version": "1.0",
+        "drum_taxonomy": DRUM_TAXONOMY_ID,
         "source": "notation_simplifier",
         "ticks_per_beat": source_payload.get("ticks_per_beat", 480),
         "estimated_bpm": tempo_bpm,

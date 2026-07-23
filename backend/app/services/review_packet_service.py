@@ -17,6 +17,7 @@ from app.services.result_service import ResultService
 from app.storage import ArtifactType, build_job_artifact_key
 from app.storage.base import StorageAdapter
 from app.storage.errors import ArtifactInvalidError, ArtifactNotFoundError, StorageReadFailedError
+from ai_pipeline.midi.mapping import DRUM_TAXONOMY_ID
 
 UNSAFE_TOKENS = (
     "/Users/",
@@ -314,6 +315,7 @@ def _manual_eval_seed(job: TranscriptionJob, pipeline: dict, quality: dict | Non
         "processed_event_count": quality.get("processed_event_count"),
         "raw_note_histogram": quality.get("raw_note_histogram", {}),
         "processed_drum_counts": quality.get("processed_drum_counts", {}),
+        "drum_taxonomy": quality.get("drum_taxonomy") or DRUM_TAXONOMY_ID,
         "quality_flags": quality.get("quality_flags", []),
         "warnings": warnings,
         "blocked_reason": "",

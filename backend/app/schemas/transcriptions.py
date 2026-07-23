@@ -137,6 +137,7 @@ class PipelineQualitySummary(BaseModel):
     processed_event_count: int | None = None
     raw_note_histogram: dict[str, int] = Field(default_factory=dict)
     processed_drum_counts: dict[str, int] = Field(default_factory=dict)
+    drum_taxonomy: str = "generic_hihat_v1"
     duration_seconds: float | None = None
     tempo_bpm: float | None = None
     tempo_source: str | None = None
@@ -205,6 +206,7 @@ class PerformancePlaybackSummary(BaseModel):
 
 class ReviewTimelineSummary(BaseModel):
     schema_version: str = "1.0"
+    drum_taxonomy: str = "generic_hihat_v1"
     timing_source: str = "unavailable"
     tempo_bpm: float | None = None
     audio_sources: list[ReviewAudioSource] = Field(default_factory=list)

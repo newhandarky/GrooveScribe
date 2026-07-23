@@ -12,7 +12,7 @@ from app.services.job_query_service import JobQueryService
 from app.services.pipeline_config import PIPELINE_MODE_DEMO_MOCK, PIPELINE_MODE_TRUE_AI, pipeline_config_for_job
 from app.services.pipeline_log_read_model import PipelineLogReadService
 from app.services.review_timeline_service import ReviewTimelineService
-from ai_pipeline.midi.mapping import LEGACY_HI_HAT_DRUMS, normalize_drum_counts
+from ai_pipeline.midi.mapping import DRUM_TAXONOMY_ID, LEGACY_HI_HAT_DRUMS, normalize_drum_counts
 from app.storage.base import StorageAdapter
 from app.storage.keys import build_candidate_artifact_key, build_job_artifact_key
 from app.storage.types import ArtifactType
@@ -173,7 +173,14 @@ class ResultService:
 
     def review_timeline(self, job: TranscriptionJob) -> dict:
         if self.storage is None:
-            return {"schema_version": "1.0", "timing_source": "unavailable", "tempo_bpm": None, "audio_sources": [], "measures": []}
+            return {
+                "schema_version": "1.0",
+                "drum_taxonomy": DRUM_TAXONOMY_ID,
+                "timing_source": "unavailable",
+                "tempo_bpm": None,
+                "audio_sources": [],
+                "measures": [],
+            }
         return ReviewTimelineService(storage=self.storage).build(
             job,
             audio_urls={
@@ -327,6 +334,7 @@ def _pipeline_quality_summary(pipeline_log, job: TranscriptionJob, validation: d
         "processed_event_count": job.drum_track.event_count,
         "raw_note_histogram": {},
         "processed_drum_counts": {},
+        "drum_taxonomy": DRUM_TAXONOMY_ID,
         "duration_seconds": job.audio_file.duration_seconds,
         "tempo_bpm": job.drum_track.estimated_bpm,
         "tempo_source": None,
@@ -435,6 +443,7 @@ def _quality_from_midi_report(report: dict) -> dict | None:
         "processed_event_count": _int_or_none(report.get("output_event_count")),
         "raw_note_histogram": _safe_note_histogram(report.get("raw_note_histogram")),
         "processed_drum_counts": _safe_drum_counts(report.get("processed_drum_counts")),
+        "drum_taxonomy": DRUM_TAXONOMY_ID,
         "duration_seconds": None,
         "tempo_bpm": _float_or_none(report.get("estimated_bpm")),
         "tempo_source": None,
@@ -458,6 +467,7 @@ def _sanitize_quality_summary(raw: dict) -> dict:
         "processed_event_count": _int_or_none(raw.get("processed_event_count")),
         "raw_note_histogram": _safe_note_histogram(raw.get("raw_note_histogram")),
         "processed_drum_counts": _safe_drum_counts(raw.get("processed_drum_counts")),
+        "drum_taxonomy": DRUM_TAXONOMY_ID,
         "duration_seconds": _float_or_none(raw.get("duration_seconds")),
         "tempo_bpm": _float_or_none(raw.get("tempo_bpm")),
         "estimated_measure_count": _int_or_none(raw.get("estimated_measure_count")),
@@ -593,8 +603,8 @@ def _sanitize_notation_chart(value: object) -> dict:
         "repeat_measure_count": _int_or_none(value.get("repeat_measure_count")),
         "fill_measure_count": _int_or_none(value.get("fill_measure_count")),
         "accent_measure_count": _int_or_none(value.get("accent_measure_count")),
-        "preserved_counts": _safe_int_dict(value.get("preserved_counts")),
-        "dropped_counts": _safe_int_dict(value.get("dropped_counts")),
+        "preserved_counts": _safe_drum_counts(value.get("preserved_counts")),
+        "dropped_counts": _safe_drum_counts(value.get("dropped_counts")),
         "dense_measures_before": _int_or_none(value.get("dense_measures_before")),
         "dense_measures_after": _int_or_none(value.get("dense_measures_after")),
         "warnings": [item for item in _string_list(value.get("warnings")) if _is_public_safe_text(item)],

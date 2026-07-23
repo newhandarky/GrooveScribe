@@ -32,6 +32,7 @@ import type {
   TranscriptionJobSummary,
   TranscriptionResultResponse,
 } from './services/types';
+import { normalizeDrumCounts } from './drumTaxonomy';
 
 const unsafeTokens = [
   '/Users/',
@@ -127,6 +128,7 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
     ],
     review_timeline: {
       schema_version: '1.0',
+      drum_taxonomy: 'generic_hihat_v1',
       timing_source: 'score_tempo',
       tempo_bpm: 120,
       audio_sources: [
@@ -139,7 +141,7 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
           start_seconds: 0,
           end_seconds: 2,
           render_kind: 'groove',
-          drum_counts: { closed_hat: 8, kick: 2, snare: 2 },
+          drum_counts: { hi_hat: 8, kick: 2, snare: 2 },
           warnings: [],
         },
         {
@@ -147,7 +149,7 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
           start_seconds: 2,
           end_seconds: 4,
           render_kind: 'groove',
-          drum_counts: { closed_hat: 8, kick: 2, snare: 2 },
+          drum_counts: { hi_hat: 8, kick: 2, snare: 2 },
           warnings: [],
         },
       ],
@@ -156,9 +158,9 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
         event_count: 4,
         events: [
           { time_seconds: 0, drum: 'kick', velocity: 100 },
-          { time_seconds: 0.5, drum: 'closed_hat', velocity: 68 },
+          { time_seconds: 0.5, drum: 'hi_hat', velocity: 68 },
           { time_seconds: 1, drum: 'snare', velocity: 96 },
-          { time_seconds: 2.5, drum: 'open_hat', velocity: 72 },
+          { time_seconds: 2.5, drum: 'hi_hat', velocity: 72 },
         ],
       },
     },
@@ -190,7 +192,8 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
         raw_event_count: 7,
         processed_event_count: 5,
         raw_note_histogram: { '35': 2, '38': 1, '42': 4 },
-        processed_drum_counts: { closed_hat: 2, kick: 2, snare: 1 },
+        processed_drum_counts: { hi_hat: 2, kick: 2, snare: 1 },
+        drum_taxonomy: 'generic_hihat_v1',
         duration_seconds: 12,
         tempo_bpm: 120,
         estimated_measure_count: 4,
@@ -219,7 +222,7 @@ function resultFixture(overrides: Partial<TranscriptionResultResponse> = {}): Tr
           repeat_measure_count: 0,
           fill_measure_count: 0,
           accent_measure_count: 0,
-          preserved_counts: { closed_hat: 2, kick: 2, snare: 1 },
+          preserved_counts: { hi_hat: 2, kick: 2, snare: 1 },
           dropped_counts: {},
           dense_measures_before: 0,
           dense_measures_after: 0,
@@ -359,6 +362,13 @@ describe('local app smoke rendering', () => {
     expect(displayDrumName('closed_hat')).toBe('Hi-hat');
     expect(displayDrumName('open_hat')).toBe('Hi-hat');
     expect(displayDrumName('pedal_hat')).toBe('Hi-hat');
+  });
+
+  it('merges legacy hi-hat count labels before rendering a public quality summary', () => {
+    expect(normalizeDrumCounts({ closed_hat: 2, open_hat: 3, pedal_hat: 4, kick: 1, unsupported: 9 })).toEqual({
+      hi_hat: 9,
+      kick: 1,
+    });
   });
 
   it('can render the app shell without browser globals during static rendering', () => {
@@ -1009,6 +1019,7 @@ describe('local app smoke rendering', () => {
               processed_event_count: 7,
               raw_note_histogram: { '35': 1, '47': 6 },
               processed_drum_counts: { kick: 1, tom: 6 },
+              drum_taxonomy: 'generic_hihat_v1',
               duration_seconds: 30,
               tempo_bpm: 118,
               estimated_measure_count: 8,
@@ -1044,7 +1055,7 @@ describe('local app smoke rendering', () => {
                 complete_core_groove_measure_count: 6,
                 incomplete_core_groove_measure_count: 2,
                 hihat_rendered_measure_count: 6,
-                preserved_counts: { closed_hat: 8, kick: 8, snare: 8 },
+                preserved_counts: { hi_hat: 8, kick: 8, snare: 8 },
                 dropped_counts: { tom: 20, cymbal: 12 },
                 dense_measures_before: 4,
                 dense_measures_after: 0,

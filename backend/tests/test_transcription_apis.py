@@ -260,6 +260,7 @@ def test_result_service_builds_redacted_pipeline_summary(tmp_path) -> None:
             "processed_event_count": 7,
             "raw_note_histogram": {"35": 1, "47": 6},
             "processed_drum_counts": {"kick": 1, "tom": 6},
+            "drum_taxonomy": "generic_hihat_v1",
             "duration_seconds": 12.5,
             "tempo_bpm": 118.2,
             "estimated_measure_count": 6,
@@ -384,6 +385,7 @@ def test_result_service_builds_redacted_pipeline_summary(tmp_path) -> None:
             "processed_event_count": 7,
             "raw_note_histogram": {"35": 1, "47": 6},
             "processed_drum_counts": {"kick": 1, "tom": 6},
+            "drum_taxonomy": "generic_hihat_v1",
             "duration_seconds": 12.5,
             "tempo_bpm": 118.2,
             "estimated_measure_count": 6,
@@ -414,7 +416,7 @@ def test_result_service_builds_redacted_pipeline_summary(tmp_path) -> None:
                 "repeat_measure_count": 2,
                 "fill_measure_count": 1,
                 "accent_measure_count": 1,
-                "preserved_counts": {"closed_hat": 8, "kick": 8, "snare": 8},
+                "preserved_counts": {"hi_hat": 8, "kick": 8, "snare": 8},
                 "dropped_counts": {"cymbal": 12, "tom": 20},
                 "dense_measures_before": 4,
                 "dense_measures_after": 0,
@@ -1074,6 +1076,7 @@ def test_review_packet_service_builds_public_safe_packet_and_zip(tmp_path) -> No
         "source_job_id": None,
     }
     assert packet["manual_eval_seed"]["processed_event_count"] == 4
+    assert packet["manual_eval_seed"]["drum_taxonomy"] == "generic_hihat_v1"
     assert packet["validation"]["pdf"]["status"] == "optional_unavailable"
     assert packet["validation"]["visual_qa"]["status"] == "musescore_gui_session_unavailable"
     assert any(item["code"] == "pdf_optional" for item in packet["review_checklist"])
@@ -1156,6 +1159,7 @@ def test_review_packet_service_drops_unsafe_dict_keys_from_public_packet_and_zip
     for token in UNSAFE_TOKENS:
         assert token not in zipped_packet
     assert json.loads(zipped_packet)["manual_eval_seed"]["processed_drum_counts"] == {"kick": 4, "snare": 2}
+    assert json.loads(zipped_packet)["manual_eval_seed"]["drum_taxonomy"] == "generic_hihat_v1"
 
 
 def test_review_packet_notes_do_not_verify_inconsistent_performance_gate(tmp_path) -> None:
