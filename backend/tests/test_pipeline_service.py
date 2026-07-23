@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import Settings
+from app.core.errors import ErrorCode
 from app.db.base import Base
 from app.models import AudioFile, DrumTrack, ExportFile, TranscriptionJob
 from app.models.enums import ExportFileStatus, ExportFileType, JobStatus, PipelineStage
@@ -169,41 +170,13 @@ def test_pipeline_service_builds_subprocess_command(tmp_path: Path) -> None:
         title="Demo",
     )
 
-    assert command == [
-        "/opt/groovescribe-ai/bin/python",
-        "/repo/scripts/run_local_pipeline.py",
-        "--input",
-        "/tmp/input.wav",
-        "--output-dir",
-        "/tmp/output",
-        "--title",
-        "Demo",
-        "--demucs-model-name",
-        "htdemucs",
-        "--demucs-device",
-        "auto",
-        "--demucs-timeout-seconds",
-        "1800",
-        "--adtof-device",
-        "cpu",
-        "--adtof-threshold",
-        "0.5",
-        "--adtof-timeout-seconds",
-        "1800",
-        "--mock-ai",
-        "--adtof-command-template",
-        "adtof --audio {input} --out {output}",
-        "--adtof-checkpoint",
-        "/models/adtof.ckpt",
-        "--performance-gate-calibration",
-        "/private/calibration/gate_calibration.json",
-        "--pdf-renderer",
-        "/opt/homebrew/bin/mscore",
-        "--export-pdf",
-    ]
+    assert command[command.index("--transcription-backend") + 1] == "spectral_onset_v1"
+    assert "--mock-ai" not in command
+    assert not any(argument.startswith("--adtof") for argument in command)
+    assert "--candidate-thresholds" not in command
 
 
-def test_pipeline_service_builds_true_ai_command_from_job_config(tmp_path: Path) -> None:
+def test_pipeline_service_does_not_build_adtof_command_for_legacy_job_config(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     runner = PipelineServiceRunner(settings=settings, pipeline_script_path=Path("/repo/scripts/run_local_pipeline.py"))
     job = TranscriptionJob(
@@ -220,9 +193,9 @@ def test_pipeline_service_builds_true_ai_command_from_job_config(tmp_path: Path)
         job=job,
     )
 
+    assert command[command.index("--transcription-backend") + 1] == "spectral_onset_v1"
     assert "--mock-ai" not in command
-    assert command[command.index("--adtof-threshold-preset") + 1] == "separated_v1"
-    assert command[command.index("--tom-filter-preset") + 1] == "tom_guard_v1"
+    assert not any(argument.startswith("--adtof") for argument in command)
 
 
 def test_pipeline_service_passes_private_calibration_only_to_subprocess(tmp_path: Path) -> None:
@@ -236,7 +209,7 @@ def test_pipeline_service_passes_private_calibration_only_to_subprocess(tmp_path
         input_path=Path("/tmp/input.wav"),
         output_dir=Path("/tmp/output"),
         title="Demo",
-        job=TranscriptionJob(id="job-true-ai", pipeline_mode="true_ai"),
+        job=TranscriptionJob(id="job-generic", pipeline_mode="generic_baseline"),
     )
 
     assert command[command.index("--performance-gate-calibration") + 1] == "/private/calibration/gate_calibration.json"
@@ -259,7 +232,7 @@ def test_pipeline_service_builds_demo_mock_command_from_job_config(tmp_path: Pat
     assert "--tom-filter-preset" not in command
 
 
-def test_pipeline_service_treats_unknown_job_config_as_global_default(tmp_path: Path) -> None:
+def test_pipeline_service_treats_unknown_job_config_as_generic_baseline(tmp_path: Path) -> None:
     settings = _settings(tmp_path, pipeline_mock_ai=True)
     runner = PipelineServiceRunner(settings=settings, pipeline_script_path=Path("/repo/scripts/run_local_pipeline.py"))
     job = TranscriptionJob(id="job-legacy", pipeline_mode="unknown")
@@ -271,9 +244,8 @@ def test_pipeline_service_treats_unknown_job_config_as_global_default(tmp_path: 
         job=job,
     )
 
-    assert "--mock-ai" in command
-    assert "--adtof-threshold-preset" not in command
-    assert "--tom-filter-preset" not in command
+    assert "--mock-ai" not in command
+    assert command[command.index("--transcription-backend") + 1] == "spectral_onset_v1"
 
 
 def test_pipeline_service_runs_fake_subprocess_and_writes_metadata(tmp_path: Path) -> None:
@@ -283,10 +255,8 @@ def test_pipeline_service_runs_fake_subprocess_and_writes_metadata(tmp_path: Pat
     _seed_job(
         session_factory,
         storage,
-        pipeline_mode="true_ai",
-        adtof_threshold_preset="separated_v1",
-        tom_filter_preset="tom_guard_v1",
-        runtime_fallback_status="not_applied",
+        pipeline_mode="generic_baseline",
+        runtime_fallback_status="not_required",
     )
     calls = []
 
@@ -327,13 +297,37 @@ def test_pipeline_service_runs_fake_subprocess_and_writes_metadata(tmp_path: Pat
         log_payload = _read_storage_json(storage, "jobs/job-pipeline/logs/pipeline.json")
         assert log_payload["artifacts"]["musicxml"] == "jobs/job-pipeline/notation/score.musicxml"
         assert log_payload["pipeline_config"] == {
-            "mode": "true_ai",
-            "adtof_threshold_preset": "separated_v1",
-            "tom_filter_preset": "tom_guard_v1",
-            "runtime_fallback_status": "not_applied",
+            "mode": "generic_baseline",
+            "adtof_threshold_preset": None,
+            "tom_filter_preset": None,
+            "runtime_fallback_status": "not_required",
             "source_job_id": None,
         }
         assert str(tmp_path) not in json.dumps(log_payload)
+
+
+def test_pipeline_service_rejects_queued_legacy_true_ai_job(tmp_path: Path) -> None:
+    session_factory = _session_factory(tmp_path)
+    settings = _settings(tmp_path)
+    storage = LocalStorageAdapter(settings.storage_root)
+    _seed_job(
+        session_factory,
+        storage,
+        pipeline_mode="true_ai",
+        adtof_threshold_preset="separated_v1",
+        tom_filter_preset="tom_guard_v1",
+        runtime_fallback_status="not_applied",
+    )
+    runner = PipelineServiceRunner(settings=settings, storage=storage)
+
+    with session_factory() as session:
+        try:
+            runner.run(session, job_id="job-pipeline")
+        except LocalPipelineRunnerError as exc:
+            assert exc.error_code == ErrorCode.LEGACY_RUNTIME_UNAVAILABLE
+            assert exc.error_stage == PipelineStage.QUEUED.value
+        else:
+            raise AssertionError("expected LocalPipelineRunnerError")
 
 
 def test_pipeline_service_allows_completed_job_when_optional_pdf_is_missing(tmp_path: Path) -> None:

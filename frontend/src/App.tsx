@@ -29,8 +29,6 @@ import {
 
 const POLL_INTERVAL_MS = 1500;
 const ACTIVE_JOB_STORAGE_KEY = 'groovescribe.activeJobId';
-const TRUE_AI_THRESHOLD_PRESET = 'separated_v1';
-const TRUE_AI_TOM_FILTER_PRESET = 'tom_guard_v1';
 const INITIAL_HISTORY_LIMIT = 5;
 
 export function App() {
@@ -39,7 +37,7 @@ export function App() {
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [title, setTitle] = useState('');
-  const [pipelineMode, setPipelineMode] = useState<PipelineModeSelection>('demo_mock');
+  const [pipelineMode, setPipelineMode] = useState<PipelineModeSelection>('generic_baseline');
   const [pipelineModeTouched, setPipelineModeTouched] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(() => {
@@ -103,7 +101,7 @@ export function App() {
 
   useEffect(() => {
     if (!runtime || pipelineModeTouched) return;
-    setPipelineMode(runtime.true_ai_ready ? 'true_ai' : 'demo_mock');
+    setPipelineMode(runtime.generic_baseline_ready ? 'generic_baseline' : 'demo_mock');
   }, [pipelineModeTouched, runtime]);
 
   useEffect(() => {
@@ -222,8 +220,11 @@ export function App() {
   };
 
   const runtimeTone = runtime ? runtimeStatusTone(runtime.status) : 'neutral';
-  const canUpload = runtime?.mock_ai_ready === true && !uploading;
-  const trueAiReady = runtime?.true_ai_ready === true;
+  const canUpload = (
+    pipelineMode === 'generic_baseline'
+      ? runtime?.generic_baseline_ready === true
+      : runtime?.demo_mock_ready === true
+  ) && !uploading;
 
   useEffect(() => {
     const analysis = result?.pipeline?.candidate_analysis;
@@ -270,7 +271,6 @@ export function App() {
             title={title}
             pipelineMode={pipelineMode}
             runtime={runtime}
-            trueAiReady={trueAiReady}
             onFileChange={setSelectedFile}
             onTitleChange={setTitle}
             onPipelineModeChange={(mode) => {
@@ -300,7 +300,6 @@ export function App() {
           onRetry={(jobId, config) => void retryJob(jobId, config)}
           onReset={resetJob}
           retryingJobId={retryingJobId}
-          trueAiReady={trueAiReady}
           selectedCandidateId={selectedCandidateId}
           onCandidateSelect={setSelectedCandidateId}
         />
@@ -346,8 +345,8 @@ export function RuntimePanel({
       <RuntimeStatusNote runtime={runtime} />
 
       <div className="runtimeSummary">
-        <Metric label="Mock pipeline" value={runtime?.mock_ai_ready ? 'ready' : 'not ready'} />
-        <Metric label="True AI" value={runtime?.true_ai_ready ? 'ready' : 'not ready'} />
+        <Metric label="Generic baseline" value={runtime?.generic_baseline_ready ? 'ready' : 'not ready'} />
+        <Metric label="Demo mock" value={runtime?.demo_mock_ready ? 'ready' : 'not ready'} />
         <Metric label="Checked" value={runtime ? formatDateTime(runtime.checked_at) : '-'} />
       </div>
 
@@ -366,11 +365,10 @@ export function RuntimePanel({
         <RuntimeCheck label="AI Python" value={checks.ai_python} />
         <RuntimeCheck label="ffmpeg" value={checks.ffmpeg} />
         <RuntimeCheck label="Demucs" value={checks.demucs} />
-        <RuntimeCheck label="ADTOF" value={checks.adtof} />
+        <RuntimeCheck label="Spectral onset" value={checks.spectral_onset} />
         <RuntimeCheck label="PDF" value={checks.musescore_pdf} />
       </div>
-
-      <AdtofDiagnostic value={checks.adtof} />
+      <OfflineEvaluationDiagnostic value={runtime?.offline_evaluation?.adtof} />
     </section>
   );
 }
@@ -381,9 +379,9 @@ function RuntimeStatusNote({ runtime }: { runtime: RuntimePreflightResponse | nu
   }
 
   const descriptions: Record<string, string> = {
-    ready: 'Mock pipeline 與 true AI runtime 都可用。你可以選 True-AI V1 preset 跑真實音檔；true AI 仍只在明確 opt-in 時執行。',
-    degraded: 'Mock pipeline 可用，true AI runtime 尚未 ready。Demo mode 可驗證流程，但不代表真實轉譜品質；true AI smoke 需另行 opt-in。',
-    not_ready: 'Mock pipeline 尚未 ready；請先修復 runtime 缺口，upload 會維持停用。',
+    ready: 'Generic baseline runtime 已就緒，可分析真實音檔並輸出 generic hi-hat 事件。',
+    degraded: '僅 Demo mock 可用；generic baseline runtime 尚未 ready，upload 會維持停用。',
+    not_ready: 'Generic baseline runtime 尚未 ready；請先修復 runtime 缺口，upload 會維持停用。',
     error: 'Runtime preflight 本身失敗；請先修復 AI Python 或 diagnostics 執行問題。',
   };
 
@@ -430,41 +428,20 @@ export function LocalDataPanel({
   );
 }
 
-function AdtofDiagnostic({ value }: { value: unknown }) {
+function OfflineEvaluationDiagnostic({ value }: { value: unknown }) {
   const check = recordFromUnknown(value);
   if (!Object.keys(check).length) return null;
-  const statusCode = stringFromUnknown(check.status_code) ?? 'unknown';
-  const summary = stringFromUnknown(check.summary) ?? 'ADTOF runtime 尚未 ready。';
-  const nextSteps = stringListFromUnknown(check.next_steps);
-  const optionalEnv = stringListFromUnknown(check.optional_env);
-  const reason = stringFromUnknown(check.output_verification_reason);
 
   return (
     <div className="diagnosticBlock">
       <div className="diagnosticHeader">
         <div>
-          <span>ADTOF diagnosis</span>
-          <strong>{statusCode}</strong>
+          <span>Offline evaluation</span>
+          <strong>Not available to product runtime</strong>
         </div>
-        <span className={check.ready ? 'statusText ready' : 'statusText warn'}>
-          {check.ready ? 'ready' : 'needs attention'}
-        </span>
+        <span className="statusText warn">offline only</span>
       </div>
-      <p>{summary}</p>
-      {reason ? <p className="diagnosticReason">{reason}</p> : null}
-      {nextSteps.length ? (
-        <div>
-          <strong>Next steps</strong>
-          <ul>
-            {nextSteps.map((step) => (
-              <li key={step}>{step}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      {optionalEnv.length ? (
-        <p className="diagnosticMeta">Optional env: {optionalEnv.join(', ')}</p>
-      ) : null}
+      <p>ADTOF 僅限離線評測與歷史 artifact 讀取，不會由公開 API 或產品 runtime 執行。</p>
     </div>
   );
 }
@@ -476,7 +453,6 @@ export function UploadPanel({
   title,
   pipelineMode,
   runtime,
-  trueAiReady,
   onFileChange,
   onTitleChange,
   onPipelineModeChange,
@@ -488,7 +464,6 @@ export function UploadPanel({
   title: string;
   pipelineMode: PipelineModeSelection;
   runtime: RuntimePreflightResponse | null;
-  trueAiReady: boolean;
   onFileChange: (file: File | null) => void;
   onTitleChange: (value: string) => void;
   onPipelineModeChange: (value: PipelineModeSelection) => void;
@@ -496,9 +471,12 @@ export function UploadPanel({
 }) {
   const blockedReason = useMemo(() => {
     if (!runtime) return 'Runtime 尚未完成檢查。';
-    if (!runtime.mock_ai_ready) return 'Mock pipeline 尚未 ready，請先修正 runtime。';
+    if (pipelineMode === 'generic_baseline' && !runtime.generic_baseline_ready) {
+      return 'Generic baseline runtime 尚未 ready，請先修正 runtime。';
+    }
+    if (pipelineMode === 'demo_mock' && !runtime.demo_mock_ready) return 'Demo mock runtime 尚未 ready，請先修正 runtime。';
     return null;
-  }, [runtime]);
+  }, [pipelineMode, runtime]);
 
   return (
     <section className="panel">
@@ -515,6 +493,18 @@ export function UploadPanel({
         </label>
         <fieldset className="modeSelector">
           <legend>分析模式</legend>
+          <label className={pipelineMode === 'generic_baseline' ? 'modeOption active' : 'modeOption'}>
+            <input
+              type="radio"
+              name="pipeline_mode"
+              checked={pipelineMode === 'generic_baseline'}
+              onChange={() => onPipelineModeChange('generic_baseline')}
+            />
+            <span>
+              <strong>Generic baseline</strong>
+              <small>使用 spectral onset pipeline，輸出 kick、snare、generic hi-hat 等鼓事件。</small>
+            </span>
+          </label>
           <label className={pipelineMode === 'demo_mock' ? 'modeOption active' : 'modeOption'}>
             <input
               type="radio"
@@ -523,33 +513,11 @@ export function UploadPanel({
               onChange={() => onPipelineModeChange('demo_mock')}
             />
             <span>
-              <strong>Demo mode</strong>
-              <small>使用 mock pipeline，適合 runtime degraded 或產品流程展示。</small>
-            </span>
-          </label>
-          <label className={pipelineMode === 'true_ai' ? 'modeOption active' : 'modeOption'}>
-            <input
-              type="radio"
-              name="pipeline_mode"
-              checked={pipelineMode === 'true_ai'}
-              disabled={!trueAiReady}
-              onChange={() => onPipelineModeChange('true_ai')}
-            />
-            <span>
-              <strong>True-AI V1 preset</strong>
-              <small>套用 separated_v1 + tom_guard_v1，產出 MIDI / MusicXML 與品質報告。</small>
+              <strong>Demo mock</strong>
+              <small>使用 mock pipeline，適合產品流程展示，不代表真實轉譜品質。</small>
             </span>
           </label>
         </fieldset>
-        {!trueAiReady ? <p className="formNote">True-AI runtime 尚未 ready；Demo mode 仍可用。</p> : null}
-        {pipelineMode === 'true_ai' ? (
-          <div className="presetSummary">
-            <span>Preset</span>
-            <strong>{TRUE_AI_THRESHOLD_PRESET}</strong>
-            <span>Filter</span>
-            <strong>{TRUE_AI_TOM_FILTER_PRESET}</strong>
-          </div>
-        ) : null}
         <label className="fileDrop">
           <input
             type="file"
@@ -677,7 +645,6 @@ function JobPanel({
   onRetry,
   onReset,
   retryingJobId,
-  trueAiReady,
   selectedCandidateId,
   onCandidateSelect,
 }: {
@@ -689,7 +656,6 @@ function JobPanel({
   onRetry: (jobId: string, config?: PipelineRunConfigInput) => void;
   onReset: () => void;
   retryingJobId: string | null;
-  trueAiReady: boolean;
   selectedCandidateId: string | null;
   onCandidateSelect: (candidateId: string | null) => void;
 }) {
@@ -731,7 +697,6 @@ function JobPanel({
           result={result}
           onRerun={onRetry}
           rerunning={retryingJobId === result.job_id}
-          trueAiReady={trueAiReady}
           selectedCandidateId={selectedCandidateId}
           onCandidateSelect={onCandidateSelect}
         />
@@ -798,14 +763,12 @@ export function ResultCard({
   result,
   onRerun,
   rerunning = false,
-  trueAiReady = false,
   selectedCandidateId = null,
   onCandidateSelect,
 }: {
   result: TranscriptionResultResponse;
   onRerun?: (jobId: string, config?: PipelineRunConfigInput) => void;
   rerunning?: boolean;
-  trueAiReady?: boolean;
   selectedCandidateId?: string | null;
   onCandidateSelect?: (candidateId: string | null) => void;
 }) {
@@ -837,32 +800,14 @@ export function ResultCard({
           </p>
         </div>
         <div className="resultMetaStack">
-          <span className={`pipelineBadge ${pipelineMode === 'true_ai' ? 'trueAi' : pipelineMode}`}>
-            {pipelineMode === 'true_ai' ? 'TRUE AI' : pipelineMode.toUpperCase()}
+          <span className={`pipelineBadge ${pipelineMode}`}>
+            {pipelineModeLabel(pipelineMode)}
           </span>
           {onRerun ? (
             <div className="rerunActions">
               <button className="secondaryButton compactButton" type="button" onClick={() => onRerun(result.job_id)} disabled={rerunning}>
                 {rerunning ? '重新排隊中' : '沿用設定重跑'}
               </button>
-              <button
-                className="secondaryButton compactButton"
-                type="button"
-                onClick={() => onRerun(result.job_id, pipelineConfigInput('true_ai'))}
-                disabled={rerunning || !trueAiReady}
-              >
-                True-AI V1
-              </button>
-              {pipelineMode === 'true_ai' ? (
-                <button
-                  className="secondaryButton compactButton"
-                  type="button"
-                  onClick={() => onRerun(result.job_id, pipelineConfigInput('demo_mock'))}
-                  disabled={rerunning}
-                >
-                  Demo mode
-                </button>
-              ) : null}
             </div>
           ) : null}
           {result.drum_track ? (
@@ -1077,18 +1022,18 @@ function ResultModeGuidance({ pipeline }: { pipeline: TranscriptionResultRespons
     );
   }
 
-  if (mode !== 'true_ai' || !lowQuality) return null;
+  if (mode !== 'generic_baseline' || !lowQuality) return null;
   const blockers = limitations.length
     ? limitations.slice(0, 3)
     : performance?.blocking_issues?.slice(0, 3) ?? [];
 
   return (
     <div className="alert warn">
-      <strong>True-AI 結果需要人工修譜或重新嘗試</strong>
+      <strong>Generic baseline 結果需要人工修譜或重新嘗試</strong>
       {blockers.length ? <p>主要 blocker：{blockers.map(qualityLimitationLabel).join('、')}</p> : null}
       <ul>
         <li>改用更乾淨的鼓聲來源或分離後 drums stem。</li>
-        <li>執行 real audio pilot / quality matrix，比較 threshold 0.3、0.4、0.5、0.6。</li>
+        <li>確認 generic hi-hat、kick 與 snare 的節奏位置，再視需要進行人工修譜。</li>
         <li>匯出 review packet 給人工修譜，不要把低分草稿當成可直接交付成品。</li>
       </ul>
     </div>
@@ -1117,14 +1062,7 @@ function PipelineConfigPanel({
         <span>Mode</span>
         <strong>{pipelineModeLabel(mode)}</strong>
       </div>
-      <div>
-        <span>ADTOF preset</span>
-        <strong>{config?.adtof_threshold_preset ?? '-'}</strong>
-      </div>
-      <div>
-        <span>Postprocess filter</span>
-        <strong>{config?.tom_filter_preset ?? '-'}</strong>
-      </div>
+      {mode === 'true_ai' ? <div><span>Historical mode</span><strong>Offline evaluation only</strong></div> : null}
       {sourceJobId ? (
         <div>
           <span>Source job</span>
@@ -2077,7 +2015,8 @@ function qualitySuggestionList(
 }
 
 function pipelineModeLabel(mode: string): string {
-  if (mode === 'true_ai') return 'True-AI';
+  if (mode === 'generic_baseline') return 'Generic baseline';
+  if (mode === 'true_ai') return 'Historical offline evaluation';
   if (mode === 'demo_mock' || mode === 'mock') return 'Demo / mock';
   return 'Unknown';
 }
@@ -2355,14 +2294,7 @@ function canRetryJobStatus(status: string): boolean {
 }
 
 function pipelineConfigInput(mode: PipelineModeSelection): PipelineRunConfigInput {
-  if (mode === 'true_ai') {
-    return {
-      pipelineMode: 'true_ai',
-      adtofThresholdPreset: TRUE_AI_THRESHOLD_PRESET,
-      tomFilterPreset: TRUE_AI_TOM_FILTER_PRESET,
-    };
-  }
-  return { pipelineMode: 'demo_mock' };
+  return { pipelineMode: mode };
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

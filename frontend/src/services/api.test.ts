@@ -28,10 +28,11 @@ describe('api client', () => {
       calls.push(String(url));
       return jsonResponse({
         status: 'degraded',
-        mock_ai_ready: true,
-        true_ai_ready: false,
-        missing_requirements: ['ADTOF not configured'],
+        generic_baseline_ready: false,
+        demo_mock_ready: true,
+        missing_requirements: ['Demucs not configured'],
         checks: {},
+        offline_evaluation: {},
         smoke_commands: {},
         checked_at: '2026-07-02T00:00:00Z',
         error: null,
@@ -42,7 +43,7 @@ describe('api client', () => {
 
     expect(calls).toEqual(['/api/v1/runtime/preflight']);
     expect(response.status).toBe('degraded');
-    expect(response.mock_ai_ready).toBe(true);
+    expect(response.demo_mock_ready).toBe(true);
   });
 
   it('loads job status with encoded id', async () => {
@@ -89,9 +90,7 @@ describe('api client', () => {
       {
         file: new File(['audio'], 'demo.wav', { type: 'audio/wav' }),
         title: 'Demo',
-        pipelineMode: 'true_ai',
-        adtofThresholdPreset: 'separated_v1',
-        tomFilterPreset: 'tom_guard_v1',
+        pipelineMode: 'generic_baseline',
       },
       fetcher as typeof fetch,
     );
@@ -102,10 +101,8 @@ describe('api client', () => {
         method: 'POST',
         bodyIsFormData: true,
         entries: {
-          adtof_threshold_preset: 'separated_v1',
-          pipeline_mode: 'true_ai',
+          pipeline_mode: 'generic_baseline',
           title: 'Demo',
-          tom_filter_preset: 'tom_guard_v1',
         },
       },
     ]);
@@ -162,7 +159,7 @@ describe('api client', () => {
     expect(response.job_id).toBe('retry-job');
   });
 
-  it('retries a transcription with a selected true-AI config', async () => {
+  it('retries a transcription with the generic baseline config', async () => {
     const calls: Array<{ url: string; method?: string; entries: Record<string, string> }> = [];
     const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
       calls.push({
@@ -182,9 +179,7 @@ describe('api client', () => {
     await retryTranscription(
       'job 1',
       {
-        pipelineMode: 'true_ai',
-        adtofThresholdPreset: 'separated_v1',
-        tomFilterPreset: 'tom_guard_v1',
+        pipelineMode: 'generic_baseline',
       },
       fetcher as typeof fetch,
     );
@@ -194,9 +189,7 @@ describe('api client', () => {
         url: '/api/v1/transcriptions/job%201/retry',
         method: 'POST',
         entries: {
-          adtof_threshold_preset: 'separated_v1',
-          pipeline_mode: 'true_ai',
-          tom_filter_preset: 'tom_guard_v1',
+          pipeline_mode: 'generic_baseline',
         },
       },
     ]);

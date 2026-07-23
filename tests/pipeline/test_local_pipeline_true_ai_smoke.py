@@ -32,9 +32,10 @@ def test_run_local_pipeline_true_ai_smoke(tmp_path: Path) -> None:
     if preflight.returncode != 0:
         pytest.skip("runtime preflight command failed")
     preflight_body = json.loads(preflight.stdout)
-    local_pipeline = preflight_body["runtime_checks"]["local_pipeline"]
-    if not local_pipeline["true_ai_ready"]:
-        pytest.skip(f"true-AI runtime is not ready: {local_pipeline['missing_requirements']}")
+    runtime_checks = preflight_body["runtime_checks"]
+    adtof = runtime_checks["adtof_pytorch"]
+    if not adtof["ready"]:
+        pytest.skip(f"ADTOF offline evaluation runtime is not ready: {adtof.get('status_code', 'unknown')}")
 
     output_dir = tmp_path / "true-ai-run"
     command = [

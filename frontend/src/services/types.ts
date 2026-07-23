@@ -2,10 +2,11 @@ export type RuntimePreflightStatus = 'ready' | 'degraded' | 'not_ready' | 'error
 
 export interface RuntimePreflightResponse {
   status: RuntimePreflightStatus;
-  mock_ai_ready: boolean;
-  true_ai_ready: boolean;
+  generic_baseline_ready: boolean;
+  demo_mock_ready: boolean;
   missing_requirements: string[];
   checks: Record<string, unknown>;
+  offline_evaluation: Record<string, unknown>;
   smoke_commands: Record<string, string>;
   checked_at: string;
   error: { code: string; message: string } | null;
@@ -19,12 +20,10 @@ export interface UploadAcceptedResponse {
   created_at: string;
 }
 
-export type PipelineModeSelection = 'demo_mock' | 'true_ai';
+export type PipelineModeSelection = 'generic_baseline' | 'demo_mock';
 
 export interface PipelineRunConfigInput {
   pipelineMode?: PipelineModeSelection;
-  adtofThresholdPreset?: string | null;
-  tomFilterPreset?: string | null;
 }
 
 export interface PipelineConfigSummary {

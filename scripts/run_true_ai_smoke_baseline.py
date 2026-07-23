@@ -128,8 +128,8 @@ def run_baseline(
         return BaselineRunResult("blocked", report_path, 2 if config.fail_on_blocked else 0)
 
     preflight = preflight_result["json"]
-    local_pipeline = _dict(_dict(preflight.get("runtime_checks")).get("local_pipeline"))
-    if not local_pipeline.get("true_ai_ready"):
+    adtof = _dict(_dict(preflight.get("runtime_checks")).get("adtof_pytorch"))
+    if not adtof.get("ready"):
         report = _blocked_report(
             config,
             checked_at=checked,
@@ -434,8 +434,9 @@ def _preflight_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
     output_verification = _dict(adtof.get("output_verification"))
     return {
         "available": True,
-        "mock_ai_ready": bool(local_pipeline.get("mock_ai_ready")),
-        "true_ai_ready": bool(local_pipeline.get("true_ai_ready")),
+        "demo_mock_ready": bool(local_pipeline.get("demo_mock_ready")),
+        "generic_baseline_ready": bool(local_pipeline.get("generic_baseline_ready")),
+        "adtof_offline_ready": bool(adtof.get("ready")),
         "missing_requirements": _list(local_pipeline.get("missing_requirements")),
         "adtof_status_code": adtof.get("status_code"),
         "adtof_event_count": output_verification.get("event_count"),

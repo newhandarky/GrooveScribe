@@ -43,7 +43,7 @@ def test_true_ai_baseline_writes_blocked_report_when_runtime_is_degraded(tmp_pat
     assert report["status"] == "blocked"
     assert report["baseline_ref"] == "baseline:baseline-test"
     assert "ADTOF runtime has not produced" in report["blocked_reason"]
-    assert report["preflight"]["true_ai_ready"] is False
+    assert report["preflight"]["adtof_offline_ready"] is False
     assert report["preflight"]["adtof_status_code"] == "verify_input_missing"
     assert "/Users/" not in json.dumps(report)
     assert "/tmp/" not in json.dumps(report)
@@ -121,8 +121,8 @@ def _preflight_payload(*, true_ai_ready: bool) -> dict:
         "python": {"version": "3.11.15"},
         "runtime_checks": {
             "local_pipeline": {
-                "mock_ai_ready": True,
-                "true_ai_ready": true_ai_ready,
+                "demo_mock_ready": True,
+                "generic_baseline_ready": True,
                 "missing_requirements": []
                 if true_ai_ready
                 else [
@@ -132,6 +132,7 @@ def _preflight_payload(*, true_ai_ready: bool) -> dict:
                 ],
             },
             "adtof_pytorch": {
+                "ready": true_ai_ready,
                 "status_code": "ready" if true_ai_ready else "verify_input_missing",
                 "output_verification": {"event_count": 2 if true_ai_ready else None},
             },

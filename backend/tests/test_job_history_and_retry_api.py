@@ -212,7 +212,7 @@ def test_retry_creates_new_job_from_original_audio_without_mutating_source(tmp_p
         assert retry.source_job_id == source.id
 
 
-def test_retry_copies_or_overrides_pipeline_config(tmp_path: Path) -> None:
+def test_retry_defaults_to_generic_baseline_and_rejects_legacy_override(tmp_path: Path) -> None:
     client, session_factory, storage, _queue = _client(tmp_path)
     with session_factory() as session:
         source = _seed_job(
@@ -235,20 +235,13 @@ def test_retry_copies_or_overrides_pipeline_config(tmp_path: Path) -> None:
     )
 
     assert copy_response.status_code == 202
-    assert override_response.status_code == 202
+    assert override_response.status_code == 422
     with session_factory() as session:
         copied = session.get(TranscriptionJob, copy_response.json()["job_id"])
-        overridden = session.get(TranscriptionJob, override_response.json()["job_id"])
         assert copied is not None
-        assert overridden is not None
         assert copied.source_job_id == "completed"
-        assert copied.pipeline_mode == "demo_mock"
+        assert copied.pipeline_mode == "generic_baseline"
         assert copied.runtime_fallback_status == "not_required"
-        assert overridden.source_job_id == "completed"
-        assert overridden.pipeline_mode == "true_ai"
-        assert overridden.adtof_threshold_preset == "separated_v1"
-        assert overridden.tom_filter_preset == "tom_guard_v1"
-        assert overridden.runtime_fallback_status == "not_applied"
 
 
 def test_retry_can_switch_true_ai_source_back_to_demo_mock(tmp_path: Path) -> None:

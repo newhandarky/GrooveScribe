@@ -48,25 +48,20 @@ const unsafeTokens = [
 function runtimeFixture(overrides: Partial<RuntimePreflightResponse> = {}): RuntimePreflightResponse {
   return {
     status: 'degraded',
-    mock_ai_ready: true,
-    true_ai_ready: false,
-    missing_requirements: ['ADTOF runtime is not verified'],
+    generic_baseline_ready: false,
+    demo_mock_ready: true,
+    missing_requirements: ['Demucs package/command probe is not ready'],
     checks: {
       ai_python: { available: true },
       ffmpeg: { ready: true },
       demucs: { ready: true },
-      adtof: {
-        ready: false,
-        status_code: 'verify_input_missing',
-        summary: '尚未提供 ADTOF verification input drums stem。',
-        next_steps: [
-          '先執行 normalize 與 Demucs separation，產生 drums.wav。',
-          '設定 GROOVESCRIBE_ADTOF_VERIFY_INPUT 指向該 drums.wav。',
-        ],
-        optional_env: ['GROOVESCRIBE_ADTOF_CHECKPOINT', 'GROOVESCRIBE_ADTOF_VERIFY_INPUT'],
-        output_verification_reason: 'GROOVESCRIBE_ADTOF_VERIFY_INPUT is not set',
-      },
       musescore_pdf: { ready: false },
+    },
+    offline_evaluation: {
+      adtof: {
+        enabled: false,
+        reason: 'offline_evaluation_only',
+      },
     },
     smoke_commands: {
       runtime_check: 'PYTHONPATH=. /Users/dev/private/.venv-ai/bin/python scripts/check_ai_runtime.py',
@@ -379,8 +374,8 @@ describe('local app smoke rendering', () => {
       <RuntimePanel
         runtime={runtimeFixture({
           status,
-          mock_ai_ready: status !== 'not_ready' && status !== 'error',
-          true_ai_ready: status === 'ready',
+          demo_mock_ready: status !== 'not_ready' && status !== 'error',
+          generic_baseline_ready: status === 'ready',
           error: status === 'error' ? { code: 'RUNTIME_PREFLIGHT_FAILED', message: 'Runtime preflight command failed.' } : null,
         })}
         loading={false}
@@ -390,23 +385,22 @@ describe('local app smoke rendering', () => {
     );
 
     expect(html).toContain('本機 AI 環境');
-    expect(html).toContain(status === 'ready' ? 'True AI' : 'Mock pipeline');
-    expect(html).toContain('ADTOF diagnosis');
-    expect(html).toContain('verify_input_missing');
+    expect(html).toContain(status === 'ready' ? 'Generic baseline' : 'Demo mock');
+    expect(html).toContain('Offline evaluation');
+    expect(html).toContain('Not available to product runtime');
     expectPublicSafe(html);
     expect(html).not.toContain('check_ai_runtime.py');
   });
 
-  it('explains degraded runtime and ADTOF repair steps without raw local paths', () => {
+  it('explains degraded runtime and the offline evaluation policy without raw local paths', () => {
     const html = renderToStaticMarkup(
       <RuntimePanel runtime={runtimeFixture()} loading={false} error={null} onRefresh={() => undefined} />,
     );
 
-    expect(html).toContain('Mock pipeline 可用');
-    expect(html).toContain('true AI runtime 尚未 ready');
-    expect(html).toContain('true AI smoke 需另行 opt-in');
-    expect(html).toContain('先執行 normalize 與 Demucs separation');
-    expect(html).toContain('GROOVESCRIBE_ADTOF_VERIFY_INPUT');
+    expect(html).toContain('僅 Demo mock 可用');
+    expect(html).toContain('generic baseline runtime 尚未 ready');
+    expect(html).toContain('僅限離線評測與歷史 artifact 讀取');
+    expect(html).not.toContain('GROOVESCRIBE_ADTOF_');
     expectPublicSafe(html);
   });
 
@@ -426,7 +420,7 @@ describe('local app smoke rendering', () => {
     expectPublicSafe(html);
   });
 
-  it('keeps upload available for degraded mock-ready runtime', () => {
+  it('keeps generic baseline mode visible when runtime is degraded', () => {
     const html = renderToStaticMarkup(
       <UploadPanel
         canUpload
@@ -435,7 +429,6 @@ describe('local app smoke rendering', () => {
         title=""
         pipelineMode="demo_mock"
         runtime={runtimeFixture()}
-        trueAiReady={false}
         onFileChange={() => undefined}
         onTitleChange={() => undefined}
         onPipelineModeChange={() => undefined}
@@ -444,21 +437,20 @@ describe('local app smoke rendering', () => {
     );
 
     expect(html).toContain('開始本機分析');
-    expect(html).toContain('Demo mode');
-    expect(html).toContain('True-AI runtime 尚未 ready');
+    expect(html).toContain('Demo mock');
+    expect(html).not.toContain('runtime 尚未 ready');
     expect(html).not.toContain('<button class="primaryButton" type="submit" disabled=""');
   });
 
-  it('shows the true-AI V1 product preset when runtime is ready', () => {
+  it('shows generic baseline without ADTOF product controls when runtime is ready', () => {
     const html = renderToStaticMarkup(
       <UploadPanel
         canUpload
         uploading={false}
         selectedFile={{ name: 'demo.mp3' } as File}
         title=""
-        pipelineMode="true_ai"
-        runtime={runtimeFixture({ status: 'ready', true_ai_ready: true })}
-        trueAiReady
+        pipelineMode="generic_baseline"
+        runtime={runtimeFixture({ status: 'ready', generic_baseline_ready: true })}
         onFileChange={() => undefined}
         onTitleChange={() => undefined}
         onPipelineModeChange={() => undefined}
@@ -466,9 +458,9 @@ describe('local app smoke rendering', () => {
       />,
     );
 
-    expect(html).toContain('True-AI V1 preset');
-    expect(html).toContain('separated_v1');
-    expect(html).toContain('tom_guard_v1');
+    expect(html).toContain('Generic baseline');
+    expect(html).not.toContain('ADTOF preset');
+    expect(html).not.toContain('True-AI');
     expectPublicSafe(html);
   });
 
@@ -480,8 +472,7 @@ describe('local app smoke rendering', () => {
         selectedFile={{ name: 'demo.wav' } as File}
         title=""
         pipelineMode="demo_mock"
-        runtime={runtimeFixture({ status: 'not_ready', mock_ai_ready: false })}
-        trueAiReady={false}
+        runtime={runtimeFixture({ status: 'not_ready', demo_mock_ready: false })}
         onFileChange={() => undefined}
         onTitleChange={() => undefined}
         onPipelineModeChange={() => undefined}
@@ -489,7 +480,7 @@ describe('local app smoke rendering', () => {
       />,
     );
 
-    expect(html).toContain('Mock pipeline 尚未 ready');
+    expect(html).toContain('Demo mock runtime 尚未 ready');
     expect(html).toContain('disabled=""');
   });
 
@@ -497,7 +488,7 @@ describe('local app smoke rendering', () => {
     const html = renderToStaticMarkup(<ResultCard result={resultFixture()} />);
 
     expect(html).toContain('Demo Groove');
-    expect(html).toContain('MOCK');
+    expect(html).toContain('Demo / mock');
     expect(html).toContain('Pipeline summary');
     expect(html).toContain('Pipeline config');
     expect(html).toContain('Demo / mock');
@@ -754,18 +745,16 @@ describe('local app smoke rendering', () => {
     expectPublicSafe(html);
   });
 
-  it('shows concrete next steps for low-quality true-AI results', () => {
+  it('shows concrete next steps for low-quality generic baseline results', () => {
     const html = renderToStaticMarkup(
       <ResultCard
         result={resultFixture({
           pipeline: {
             ...resultFixture().pipeline!,
-            mode: 'true_ai',
+            mode: 'generic_baseline',
             config: {
               ...resultFixture().pipeline!.config!,
-              mode: 'true_ai',
-              adtof_threshold_preset: 'separated_v1',
-              tom_filter_preset: 'tom_guard_v1',
+              mode: 'generic_baseline',
             },
             quality: {
               ...resultFixture().pipeline!.quality!,
@@ -794,10 +783,10 @@ describe('local app smoke rendering', () => {
       />,
     );
 
-    expect(html).toContain('TRUE AI');
-    expect(html).toContain('True-AI 結果需要人工修譜或重新嘗試');
+    expect(html).toContain('Generic baseline');
+    expect(html).toContain('Generic baseline 結果需要人工修譜或重新嘗試');
     expect(html).toContain('主要 blocker');
-    expect(html).toContain('執行 real audio pilot / quality matrix');
+    expect(html).toContain('確認 generic hi-hat、kick 與 snare');
     expect(html).not.toContain('Demo/mock 結果僅供流程驗證');
     expectPublicSafe(html);
   });
@@ -1123,9 +1112,9 @@ describe('local app smoke rendering', () => {
       />,
     );
 
-    expect(html).toContain('TRUE AI');
-    expect(html).toContain('separated_v1');
-    expect(html).toContain('tom_guard_v1');
+    expect(html).toContain('Historical offline evaluation');
+    expect(html).toContain('Offline evaluation only');
+    expect(html).not.toContain('ADTOF preset');
     expect(html).toContain('草稿品質仍需提升');
     expect(html).toContain('3/5');
     expect(html).toContain('Tom 誤判偏多');
@@ -1263,7 +1252,6 @@ describe('local app smoke rendering', () => {
   it('renders rerun comparison without exposing artifact paths', () => {
     const html = renderToStaticMarkup(
       <ResultCard
-        trueAiReady
         result={resultFixture({
           source_job_id: 'job-source',
           source_result_summary: {
@@ -1291,7 +1279,7 @@ describe('local app smoke rendering', () => {
     );
 
     expect(html).toContain('沿用設定重跑');
-    expect(html).toContain('True-AI V1');
+    expect(html).not.toContain('True-AI V1');
     expect(html).toContain('與前一次比較');
     expect(html).toContain('Previous tom');
     expect(html).toContain('Current tom');
