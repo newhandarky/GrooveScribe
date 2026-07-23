@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from app.services.review_timeline_service import ReviewTimelineService
 from app.services.result_service import _safe_drum_counts
+from app.schemas.transcriptions import ReviewTimelineSummary
 from app.storage.keys import build_job_artifact_key
 from app.storage.local import LocalStorageAdapter
 from app.storage.types import ArtifactType
@@ -92,3 +93,5 @@ def test_legacy_hat_counts_and_chart_events_are_publicly_normalized(tmp_path) ->
     assert _safe_drum_counts({"kick": 1, "closed_hat": 2, "open_hat": 3, "pedal_hat": 4}) == {"kick": 1, "hi_hat": 9}
     assert timeline["measures"][0]["drum_counts"] == {"hi_hat": 3}
     assert {event["drum"] for event in timeline["performance_playback"]["events"]} == {"hi_hat"}
+    assert timeline["drum_taxonomy"] == "generic_hihat_v1"
+    assert ReviewTimelineSummary.model_validate(timeline).model_dump()["drum_taxonomy"] == "generic_hihat_v1"

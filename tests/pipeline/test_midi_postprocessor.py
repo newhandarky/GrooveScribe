@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from ai_pipeline.midi.mapping import map_to_general_midi_drum
+from ai_pipeline.midi.mapping import DRUM_TAXONOMY_ID, map_to_general_midi_drum, normalize_drum_counts
 from ai_pipeline.midi.postprocessor import MidiPostProcessor
 from ai_pipeline.midi.quality import evaluate_drum_draft_quality
 from ai_pipeline.midi.simple_midi import parse_midi, write_drum_midi
@@ -81,6 +81,7 @@ def test_postprocessor_quantizes_dedupes_and_writes_artifacts(tmp_path) -> None:
 
     payload = json.loads(result.drum_events_path.read_text(encoding="utf-8"))
     assert payload["schema_version"] == "1.0"
+    assert payload["drum_taxonomy"] == DRUM_TAXONOMY_ID
     assert payload["event_count"] == 3
     assert payload["events"][0]["midi_note"] == 36
     assert payload["raw_note_histogram"] == {"35": 1, "36": 1, "38": 1, "42": 1}
@@ -88,6 +89,12 @@ def test_postprocessor_quantizes_dedupes_and_writes_artifacts(tmp_path) -> None:
     assert "repeated_close_events_deduped" in payload["warnings"]
     assert "sparse_transcription" in payload["warnings"]
     assert "too_few_events" in payload["warnings"]
+
+
+def test_legacy_counts_merge_and_unknown_labels_are_dropped() -> None:
+    assert normalize_drum_counts(
+        {"kick": 2, "closed_hat": 3, "open_hat": 4, "pedal_hat": 5, "unsupported": 9}
+    ) == {"hi_hat": 12, "kick": 2}
 
 
 def test_postprocessor_warns_for_sparse_and_unbalanced_output(tmp_path) -> None:

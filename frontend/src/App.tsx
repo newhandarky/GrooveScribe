@@ -20,6 +20,7 @@ import type {
   TranscriptionJobSummary,
   TranscriptionResultResponse,
 } from './services/types';
+import { canonicalDrumName, normalizeDrumCounts } from './drumTaxonomy';
 import {
   formatDateTime,
   isTerminalJobStatus,
@@ -1698,7 +1699,8 @@ export function PerformancePlaybackPanel({
 function playDrumPreview(context: AudioContext, when: number, drum: string, velocity: number, volume: number) {
   const intensity = drumPreviewIntensity(velocity, volume);
   if (intensity <= 0) return;
-  const canonicalDrum = ['hi_hat', 'closed_hat', 'open_hat', 'pedal_hat'].includes(drum) ? 'hi_hat' : drum;
+  const canonicalDrum = canonicalDrumName(drum);
+  if (canonicalDrum === null) return;
   if (canonicalDrum === 'kick') {
     playKickPreview(context, when, intensity);
     return;
@@ -2227,7 +2229,7 @@ function ArtifactValidationSummary({
 }
 
 function QualityReview({ quality }: { quality: NonNullable<NonNullable<TranscriptionResultResponse['pipeline']>['quality']> }) {
-  const drumCounts = Object.entries(quality.processed_drum_counts ?? {});
+  const drumCounts = Object.entries(normalizeDrumCounts(quality.processed_drum_counts ?? {}));
   const flags = quality.quality_flags ?? [];
   const warnings = quality.warnings ?? [];
 
@@ -2260,7 +2262,7 @@ function QualityReview({ quality }: { quality: NonNullable<NonNullable<Transcrip
 }
 
 export function displayDrumName(drum: string): string {
-  return ['hi_hat', 'closed_hat', 'open_hat', 'pedal_hat'].includes(drum) ? 'Hi-hat' : drum;
+  return canonicalDrumName(drum) === 'hi_hat' ? 'Hi-hat' : drum;
 }
 
 function RuntimeCheck({ label, value }: { label: string; value: unknown }) {

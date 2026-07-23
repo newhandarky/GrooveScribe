@@ -130,6 +130,7 @@ export interface TranscriptionResultResponse {
   }>;
   review_timeline?: {
     schema_version: string;
+    drum_taxonomy: 'generic_hihat_v1';
     timing_source: string;
     tempo_bpm: number | null;
     audio_sources: Array<{
@@ -174,6 +175,7 @@ export interface TranscriptionResultResponse {
       processed_event_count: number | null;
       raw_note_histogram: Record<string, number>;
       processed_drum_counts: Record<string, number>;
+      drum_taxonomy: 'generic_hihat_v1';
       duration_seconds: number | null;
       tempo_bpm: number | null;
       tempo_source?: string | null;

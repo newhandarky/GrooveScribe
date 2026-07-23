@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 from app.models import TranscriptionJob
 from app.storage import ArtifactType, StorageAdapter, build_job_artifact_key
 from app.storage.errors import ArtifactInvalidError, ArtifactNotFoundError, StorageReadFailedError
-from ai_pipeline.midi.mapping import normalize_drum_name
+from ai_pipeline.midi.mapping import DRUM_TAXONOMY_ID, canonical_drum_name
 
 
 class ReviewTimelineService:
@@ -37,7 +37,7 @@ class ReviewTimelineService:
                 continue
             tick = event.get("tick")
             drum = event.get("drum")
-            canonical_drum = normalize_drum_name(drum) if isinstance(drum, str) else None
+            canonical_drum = canonical_drum_name(drum)
             if isinstance(tick, int) and canonical_drum in {"kick", "snare", "hi_hat", "tom", "cymbal"}:
                 events_by_measure[tick // measure_ticks][canonical_drum] += 1
                 if tempo_bpm is not None:
@@ -68,6 +68,7 @@ class ReviewTimelineService:
         ]
         return {
             "schema_version": "1.0",
+            "drum_taxonomy": DRUM_TAXONOMY_ID,
             "timing_source": "score_tempo" if seconds_per_measure is not None else "unavailable",
             "tempo_bpm": tempo_bpm,
             "audio_sources": [

@@ -5,7 +5,7 @@ from collections import Counter
 from pathlib import Path
 
 from ai_pipeline.midi.errors import NoUsableDrumEventsError, ProcessedMidiInvalidError
-from ai_pipeline.midi.mapping import map_to_general_midi_drum
+from ai_pipeline.midi.mapping import DRUM_TAXONOMY_ID, map_to_general_midi_drum
 from ai_pipeline.midi.quality import quality_diagnostics
 from ai_pipeline.midi.simple_midi import DEFAULT_TEMPO_BPM, parse_midi, write_drum_midi
 from ai_pipeline.midi.types import (
@@ -284,6 +284,7 @@ class MidiPostProcessor:
     ) -> dict:
         return {
             "schema_version": "1.0",
+            "drum_taxonomy": DRUM_TAXONOMY_ID,
             "ticks_per_beat": ticks_per_beat,
             "estimated_bpm": report.estimated_bpm,
             "time_signature": report.time_signature,
