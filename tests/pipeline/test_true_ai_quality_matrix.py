@@ -90,7 +90,7 @@ def test_quality_matrix_summarizes_completed_threshold_candidates(tmp_path: Path
     first_run = report["fixtures"][0]["runs"][0]
     assert first_run["minimum_gate"]["status"] == "passed"
     assert first_run["processed_event_count"] == 8
-    assert first_run["processed_drum_counts"] == {"closed_hat": 4, "kick": 2, "snare": 2}
+    assert first_run["processed_drum_counts"] == {"hi_hat": 4, "kick": 2, "snare": 2}
     assert first_run["minimum_gate"]["musicxml_parseable"] is True
     assert "mostly_tom_output" not in first_run["quality_flags"]
     assert first_run["musicxml"]["available"] is True
@@ -248,11 +248,12 @@ def _preflight_payload(*, true_ai_ready: bool) -> dict:
         "python": {"version": "3.11.15"},
         "runtime_checks": {
             "local_pipeline": {
-                "mock_ai_ready": True,
-                "true_ai_ready": true_ai_ready,
+                "demo_mock_ready": True,
+                "generic_baseline_ready": True,
                 "missing_requirements": [] if true_ai_ready else ["ADTOF runtime is not ready"],
             },
             "adtof_pytorch": {
+                "ready": true_ai_ready,
                 "status_code": "ready" if true_ai_ready else "verify_input_missing",
                 "output_verification": {"event_count": 2 if true_ai_ready else None},
             },

@@ -1,7 +1,7 @@
 import sys
 
 from scripts import check_ai_runtime
-from scripts.check_ai_runtime import _adtof_runtime_check, _command_status, _true_pipeline_missing
+from scripts.check_ai_runtime import _adtof_runtime_check, _command_status, _generic_baseline_missing
 
 
 def test_adtof_runtime_check_requires_explicit_template() -> None:
@@ -172,18 +172,16 @@ def test_adtof_runtime_check_requires_verified_raw_midi_output(tmp_path) -> None
     assert result["output_verification"]["event_count"] == 1
 
 
-def test_true_pipeline_missing_lists_model_runtime_gaps() -> None:
-    missing = _true_pipeline_missing(ffmpeg_ready=True, demucs_ready=False, adtof_ready=False)
+def test_generic_baseline_missing_excludes_offline_adtof_runtime() -> None:
+    missing = _generic_baseline_missing(ffmpeg_ready=True, demucs_ready=False, spectral_onset_ready=True)
 
-    adtof_missing = (
-        "ADTOF runtime has not produced and verified raw_drum.mid; "
-        "set GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE and GROOVESCRIBE_ADTOF_VERIFY_INPUT "
-        "for output verification"
-    )
-    assert missing == [
-        "Demucs package/command probe is not ready",
-        adtof_missing,
-    ]
+    assert missing == ["Demucs package/command probe is not ready"]
+
+
+def test_generic_baseline_missing_includes_spectral_onset_runtime() -> None:
+    missing = _generic_baseline_missing(ffmpeg_ready=True, demucs_ready=True, spectral_onset_ready=False)
+
+    assert missing == ["Spectral onset backend (librosa/NumPy) is not ready"]
 
 
 def test_musescore_command_status_does_not_execute_gui_app(monkeypatch) -> None:

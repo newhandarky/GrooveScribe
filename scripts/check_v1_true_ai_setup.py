@@ -4,7 +4,6 @@ import argparse
 import json
 import os
 import subprocess
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -117,8 +116,12 @@ def check_true_ai_setup(
     adtof = _dict(runtime_checks.get("adtof_pytorch"))
     demucs = _dict(runtime_checks.get("demucs"))
     ffmpeg = _dict(runtime_checks.get("ffmpeg"))
-    true_ai_ready = bool(local_pipeline.get("true_ai_ready"))
+    # This legacy doctor is retained for offline ADTOF evaluation only. It must
+    # not treat public generic-baseline readiness as ADTOF availability.
+    true_ai_ready = bool(adtof.get("ready"))
     missing = _safe_list(local_pipeline.get("missing_requirements", []))
+    if not true_ai_ready:
+        missing = ["ADTOF offline evaluation runtime is not ready.", *missing]
     status = "ready" if completed.returncode == 0 and true_ai_ready else "blocked"
     return _finalize(
         {

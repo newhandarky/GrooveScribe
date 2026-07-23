@@ -28,6 +28,7 @@ class ErrorCode(StrEnum):
     NOTATION_GENERATION_FAILED = "NOTATION_GENERATION_FAILED"
     PDF_EXPORT_FAILED = "PDF_EXPORT_FAILED"
     PIPELINE_FAILED = "PIPELINE_FAILED"
+    LEGACY_RUNTIME_UNAVAILABLE = "LEGACY_RUNTIME_UNAVAILABLE"
     WORKER_TIMEOUT = "WORKER_TIMEOUT"
     INVALID_JOB_STATE_TRANSITION = "INVALID_JOB_STATE_TRANSITION"
     ROUTE_NOT_FOUND = "ROUTE_NOT_FOUND"
@@ -154,6 +155,11 @@ ERROR_CATALOG: dict[str, ErrorDefinition] = {
         message="音訊分析流程失敗，請稍後再試或重新上傳音檔。",
         status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
         retriable=True,
+    ),
+    ErrorCode.LEGACY_RUNTIME_UNAVAILABLE: ErrorDefinition(
+        code=ErrorCode.LEGACY_RUNTIME_UNAVAILABLE,
+        message="此歷史分析模式僅供讀取，請重新執行 generic baseline。",
+        status_code=HTTPStatus.CONFLICT,
     ),
     ErrorCode.WORKER_TIMEOUT: ErrorDefinition(
         code=ErrorCode.WORKER_TIMEOUT,

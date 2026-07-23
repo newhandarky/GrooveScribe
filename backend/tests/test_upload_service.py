@@ -76,7 +76,7 @@ def test_upload_service_creates_job_audio_file_and_original_artifact(tmp_path) -
         assert job is not None
         assert job.status == JobStatus.QUEUED
         assert job.stage == PipelineStage.QUEUED
-        assert job.pipeline_mode is None
+        assert job.pipeline_mode == "generic_baseline"
         assert job.adtof_threshold_preset is None
         assert job.tom_filter_preset is None
         assert audio is not None
@@ -85,7 +85,7 @@ def test_upload_service_creates_job_audio_file_and_original_artifact(tmp_path) -
         assert queue.calls == [{"job_id": result.job_id, "pipeline_config_id": None}]
 
 
-def test_upload_service_saves_true_ai_product_config(tmp_path) -> None:
+def test_upload_service_rejects_true_ai_product_config(tmp_path) -> None:
     settings = _settings(tmp_path)
     storage = LocalStorageAdapter(settings.storage_root)
     queue = RecordingQueue()
@@ -97,21 +97,19 @@ def test_upload_service_saves_true_ai_product_config(tmp_path) -> None:
     )
 
     with _session() as session:
-        result = service.create_upload_job(
-            db=session,
-            filename="demo.wav",
-            content_type="audio/wav",
-            content=b"fake-wav",
-            pipeline_mode="true_ai",
-        )
-
-        job = session.scalar(select(TranscriptionJob).where(TranscriptionJob.id == result.job_id))
-
-        assert job is not None
-        assert job.pipeline_mode == "true_ai"
-        assert job.adtof_threshold_preset == "separated_v1"
-        assert job.tom_filter_preset == "tom_guard_v1"
-        assert job.runtime_fallback_status == "not_applied"
+        try:
+            service.create_upload_job(
+                db=session,
+                filename="demo.wav",
+                content_type="audio/wav",
+                content=b"fake-wav",
+                pipeline_mode="true_ai",
+            )
+        except ApiErrorException as exc:
+            assert exc.code == ErrorCode.VALIDATION_ERROR
+            assert exc.details["supported"] == ["demo_mock", "generic_baseline"]
+        else:
+            raise AssertionError("expected VALIDATION_ERROR")
 
 
 def test_upload_service_rejects_true_ai_presets_without_mode(tmp_path) -> None:

@@ -68,13 +68,10 @@ class JobHistoryService:
         if not self.storage.exists(source_job.audio_file.original_storage_key):
             raise ApiErrorException(ErrorCode.ARTIFACT_NOT_FOUND, details={"job_id": job_id, "artifact": "original_audio"})
 
-        explicit_mode = _clean(pipeline_mode) is not None
         pipeline_config = normalize_pipeline_config(
-            pipeline_mode=_retry_pipeline_mode(pipeline_mode, source_job),
-            adtof_threshold_preset=adtof_threshold_preset
-            if explicit_mode
-            else adtof_threshold_preset or source_job.adtof_threshold_preset,
-            tom_filter_preset=tom_filter_preset if explicit_mode else tom_filter_preset or source_job.tom_filter_preset,
+            pipeline_mode=_retry_pipeline_mode(pipeline_mode),
+            adtof_threshold_preset=adtof_threshold_preset,
+            tom_filter_preset=tom_filter_preset,
             source_job_id=source_job.id,
         )
         created_at = datetime.now(UTC)
@@ -121,12 +118,11 @@ class JobHistoryService:
         db.commit()
 
 
-def _retry_pipeline_mode(pipeline_mode: str | None, source_job: TranscriptionJob) -> str | None:
+def _retry_pipeline_mode(pipeline_mode: str | None) -> str | None:
     requested_mode = _clean(pipeline_mode)
     if requested_mode is not None:
         return requested_mode
-    source_mode = _clean(source_job.pipeline_mode)
-    return source_mode if source_mode != "unknown" else None
+    return None
 
 
 def _clean(value: str | None) -> str | None:

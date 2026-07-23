@@ -32,10 +32,11 @@ Future optional：
 優先閱讀：
 
 1. `V1_Ticket總表.md`
-2. `docs/產品完整度標準.md`
-3. `docs/架構決策/ADR-001-介面型態與執行模式.md`
-4. `docs/系統架構.md`
-5. `docs/技術選型.md`
+2. `Generic_HiHat_下一階段架構與執行計畫.md`：generic hi-hat baseline 的後續產品主線；優先於 articulation 或 ADTOF production 整合工作。
+3. `docs/產品完整度標準.md`
+4. `docs/架構決策/ADR-001-介面型態與執行模式.md`
+5. `docs/系統架構.md`
+6. `docs/技術選型.md`
 
 ## V1 Phase 對照
 

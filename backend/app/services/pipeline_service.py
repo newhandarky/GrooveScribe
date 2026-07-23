@@ -24,6 +24,7 @@ from app.models.enums import (
 from app.services.local_pipeline_runner import LocalPipelineRunResult, LocalPipelineRunnerError
 from app.services.pipeline_config import (
     PIPELINE_MODE_DEMO_MOCK,
+    PIPELINE_MODE_GENERIC_BASELINE,
     PIPELINE_MODE_TRUE_AI,
     pipeline_config_for_job,
 )
@@ -132,6 +133,11 @@ class PipelineServiceRunner:
         pipeline_config_id: str | None = None,
     ) -> LocalPipelineRunResult:
         job = self._load_job(db, job_id)
+        if job.pipeline_mode == PIPELINE_MODE_TRUE_AI:
+            raise LocalPipelineRunnerError(
+                error_code=ErrorCode.LEGACY_RUNTIME_UNAVAILABLE,
+                error_stage=PipelineStage.QUEUED.value,
+            )
         pipeline_config = pipeline_config_for_job(job)
         workspace = self._workspace_path(job.id)
         input_path = self._prepare_input_file(job, workspace)
@@ -246,27 +252,12 @@ class PipelineServiceRunner:
             self.settings.pipeline_demucs_device,
             "--demucs-timeout-seconds",
             str(self.settings.pipeline_demucs_timeout_seconds),
-            "--adtof-device",
-            self.settings.pipeline_adtof_device,
-            "--adtof-threshold",
-            str(self.settings.pipeline_adtof_threshold),
-            "--adtof-timeout-seconds",
-            str(self.settings.pipeline_adtof_timeout_seconds),
+            "--transcription-backend",
+            "spectral_onset_v1",
         ]
-        mode = job.pipeline_mode if job and job.pipeline_mode in {PIPELINE_MODE_DEMO_MOCK, PIPELINE_MODE_TRUE_AI} else None
-        use_mock = mode == PIPELINE_MODE_DEMO_MOCK if mode else self.settings.pipeline_mock_ai
-        if use_mock:
+        mode = job.pipeline_mode if job else PIPELINE_MODE_GENERIC_BASELINE
+        if mode == PIPELINE_MODE_DEMO_MOCK:
             command.append("--mock-ai")
-        if job and mode == PIPELINE_MODE_TRUE_AI:
-            command.extend(["--candidate-thresholds", "0.3,0.4,0.5,0.6"])
-            if job.adtof_threshold_preset:
-                command.extend(["--adtof-threshold-preset", job.adtof_threshold_preset])
-            if job.tom_filter_preset:
-                command.extend(["--tom-filter-preset", job.tom_filter_preset])
-        if self.settings.pipeline_adtof_command_template:
-            command.extend(["--adtof-command-template", self.settings.pipeline_adtof_command_template])
-        if self.settings.pipeline_adtof_checkpoint_path:
-            command.extend(["--adtof-checkpoint", self.settings.pipeline_adtof_checkpoint_path])
         if self.settings.pipeline_performance_gate_calibration_path:
             command.extend(
                 ["--performance-gate-calibration", self.settings.pipeline_performance_gate_calibration_path]

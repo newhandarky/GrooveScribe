@@ -20,7 +20,7 @@ def _settings(tmp_path: Path, **overrides) -> Settings:
     return Settings(**values)
 
 
-def _payload(*, mock_ai_ready: bool = True, true_ai_ready: bool = True) -> dict:
+def _payload(*, demo_mock_ready: bool = True, generic_baseline_ready: bool = True, adtof_ready: bool = False) -> dict:
     return {
         "commands": {
             "ffmpeg": {
@@ -36,14 +36,18 @@ def _payload(*, mock_ai_ready: bool = True, true_ai_ready: bool = True) -> dict:
                 "package": {"available": True, "version": "4.0.1"},
                 "command_probe": {"exit_code": 0},
             },
+            "spectral_onset": {
+                "ready": generic_baseline_ready,
+                "reason_code": None if generic_baseline_ready else "librosa_runtime_unavailable",
+            },
             "adtof_pytorch": {
-                "ready": true_ai_ready,
-                "status_code": "ready" if true_ai_ready else "verify_input_missing",
-                "configured": true_ai_ready,
-                "template_configured": true_ai_ready,
-                "template_executable": true_ai_ready,
-                "runtime_verified": true_ai_ready,
-                "output_verified": true_ai_ready,
+                "ready": adtof_ready,
+                "status_code": "ready" if adtof_ready else "verify_input_missing",
+                "configured": adtof_ready,
+                "template_configured": adtof_ready,
+                "template_executable": adtof_ready,
+                "runtime_verified": adtof_ready,
+                "output_verified": adtof_ready,
                 "device": "cpu",
                 "threshold": "0.5",
                 "missing_placeholders": [],
@@ -54,11 +58,11 @@ def _payload(*, mock_ai_ready: bool = True, true_ai_ready: bool = True) -> dict:
                     "GROOVESCRIBE_ADTOF_VERIFY_OUTPUT_DIR",
                 ],
                 "output_verification": {
-                    "verified": true_ai_ready,
-                    "attempted": true_ai_ready,
-                    "status_code": "ready" if true_ai_ready else "verify_input_missing",
-                    "event_count": 7 if true_ai_ready else None,
-                    "reason": None if true_ai_ready else "GROOVESCRIBE_ADTOF_VERIFY_INPUT is not set",
+                    "verified": adtof_ready,
+                    "attempted": adtof_ready,
+                    "status_code": "ready" if adtof_ready else "verify_input_missing",
+                    "event_count": 7 if adtof_ready else None,
+                    "reason": None if adtof_ready else "GROOVESCRIBE_ADTOF_VERIFY_INPUT is not set",
                 },
             },
             "musescore_pdf": {
@@ -67,14 +71,14 @@ def _payload(*, mock_ai_ready: bool = True, true_ai_ready: bool = True) -> dict:
                 "configured_renderer": "/tmp/private/mscore",
             },
             "local_pipeline": {
-                "mock_ai_ready": mock_ai_ready,
-                "true_ai_ready": true_ai_ready,
-                "missing_requirements": [] if true_ai_ready else ["ADTOF runtime is not verified"],
+                "demo_mock_ready": demo_mock_ready,
+                "generic_baseline_ready": generic_baseline_ready,
+                "missing_requirements": [] if generic_baseline_ready else ["Demucs package/command probe is not ready"],
             },
         },
         "smoke_commands": {
             "runtime_check": "PYTHONPATH=. /Users/dev/project/.venv-ai/bin/python scripts/check_ai_runtime.py",
-            "local_pipeline_mock": "/Users/dev/project/.venv-ai/bin/python scripts/run_local_pipeline.py",
+            "local_pipeline_generic_baseline": "/Users/dev/project/.venv-ai/bin/python scripts/run_local_pipeline.py",
             "tmp_command": "/tmp/private/tool --input demo.wav",
         },
     }
@@ -91,14 +95,9 @@ def test_runtime_diagnostics_ready_response(tmp_path: Path) -> None:
         assert kwargs["timeout"] == 30
         env = kwargs["env"]
         assert env["GROOVESCRIBE_DEMUCS_DEVICE"] == "cpu"
-        assert env["GROOVESCRIBE_ADTOF_DEVICE"] == "mps"
-        assert env["GROOVESCRIBE_ADTOF_THRESHOLD"] == "0.42"
-        assert env["GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE"] == "adtof --input {input} --output {output}"
-        assert env["GROOVESCRIBE_ADTOF_CHECKPOINT"] == "/tmp/private/model.ckpt"
-        assert env["GROOVESCRIBE_ADTOF_VERIFY_INPUT"] == "/tmp/private/drums.wav"
-        assert env["GROOVESCRIBE_ADTOF_VERIFY_OUTPUT_DIR"] == "/tmp/private/adtof-check"
+        assert not any(key.startswith("GROOVESCRIBE_ADTOF_") for key in env)
         assert env["GROOVESCRIBE_PDF_RENDERER"] == "/tmp/private/mscore"
-        return _completed(_payload(true_ai_ready=True))
+        return _completed(_payload(generic_baseline_ready=True, adtof_ready=True))
 
     response = RuntimeDiagnosticsService(
         settings=_settings(
@@ -116,45 +115,44 @@ def test_runtime_diagnostics_ready_response(tmp_path: Path) -> None:
     ).get_preflight()
 
     assert response.status == "ready"
-    assert response.mock_ai_ready is True
-    assert response.true_ai_ready is True
+    assert response.generic_baseline_ready is True
+    assert response.demo_mock_ready is True
     assert response.checks["ffmpeg"]["ready"] is True
     assert response.checks["ai_python"]["executable"] == "ai-python"
-    assert response.checks["adtof"]["device"] == "cpu"
-    assert response.checks["adtof"]["status_code"] == "ready"
-    assert response.checks["adtof"]["event_count"] == 7
-    assert response.checks["adtof"]["summary"]
-    assert response.checks["adtof"]["next_steps"]
+    assert response.checks["spectral_onset"]["ready"] is True
+    assert response.offline_evaluation == {"adtof": {"enabled": False, "reason": "offline_evaluation_only"}}
+    assert response.mock_ai_ready is True
+    assert response.true_ai_ready is False
     assert response.checks["musescore_pdf"]["configured_renderer"] == "<local-path>"
 
 
 def test_runtime_diagnostics_degraded_response(tmp_path: Path) -> None:
     service = RuntimeDiagnosticsService(
         settings=_settings(tmp_path),
-        process_runner=lambda *_args, **_kwargs: _completed(_payload(mock_ai_ready=True, true_ai_ready=False)),
+        process_runner=lambda *_args, **_kwargs: _completed(_payload(demo_mock_ready=True, generic_baseline_ready=False)),
     )
 
     response = service.get_preflight()
 
     assert response.status == "degraded"
-    assert response.mock_ai_ready is True
-    assert response.true_ai_ready is False
-    assert response.missing_requirements == ["ADTOF runtime is not verified"]
-    assert response.checks["adtof"]["status_code"] == "verify_input_missing"
-    assert response.checks["adtof"]["output_verification_reason"] == "GROOVESCRIBE_ADTOF_VERIFY_INPUT is not set"
+    assert response.demo_mock_ready is True
+    assert response.generic_baseline_ready is False
+    assert response.missing_requirements == ["Demucs package/command probe is not ready"]
+    assert response.checks["spectral_onset"]["reason_code"] == "librosa_runtime_unavailable"
+    assert response.offline_evaluation["adtof"]["enabled"] is False
 
 
 def test_runtime_diagnostics_not_ready_response(tmp_path: Path) -> None:
     service = RuntimeDiagnosticsService(
         settings=_settings(tmp_path),
-        process_runner=lambda *_args, **_kwargs: _completed(_payload(mock_ai_ready=False, true_ai_ready=False)),
+        process_runner=lambda *_args, **_kwargs: _completed(_payload(demo_mock_ready=False, generic_baseline_ready=False)),
     )
 
     response = service.get_preflight()
 
     assert response.status == "not_ready"
-    assert response.mock_ai_ready is False
-    assert response.true_ai_ready is False
+    assert response.demo_mock_ready is False
+    assert response.generic_baseline_ready is False
 
 
 def test_runtime_diagnostics_timeout_returns_error(tmp_path: Path) -> None:
@@ -223,17 +221,19 @@ def test_runtime_diagnostics_redacts_local_paths_from_smoke_commands(tmp_path: P
     assert "<local-path>" in encoded
 
 
-def test_runtime_diagnostics_redacts_adtof_output_reason(tmp_path: Path) -> None:
-    payload = _payload(mock_ai_ready=True, true_ai_ready=False)
-    payload["runtime_checks"]["adtof_pytorch"]["output_verification"]["reason"] = (
-        "verification input does not exist: /tmp/private/drums.wav"
-    )
+def test_runtime_diagnostics_preflight_strips_adtof_environment(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE", "adtof --input {input} --output {output}")
+    captured_env = {}
+
+    def fake_runner(*_args, **kwargs):
+        captured_env.update(kwargs["env"])
+        return _completed(_payload())
+
     service = RuntimeDiagnosticsService(
         settings=_settings(tmp_path),
-        process_runner=lambda *_args, **_kwargs: _completed(payload),
+        process_runner=fake_runner,
     )
 
-    response = service.get_preflight()
+    service.get_preflight()
 
-    assert response.checks["adtof"]["output_verification_reason"] == "verification input does not exist: <local-path>"
-    assert "/tmp/private" not in response.model_dump_json()
+    assert "GROOVESCRIBE_ADTOF_COMMAND_TEMPLATE" not in captured_env

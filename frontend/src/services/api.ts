@@ -120,12 +120,6 @@ function appendPipelineConfig(formData: FormData, input: PipelineRunConfigInput)
   if (input.pipelineMode) {
     formData.set('pipeline_mode', input.pipelineMode);
   }
-  if (input.adtofThresholdPreset?.trim()) {
-    formData.set('adtof_threshold_preset', input.adtofThresholdPreset.trim());
-  }
-  if (input.tomFilterPreset?.trim()) {
-    formData.set('tom_filter_preset', input.tomFilterPreset.trim());
-  }
 }
 
 async function requestJson<T>(

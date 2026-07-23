@@ -21,6 +21,8 @@ PYTHON_PACKAGES = [
     "mido",
     "pretty_midi",
     "music21",
+    "numpy",
+    "librosa",
     "fastapi",
     "celery",
 ]
@@ -51,6 +53,7 @@ def main() -> int:
     command_statuses = {name: _command_status(name) for name in COMMANDS}
     package_statuses = {name: _package_status(name) for name in PYTHON_PACKAGES}
     demucs_check = _demucs_runtime_check(package_statuses, device=demucs_device)
+    spectral_onset_check = _spectral_onset_runtime_check()
     adtof_check = _adtof_runtime_check(
         adtof_template,
         adtof_checkpoint,
@@ -61,10 +64,10 @@ def main() -> int:
     )
     musescore_check = _musescore_runtime_check(command_statuses, configured_renderer=pdf_renderer)
     ffmpeg_ready = command_statuses["ffmpeg"]["available"]
-    true_pipeline_missing = _true_pipeline_missing(
+    generic_baseline_missing = _generic_baseline_missing(
         ffmpeg_ready=ffmpeg_ready,
         demucs_ready=demucs_check["ready"],
-        adtof_ready=adtof_check["ready"],
+        spectral_onset_ready=spectral_onset_check["ready"],
     )
     payload = {
         "python": {
@@ -87,12 +90,13 @@ def main() -> int:
         "runtime_checks": {
             "ffmpeg": {"ready": ffmpeg_ready},
             "demucs": demucs_check,
+            "spectral_onset": spectral_onset_check,
             "adtof_pytorch": adtof_check,
             "musescore_pdf": musescore_check,
             "local_pipeline": {
-                "mock_ai_ready": ffmpeg_ready,
-                "true_ai_ready": not true_pipeline_missing,
-                "missing_requirements": true_pipeline_missing,
+                "demo_mock_ready": ffmpeg_ready,
+                "generic_baseline_ready": not generic_baseline_missing,
+                "missing_requirements": generic_baseline_missing,
             },
         },
         "smoke_commands": {
@@ -104,19 +108,17 @@ def main() -> int:
                 "--input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav "
                 "--output-dir /tmp/groovescribe-normalized"
             ),
-            "local_pipeline_mock": (
+            "local_pipeline_demo_mock": (
                 f"PYTHONPATH=. {sys.executable} scripts/run_local_pipeline.py "
                 "--input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav "
                 "--output-dir /tmp/groovescribe-fixture-run --mock-ai"
             ),
-            "local_pipeline_true_ai": (
+            "local_pipeline_generic_baseline": (
                 "PYTHONPATH=. "
-                f"{ADTOF_TEMPLATE_ENV}='...' "
-                f"{ADTOF_VERIFY_INPUT_ENV}='/tmp/groovescribe-stems/drums.wav' "
                 f"{sys.executable} scripts/run_local_pipeline.py "
                 "--input tests/pipeline/fixtures/audio/synthetic_clean_drum_pattern.wav "
-                "--output-dir /tmp/groovescribe-true-ai-run "
-                f"--adtof-command-template \"${ADTOF_TEMPLATE_ENV}\""
+                "--output-dir /tmp/groovescribe-generic-baseline-run "
+                "--transcription-backend spectral_onset_v1"
             ),
         },
     }
@@ -168,6 +170,23 @@ def _demucs_runtime_check(package_statuses: dict[str, dict], *, device: str) -> 
         "command": [sys.executable, "-m", "demucs", "--help"],
         "device": device,
         "command_probe": command_probe,
+    }
+
+
+def _spectral_onset_runtime_check() -> dict:
+    probe = _run_probe(
+        [
+            sys.executable,
+            "-c",
+            "from ai_pipeline.transcription.benchmark_backends import SpectralOnsetDrumBackend; "
+            "raise SystemExit(0 if SpectralOnsetDrumBackend().availability().ready else 1)",
+        ],
+        timeout=20,
+    )
+    return {
+        "ready": probe["exit_code"] == 0,
+        "reason_code": None if probe["exit_code"] == 0 else "librosa_runtime_unavailable",
+        "command_probe": probe,
     }
 
 
@@ -316,22 +335,19 @@ def _musescore_runtime_check(command_statuses: dict[str, dict], *, configured_re
     }
 
 
-def _true_pipeline_missing(
+def _generic_baseline_missing(
     *,
     ffmpeg_ready: bool,
     demucs_ready: bool,
-    adtof_ready: bool,
+    spectral_onset_ready: bool,
 ) -> list[str]:
     missing: list[str] = []
     if not ffmpeg_ready:
         missing.append("ffmpeg command not available")
     if not demucs_ready:
         missing.append("Demucs package/command probe is not ready")
-    if not adtof_ready:
-        missing.append(
-            "ADTOF runtime has not produced and verified raw_drum.mid; "
-            f"set {ADTOF_TEMPLATE_ENV} and {ADTOF_VERIFY_INPUT_ENV} for output verification"
-        )
+    if not spectral_onset_ready:
+        missing.append("Spectral onset backend (librosa/NumPy) is not ready")
     return missing
 
 

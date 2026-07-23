@@ -40,6 +40,8 @@ Future optional：
 目前主線是 V1 release candidate finalization：重跑 RC pilot handoff、release gate、redaction scan 與 git hygiene，確認不提交 storage / DB / dist / tmp artifacts。
 主線驗收命令已收斂為 `.venv-ai/bin/python scripts/run_v1_release_gate.py` 與 `.venv-ai/bin/python scripts/run_v1_rc_pilot.py --output-dir /tmp/groovescribe-v1-rc-pilot`。
 
+generic hi-hat migration 後的產品後續主線見 `Generic_HiHat_下一階段架構與執行計畫.md`。該文件定義 `generic_baseline`、ADTOF offline-only 邊界與後續驗收順序，優先於 articulation 功能或 ADTOF production 整合。
+
 ## Ticket 總表
 
 > Status note：下表保留為 phase backlog / historical implementation index。表內 `Todo` 不代表目前 release readiness 未完成；V1 RC readiness 的實際來源是 `docs/V1_Release_Checklist.md`、`docs/V1_Release_Runbook.md`、`docs/V1_Tag_Prep_Checklist.md` 與 RC handoff validation。

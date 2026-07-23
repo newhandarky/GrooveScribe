@@ -392,7 +392,7 @@ def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path)
     assert result_body["pipeline"]["quality"]["quality_verdict"]["verdict"] == "draft_candidate_needs_review"
     assert result_body["pipeline"]["quality"]["quality_verdict"]["limitations"] == ["tom_false_positive_likely"]
     assert result_body["pipeline"]["quality"]["quality_verdict"]["musicxml_parseable"] is True
-    assert result_body["pipeline"]["config"]["mode"] == "demo_mock"
+    assert result_body["pipeline"]["config"]["mode"] == "generic_baseline"
     assert result_body["pipeline"]["validation"]["musicxml"]["parseable"] is True
     assert result_body["pipeline"]["validation"]["pdf"]["openable"] is True
     assert "/tmp/" not in str(result_body["pipeline"])
@@ -410,7 +410,7 @@ def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path)
     assert packet_body["schema_version"] == "1.0"
     assert packet_body["status"] == "ready"
     assert packet_body["manual_eval_seed"]["artifact_ref"] == f"review:{job_id}"
-    assert packet_body["pipeline_config"]["mode"] == "demo_mock"
+    assert packet_body["pipeline_config"]["mode"] == "generic_baseline"
     assert packet_body["quality"]["raw_event_count"] == 7
     assert packet_body["quality"]["postprocess_filters"]["tom_false_positive"]["preset"] == "tom_guard_v1"
     assert packet_body["validation"]["musicxml"]["status"] == "parseable"
@@ -437,7 +437,7 @@ def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path)
         assert job.status == JobStatus.COMPLETED
 
 
-def test_upload_api_saves_true_ai_product_config(tmp_path: Path) -> None:
+def test_upload_api_rejects_true_ai_product_config(tmp_path: Path) -> None:
     client, session_factory, _storage = _client(tmp_path)
 
     response = client.post(
@@ -450,14 +450,8 @@ def test_upload_api_saves_true_ai_product_config(tmp_path: Path) -> None:
         },
     )
 
-    assert response.status_code == 202
-    with session_factory() as session:
-        job = session.scalar(select(TranscriptionJob).where(TranscriptionJob.id == response.json()["job_id"]))
-        assert job is not None
-        assert job.pipeline_mode == "true_ai"
-        assert job.adtof_threshold_preset == "separated_v1"
-        assert job.tom_filter_preset == "tom_guard_v1"
-        assert job.runtime_fallback_status == "not_applied"
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
 def test_upload_api_local_queue_failure_marks_job_failed(tmp_path: Path) -> None:
