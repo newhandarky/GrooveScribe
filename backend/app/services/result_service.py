@@ -12,6 +12,7 @@ from app.services.job_query_service import JobQueryService
 from app.services.pipeline_config import PIPELINE_MODE_DEMO_MOCK, PIPELINE_MODE_TRUE_AI, pipeline_config_for_job
 from app.services.pipeline_log_read_model import PipelineLogReadService
 from app.services.review_timeline_service import ReviewTimelineService
+from ai_pipeline.midi.mapping import LEGACY_HI_HAT_DRUMS, normalize_drum_counts
 from app.storage.base import StorageAdapter
 from app.storage.keys import build_candidate_artifact_key, build_job_artifact_key
 from app.storage.types import ArtifactType
@@ -49,7 +50,7 @@ _CANDIDATE_REANALYZE_ACTIONS = {
     "sparse_transcription": "鼓點覆蓋不足，請使用節奏更清楚的音檔重新分析。",
     "mostly_tom_output": "Tom 判定比例過高，請使用鼓聲更清楚的音檔重新分析。",
 }
-_DRUM_COUNT_KEYS = {"kick", "snare", "closed_hat", "open_hat", "pedal_hat", "tom", "cymbal"}
+_DRUM_COUNT_KEYS = {"kick", "snare", "hi_hat", "tom", "cymbal"}
 _PERFORMANCE_GATE_ISSUES = {
     "performance_midi_unparseable",
     "performance_musicxml_unparseable",
@@ -820,11 +821,12 @@ def _safe_note_histogram(value: object) -> dict[str, int]:
 def _safe_drum_counts(value: object) -> dict[str, int]:
     if not isinstance(value, dict):
         return {}
-    return {
+    accepted = {
         key: parsed
         for key, item in value.items()
-        if isinstance(key, str) and key in _DRUM_COUNT_KEYS and (parsed := _int_or_none(item)) is not None
+        if isinstance(key, str) and key in _DRUM_COUNT_KEYS | LEGACY_HI_HAT_DRUMS and (parsed := _int_or_none(item)) is not None
     }
+    return normalize_drum_counts(accepted)
 
 
 def _candidate_reasons(value: object) -> list[str]:

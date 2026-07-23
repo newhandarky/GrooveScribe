@@ -6,6 +6,7 @@ from ai_pipeline.midi.postprocessor import MidiPostProcessor
 from ai_pipeline.midi.quality import evaluate_drum_draft_quality
 from ai_pipeline.midi.simple_midi import parse_midi, write_drum_midi
 from ai_pipeline.midi.types import MidiPostProcessConfig, ProcessedDrumEvent
+from ai_pipeline.notation.musicxml import MusicXmlGenerator
 from ai_pipeline.transcription.midi_validation import count_note_on_events
 
 
@@ -22,9 +23,40 @@ def _write_raw_midi(path: Path) -> None:
 def test_general_midi_drum_mapping() -> None:
     assert map_to_general_midi_drum(35).note == 36
     assert map_to_general_midi_drum(38).drum == "snare"
-    assert map_to_general_midi_drum(42).drum == "closed_hat"
+    assert map_to_general_midi_drum(42).drum == "hi_hat"
+    assert map_to_general_midi_drum(44).drum == "hi_hat"
+    assert map_to_general_midi_drum(46).drum == "hi_hat"
     assert map_to_general_midi_drum(47).drum == "tom"
     assert map_to_general_midi_drum(10) is None
+
+
+def test_hat_notes_normalize_through_postprocess_notation_and_performance_midi(tmp_path) -> None:
+    raw_midi = tmp_path / "raw_hats.mid"
+    write_drum_midi(
+        raw_midi,
+        (
+            ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=100),
+            ProcessedDrumEvent(tick=240, note=42, drum="closed_hat", velocity=80),
+            ProcessedDrumEvent(tick=480, note=38, drum="snare", velocity=100),
+            ProcessedDrumEvent(tick=720, note=44, drum="pedal_hat", velocity=80),
+            ProcessedDrumEvent(tick=960, note=46, drum="open_hat", velocity=80),
+        ),
+        ticks_per_beat=480,
+        tempo_bpm=120.0,
+    )
+
+    processed = MidiPostProcessor().process(raw_midi, tmp_path / "processed")
+    notation = MusicXmlGenerator().generate(processed.drum_events_path, tmp_path / "notation")
+    chart = json.loads(notation.chart_events_path.read_text(encoding="utf-8"))
+    performance = parse_midi(notation.performance_midi_path)
+
+    assert [event.drum for event in processed.events].count("hi_hat") == 3
+    assert all(event.drum not in {"closed_hat", "open_hat", "pedal_hat"} for event in processed.events)
+    assert all(event["drum"] not in {"closed_hat", "open_hat", "pedal_hat"} for event in chart["events"])
+    assert any(event["drum"] == "hi_hat" for event in chart["events"])
+    assert 42 in {event.note for event in performance.notes}
+    assert 44 not in {event.note for event in performance.notes}
+    assert 46 not in {event.note for event in performance.notes}
 
 
 def test_postprocessor_quantizes_dedupes_and_writes_artifacts(tmp_path) -> None:
@@ -45,14 +77,14 @@ def test_postprocessor_quantizes_dedupes_and_writes_artifacts(tmp_path) -> None:
     assert result.drum_events_path.exists()
     assert count_note_on_events(result.processed_midi_path) == 3
     assert [event.tick for event in result.events] == [0, 120, 240]
-    assert [event.drum for event in result.events] == ["kick", "snare", "closed_hat"]
+    assert [event.drum for event in result.events] == ["kick", "snare", "hi_hat"]
 
     payload = json.loads(result.drum_events_path.read_text(encoding="utf-8"))
     assert payload["schema_version"] == "1.0"
     assert payload["event_count"] == 3
     assert payload["events"][0]["midi_note"] == 36
     assert payload["raw_note_histogram"] == {"35": 1, "36": 1, "38": 1, "42": 1}
-    assert payload["processed_drum_counts"] == {"closed_hat": 1, "kick": 1, "snare": 1}
+    assert payload["processed_drum_counts"] == {"hi_hat": 1, "kick": 1, "snare": 1}
     assert "repeated_close_events_deduped" in payload["warnings"]
     assert "sparse_transcription" in payload["warnings"]
     assert "too_few_events" in payload["warnings"]
@@ -107,7 +139,7 @@ def test_tom_guard_is_disabled_by_default_and_preserves_output(tmp_path) -> None
     result = MidiPostProcessor().process(raw_midi, tmp_path / "out")
 
     assert result.report.processed_drum_counts == {
-        "closed_hat": 2,
+        "hi_hat": 2,
         "kick": 2,
         "snare": 2,
         "tom": 5,
@@ -133,7 +165,7 @@ def test_tom_guard_drops_only_overlapping_toms_and_preserves_core_drums(tmp_path
     counts = result.report.processed_drum_counts
     assert counts["kick"] == 2
     assert counts["snare"] == 2
-    assert counts["closed_hat"] == 2
+    assert counts["hi_hat"] == 2
     assert counts["tom"] == 2
     assert all(event.drum != "tom" or event.note == 45 for event in result.events)
     assert not any(event.drum == "snare" and event.note == 45 for event in result.events)

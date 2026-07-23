@@ -286,7 +286,7 @@ class LocalMockPipelineRunner:
             "raw_event_count": 4,
             "processed_event_count": 4,
             "raw_note_histogram": {"36": 1, "38": 2, "42": 1},
-            "processed_drum_counts": {"closed_hat": 1, "kick": 1, "snare": 2},
+            "processed_drum_counts": {"hi_hat": 1, "kick": 1, "snare": 2},
             "duration_seconds": 1.5,
             "tempo_bpm": 120.0,
             "estimated_measure_count": 1,

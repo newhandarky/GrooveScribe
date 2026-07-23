@@ -103,6 +103,7 @@ class MidiPostProcessor:
                     note=mapping.note,
                     drum=mapping.drum,
                     velocity=max(1, min(127, event.velocity)),
+                    articulation=mapping.articulation,
                 )
             )
         return processed, warnings
@@ -122,6 +123,7 @@ class MidiPostProcessor:
                     note=event.note,
                     drum=event.drum,
                     velocity=event.velocity,
+                    articulation=event.articulation,
                 )
             )
         return sorted(quantized, key=lambda item: (item.tick, item.note, -item.velocity))
@@ -178,7 +180,7 @@ class MidiPostProcessor:
             return events, summary
 
         tom_candidates = [event for event in events if event.drum == "tom"]
-        core_events = [event for event in events if event.drum in {"kick", "snare", "closed_hat", "pedal_hat", "open_hat"}]
+        core_events = [event for event in events if event.drum in {"kick", "snare", "hi_hat"}]
         ranked_toms = sorted(
             tom_candidates,
             key=lambda event: (
@@ -242,7 +244,7 @@ class MidiPostProcessor:
         return min(abs(event.tick - core_event.tick) for core_event in core_events)
 
     def _hihat_count(self, counts: Counter[str]) -> int:
-        return sum(counts.get(drum, 0) for drum in ("closed_hat", "pedal_hat", "open_hat"))
+        return counts.get("hi_hat", 0)
 
     def _validate_processed_midi(self, processed_midi_path: Path) -> None:
         try:
@@ -299,6 +301,7 @@ class MidiPostProcessor:
                     "drum": event.drum,
                     "midi_note": event.note,
                     "velocity": event.velocity,
+                    **({"articulation": event.articulation} if event.articulation is not None else {}),
                 }
                 for index, event in enumerate(events)
             ],

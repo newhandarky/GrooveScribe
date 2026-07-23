@@ -30,7 +30,7 @@
 - 解析 raw MIDI note events，轉成內部 event model。
 - 預設拍號為 4/4；BPM 可由 MIDI tempo、簡化 beat tracking 或 fallback 預設值取得。
 - 預設量化 grid 為 16 分音符；極慢或極快歌曲可依 config 改為 8 分或 32 分。
-- 套用 General MIDI drum mapping：kick 36、snare 38、closed hat 42、tom/cymbal 使用簡化 mapping。
+- 套用 General MIDI drum mapping：kick 36、snare 38、generic hi-hat 42、tom/cymbal 使用簡化 mapping。hi-hat 的 MIDI 42 只是一致的輸出編碼，不表示 closed/open/pedal articulation 已被辨識。
 - 合併同一鼓件在極短時間窗內的重複事件，過低 velocity noise 可過濾或降權。
 
 ## 輸入資料

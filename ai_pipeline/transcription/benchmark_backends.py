@@ -62,7 +62,7 @@ class SpectralOnsetDrumBackend:
             drum = _classify_spectrum(spectrum, frequencies)
             seconds = librosa.frames_to_time(index, sr=sample_rate, hop_length=hop_length)
             tick = round(float(seconds) * tempo_bpm / 60.0 * 480)
-            note = {"kick": 36, "snare": 38, "closed_hat": 42}[drum]
+            note = {"kick": 36, "snare": 38, "hi_hat": 42}[drum]
             events.append(ProcessedDrumEvent(tick=max(0, tick), note=note, drum=drum, velocity=96))
         write_drum_midi(output_midi, tuple(events), ticks_per_beat=480, tempo_bpm=tempo_bpm)
         return {"status": "completed", "backend": self.name, "event_count": len(events)}
@@ -290,7 +290,7 @@ def _classify_spectrum(spectrum, frequencies) -> str:
     kick = energy(30, 180) * 1.5
     snare = energy(180, 4_000)
     hat = energy(5_000, 14_000) * 1.2
-    return max(((kick, "kick"), (snare, "snare"), (hat, "closed_hat")), key=lambda item: item[0])[1]
+    return max(((kick, "kick"), (snare, "snare"), (hat, "hi_hat")), key=lambda item: item[0])[1]
 
 
 def _template_availability(

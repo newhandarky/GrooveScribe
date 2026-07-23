@@ -166,14 +166,17 @@ def test_candidate_benchmark_rejects_a_class_preset_that_scalar_candidates_would
     assert report["summary"]["reason"] == "candidate_threshold_preset_requires_controlled_experiment"
 
 
-def test_candidate_strategy_profile_exposes_separated_preset_only_as_an_opt_in_experiment() -> None:
+def test_candidate_strategy_profiles_expose_each_preset_as_an_opt_in_experiment() -> None:
     script = _load_script("run_performance_benchmark")
 
     assert script._candidate_strategy_profile(None) == "scalar_v1"
     assert script._candidate_strategy_profile("scalar_plus_separated_v1") == "scalar_plus_separated_v1"
+    assert script._candidate_strategy_profile("scalar_plus_separated_hihat_v1") == "scalar_plus_separated_hihat_v1"
     assert script._candidate_strategy_profile("separated_v1") is None
     assert script._CANDIDATE_STRATEGY_PROFILES["scalar_v1"] == ()
     assert script._CANDIDATE_STRATEGY_PROFILES["scalar_plus_separated_v1"] == ("separated_v1",)
+    assert script._CANDIDATE_STRATEGY_PROFILES["scalar_plus_separated_hihat_v1"] == ("separated_hihat_v1",)
+    assert script._experimental_preset("scalar_plus_separated_hihat_v1") == "separated_hihat_v1"
 
 
 def test_benchmark_split_filters_before_any_pipeline_command(tmp_path: Path) -> None:
@@ -214,6 +217,8 @@ def test_opt_in_holdout_requires_matching_improved_development_evidence(tmp_path
     reservation, reason = script._reserve_holdout_evidence(config, "scalar_plus_separated_v1", manifest, "holdout")
     assert reason is None and reservation is not None
     script._finalize_holdout_reservation(reservation, True)
+    consumed = evidence.with_name("development.holdout-consumed.json")
+    assert json.loads(consumed.read_text(encoding="utf-8"))["status"] == "consumed"
     assert script._reserve_holdout_evidence(config, "scalar_plus_separated_v1", manifest, "holdout")[1] == "holdout_evidence_already_consumed"
 
 
@@ -809,6 +814,7 @@ def test_candidate_benchmark_accepts_recommended_ground_truth_best_and_uses_fixe
     write_drum_midi(ground_truth, events, ticks_per_beat=480)
     _write_candidate_score(tmp_path, "threshold_0_4", events)
     candidate = _candidate("threshold_0_4", 0.4)
+    candidate["quality"]["processed_drum_counts"] = {"kick": 1, "snare": 1, "hi_hat": 1}
     candidate["quality"]["processed_drum_counts"]["untrusted"] = 999
     candidate["quality"]["quality_flags"] = ["stdout /tmp/unsafe"]
     result = script._evaluate_candidates(
@@ -819,7 +825,7 @@ def test_candidate_benchmark_accepts_recommended_ground_truth_best_and_uses_fixe
     )
 
     assert result["validation"]["status"] == "passed"
-    assert result["candidates"][0]["processed_drum_counts"] == {"closed_hat": 1, "kick": 1, "snare": 1}
+    assert result["candidates"][0]["processed_drum_counts"] == {"hi_hat": 1, "kick": 1, "snare": 1}
     assert result["candidates"][0]["quality_flags"] == []
     assert set(result["candidates"][0]["ground_truth_eval"]) == {
         "status",

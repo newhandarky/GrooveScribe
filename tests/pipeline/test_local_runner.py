@@ -51,7 +51,7 @@ def test_local_runner_completes_with_mock_ai(tmp_path) -> None:
     ]
     assert log_payload["quality"]["raw_event_count"] == 5
     assert log_payload["quality"]["processed_event_count"] == 5
-    assert log_payload["quality"]["processed_drum_counts"] == {"closed_hat": 2, "kick": 2, "snare": 1}
+    assert log_payload["quality"]["processed_drum_counts"] == {"hi_hat": 2, "kick": 2, "snare": 1}
     assert "sparse_transcription" in log_payload["quality"]["quality_flags"]
 
 
@@ -136,7 +136,7 @@ def test_true_ai_candidate_analysis_reuses_preprocessing_and_separation_once(tmp
     monkeypatch.setattr(LocalPipelineRunner, "_run_notation_generation", notation)
 
     result = LocalPipelineRunner(
-        LocalPipelineConfig(candidate_thresholds=(0.3, 0.4), adtof_threshold_preset="separated_v1", tom_filter_preset="tom_guard_v1")
+        LocalPipelineConfig(transcription_backend="adtof", candidate_thresholds=(0.3, 0.4), adtof_threshold_preset="separated_v1", tom_filter_preset="tom_guard_v1")
     ).run(input_path, tmp_path / "job")
 
     assert result.status == "completed"
@@ -199,7 +199,7 @@ def test_candidate_analysis_keeps_a_canonical_artifact_without_recommending_hard
     monkeypatch.setattr(LocalPipelineRunner, "_run_midi_post_processing", postprocess)
     monkeypatch.setattr(LocalPipelineRunner, "_run_notation_generation", notation)
 
-    result = LocalPipelineRunner(LocalPipelineConfig(candidate_thresholds=(0.3, 0.4))).run(input_path, tmp_path / "job")
+    result = LocalPipelineRunner(LocalPipelineConfig(transcription_backend="adtof", candidate_thresholds=(0.3, 0.4))).run(input_path, tmp_path / "job")
 
     payload = json.loads(result.log_path.read_text(encoding="utf-8"))
     analysis = payload["candidate_analysis"]
@@ -242,7 +242,7 @@ def test_candidate_analysis_records_separated_preset_as_a_distinct_strategy(tmp_
     monkeypatch.setattr(LocalPipelineRunner, "_run_midi_post_processing", postprocess)
     monkeypatch.setattr(LocalPipelineRunner, "_run_notation_generation", notation)
 
-    result = LocalPipelineRunner(LocalPipelineConfig(candidate_thresholds=(0.4,), candidate_threshold_presets=("separated_v1",))).run(input_path, tmp_path / "job")
+    result = LocalPipelineRunner(LocalPipelineConfig(transcription_backend="adtof", candidate_thresholds=(0.4,), candidate_threshold_presets=("separated_v1",))).run(input_path, tmp_path / "job")
 
     analysis = json.loads(result.log_path.read_text(encoding="utf-8"))["candidate_analysis"]
     assert result.status == "completed"

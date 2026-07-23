@@ -270,7 +270,7 @@ def _two_measure_groove() -> dict:
     for measure in range(2):
         base = measure * 1920
         for slot in range(8):
-            events.append({"tick": base + slot * 240, "drum": "closed_hat", "velocity": 80})
+            events.append({"tick": base + slot * 240, "drum": "hi_hat", "velocity": 80})
         events.extend(
             [
                 {"tick": base, "drum": "kick", "velocity": 100},

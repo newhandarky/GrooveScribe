@@ -18,6 +18,9 @@ class ProcessedDrumEvent:
     note: int
     drum: str
     velocity: int
+    # Reserved for a future, separately validated hi-hat articulation feature.
+    # The current product contract emits generic hi-hat events only.
+    articulation: str | None = None
 
 
 @dataclass(frozen=True)

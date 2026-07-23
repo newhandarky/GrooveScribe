@@ -5,7 +5,7 @@ from math import ceil
 from pathlib import Path
 from typing import Iterable, Mapping
 
-from ai_pipeline.midi.mapping import map_to_general_midi_drum
+from ai_pipeline.midi.mapping import map_to_general_midi_drum, normalize_drum_counts
 from ai_pipeline.midi.simple_midi import DEFAULT_TEMPO_BPM, parse_midi
 from ai_pipeline.midi.types import RawMidiNoteEvent
 
@@ -28,6 +28,9 @@ QUALITY_FLAG_CODES = {
     "no_usable_groove",
 }
 MIN_CANDIDATE_EVENT_COUNT = 4
+def _hi_hat_count(drum_counts: Mapping[str, int]) -> int:
+    """Read legacy artifacts without emitting their articulation labels."""
+    return normalize_drum_counts(drum_counts).get("hi_hat", 0)
 
 
 def inspect_midi_quality(midi_path: Path) -> dict:
@@ -90,7 +93,7 @@ def quality_flags(
     if event_count and (event_count < 8 or _events_per_measure(event_count, estimated_measure_count) < 2):
         flags.add("sparse_transcription")
 
-    hihat_count = sum(drum_counts.get(drum, 0) for drum in ("closed_hat", "pedal_hat", "open_hat"))
+    hihat_count = _hi_hat_count(drum_counts)
     if event_count >= 4 and hihat_count == 0:
         flags.add("hihat_missing_likely")
     if event_count >= 4 and drum_counts.get("snare", 0) == 0:
@@ -134,7 +137,7 @@ def quality_diagnostics(
         if raw_tom_count / raw_count >= 0.75:
             flags.add("raw_tom_dominant")
 
-    hihat_count = sum(processed_counts.get(drum, 0) for drum in ("closed_hat", "pedal_hat", "open_hat"))
+    hihat_count = _hi_hat_count(processed_counts)
     kick_count = processed_counts.get("kick", 0)
     snare_count = processed_counts.get("snare", 0)
     other_count = processed_count - kick_count - snare_count - hihat_count
@@ -317,4 +320,4 @@ def _quality_limitations(
 
 
 def _hihat_count(counts: Mapping[str, int]) -> int:
-    return sum(int(counts.get(drum, 0)) for drum in ("closed_hat", "pedal_hat", "open_hat"))
+    return _hi_hat_count(counts)

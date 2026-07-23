@@ -237,8 +237,9 @@ def _candidate_strategy_fields(config: object) -> tuple[str, str | None]:
     source = config if isinstance(config, dict) else {}
     if source.get("strategy") == "scalar_threshold_v1" or source.get("threshold_strategy") == "scalar_candidate":
         return "scalar_threshold_v1", None
-    if source.get("strategy") == "adtof_preset_v1" and source.get("adtof_threshold_preset") == "separated_v1":
-        return "adtof_preset_v1", "separated_v1"
+    preset = source.get("adtof_threshold_preset")
+    if source.get("strategy") == "adtof_preset_v1" and preset in {"separated_v1", "separated_hihat_v1"}:
+        return "adtof_preset_v1", preset
     return "unknown", None
 
 

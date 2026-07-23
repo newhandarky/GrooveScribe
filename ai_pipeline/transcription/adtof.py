@@ -35,7 +35,17 @@ ADTOF_CLASS_THRESHOLD_PRESETS = {
         "tom": 0.18,
         "closed_hat": 0.06,
         "cymbal": 0.08,
-    }
+    },
+    # Benchmark-only follow-up to separated_v1.  Attribution showed that the
+    # full-mix raw output has no closed-hat matches, so this experiment changes
+    # exactly that class while preserving every other separated_v1 threshold.
+    "separated_hihat_v1": {
+        "kick": 0.06,
+        "snare": 0.04,
+        "tom": 0.18,
+        "closed_hat": 0.03,
+        "cymbal": 0.08,
+    },
 }
 ADTOF_CLASS_ALIASES = {
     "hat": "closed_hat",

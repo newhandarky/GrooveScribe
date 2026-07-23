@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ai_pipeline.midi.mapping import normalize_drum_counts
+
 _BLOCKING_FLAGS = {
     "too_few_events",
     "sparse_transcription",
@@ -19,7 +21,7 @@ def evaluate_candidate_recommendation(
 ) -> dict[str, Any]:
     """Rank a candidate conservatively without treating a user upload as truth."""
 
-    counts = _dict(quality.get("processed_drum_counts"))
+    counts = normalize_drum_counts(_dict(quality.get("processed_drum_counts")))
     flags = {str(value) for value in _list(quality.get("quality_flags"))}
     gate = _dict(quality.get("performance_gate"))
     playability = _dict(gate.get("playability"))
@@ -43,7 +45,7 @@ def evaluate_candidate_recommendation(
     if alignment is not None:
         score += round(min(1.0, alignment) * 25)
         reasons.append("鼓點與分離鼓聲的對齊較佳" if alignment >= 0.7 else "鼓點對齊仍需保留參考")
-    hihat = sum(_positive(counts.get(name)) for name in ("closed_hat", "open_hat", "pedal_hat"))
+    hihat = _positive(counts.get("hi_hat"))
     notation = _dict(quality.get("notation_readability"))
     measure_count = max(1, _positive(notation.get("measure_count")))
     minimum_hihat_events = max(2, measure_count * 4)

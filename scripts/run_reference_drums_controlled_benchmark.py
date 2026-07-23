@@ -130,7 +130,7 @@ def _candidate_raw_midi(benchmark_dir: Path, item_id: str, candidate_id: str) ->
 def _candidate_id(threshold: float, preset: object) -> str:
     """Return the exact strategy artifact paired with the reference ADTOF run."""
 
-    return "preset_separated_v1" if _preset(preset) == "separated_v1" else f"threshold_{str(threshold).replace('.', '_')}"
+    return f"preset_{_preset(preset)}" if _preset(preset) is not None else f"threshold_{str(threshold).replace('.', '_')}"
 
 
 def _demucs_stem(benchmark_dir: Path, item_id: str) -> Path | None:
@@ -275,7 +275,7 @@ def _split(value: object) -> str | None:
 
 
 def _preset(value: object) -> str | None:
-    return value if value in {"separated_v1"} else None
+    return value if value in {"separated_v1", "separated_hihat_v1"} else None
 
 
 def _delta(left: object, right: object) -> float | None:

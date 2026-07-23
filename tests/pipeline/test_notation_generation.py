@@ -284,9 +284,7 @@ def test_musicxml_generator_declares_standard_drum_instruments_per_note(tmp_path
     expected = {
         "P1-I36": ("Bass Drum 1", "36"),
         "P1-I38": ("Acoustic Snare", "38"),
-        "P1-I42": ("Closed Hi-Hat", "42"),
-        "P1-I44": ("Pedal Hi-Hat", "44"),
-        "P1-I46": ("Open Hi-Hat", "46"),
+        "P1-I42": ("Hi-hat", "42"),
         "P1-I45": ("Low Tom", "45"),
         "P1-I49": ("Crash Cymbal 1", "49"),
     }
@@ -307,7 +305,7 @@ def test_musicxml_generator_declares_standard_drum_instruments_per_note(tmp_path
         for note in root.findall("./part/measure/note")
         if note.find("instrument") is not None
     }
-    assert set(notes_by_instrument) == {"P1-I36", "P1-I38", "P1-I42", "P1-I46", "P1-I45", "P1-I49"}
+    assert set(notes_by_instrument) == {"P1-I36", "P1-I38", "P1-I42", "P1-I45", "P1-I49"}
     positions = {
         instrument_id: (
             note.findtext("unpitched/display-step"),
@@ -321,7 +319,6 @@ def test_musicxml_generator_declares_standard_drum_instruments_per_note(tmp_path
     assert positions["P1-I36"] == ("F", "4", "2", "down", None)
     assert positions["P1-I38"] == ("C", "5", "1", "up", None)
     assert positions["P1-I42"] == ("G", "5", "1", "up", "x")
-    assert positions["P1-I46"] == ("G", "5", "1", "up", "x")
     assert positions["P1-I45"] == ("D", "5", "1", "up", None)
     assert positions["P1-I49"] == ("A", "5", "1", "up", "x")
     assert positions["P1-I36"][:2] != positions["P1-I38"][:2]
@@ -371,7 +368,7 @@ def test_musicxml_generator_uses_readable_chart_events_for_dense_transcriptions(
     assert result.chart_summary["dense_measures_after"] == 0
     assert result.chart_summary["preserved_counts"]["kick"] > 0
     assert result.chart_summary["preserved_counts"]["snare"] > 0
-    assert result.chart_summary["preserved_counts"]["closed_hat"] > 0
+    assert result.chart_summary["preserved_counts"]["hi_hat"] > 0
     assert result.chart_summary["dropped_counts"]["tom"] > 0
     assert result.chart_summary["dropped_counts"]["cymbal"] > 0
     assert chart_payload["measures"]
@@ -425,7 +422,7 @@ def test_readable_chart_v3_writes_each_groove_measure_without_repeat_notation(tm
     assert not any(note.findtext("notehead") == "slash" for note in root.findall(".//note"))
     for measure_index in range(8):
         measure_events = [event for event in chart_events if event["tick"] // 1920 == measure_index]
-        assert {event["drum"] for event in measure_events} >= {"kick", "snare", "closed_hat"}
+        assert {event["drum"] for event in measure_events} >= {"kick", "snare", "hi_hat"}
         xml_measure = root.find(f"./part/measure[@number='{measure_index + 1}']")
         assert xml_measure is not None
         assert any(note.findtext("notehead") == "x" for note in xml_measure.findall("note"))
@@ -468,7 +465,7 @@ def test_readable_chart_v3_marks_insufficient_hihat_evidence_as_needing_manual_a
     chart_payload = json.loads(result.chart_events_path.read_text(encoding="utf-8"))
     for measure_index in range(3):
         measure_events = [event for event in chart_payload["events"] if event["tick"] // 1920 == measure_index]
-        assert {event["drum"] for event in measure_events} >= {"kick", "snare", "closed_hat"}
+        assert {event["drum"] for event in measure_events} >= {"kick", "snare", "hi_hat"}
 
 
 def test_readable_chart_v3_preserves_off_backbeat_core_evidence_without_inventing_events(tmp_path) -> None:
@@ -499,7 +496,7 @@ def test_readable_chart_v3_preserves_off_backbeat_core_evidence_without_inventin
     chart = json.loads(result.chart_events_path.read_text(encoding="utf-8"))
     events = chart["events"]
 
-    assert {event["drum"] for event in events} >= {"kick", "snare", "closed_hat"}
+    assert {event["drum"] for event in events} >= {"kick", "snare", "hi_hat"}
     assert len([event for event in events if event["drum"] == "kick"]) == 2
     assert len([event for event in events if event["drum"] == "snare"]) == 2
     assert all(event["tick"] % 240 == 0 for event in events if event["drum"] in {"kick", "snare"})

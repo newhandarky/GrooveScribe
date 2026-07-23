@@ -10,6 +10,7 @@ from pathlib import Path
 from ai_pipeline.notation.errors import MusicXmlInvalidError, NotationGenerationFailedError
 from ai_pipeline.notation.types import MusicXmlResult, NotationConfig
 from ai_pipeline.midi.simple_midi import write_drum_midi
+from ai_pipeline.midi.mapping import normalize_drum_name
 from ai_pipeline.midi.types import ProcessedDrumEvent
 
 HAND_VOICE = "1"
@@ -41,9 +42,7 @@ class ChartMeasure:
 DRUM_DISPLAYS = {
     "kick": DrumDisplay("F", 4, "normal", FOOT_VOICE, "down", 36, "P1-I36", "Bass Drum 1"),
     "snare": DrumDisplay("C", 5, "normal", HAND_VOICE, "up", 38, "P1-I38", "Acoustic Snare"),
-    "closed_hat": DrumDisplay("G", 5, "x", HAND_VOICE, "up", 42, "P1-I42", "Closed Hi-Hat"),
-    "pedal_hat": DrumDisplay("D", 4, "x", FOOT_VOICE, "down", 44, "P1-I44", "Pedal Hi-Hat"),
-    "open_hat": DrumDisplay("G", 5, "x", HAND_VOICE, "up", 46, "P1-I46", "Open Hi-Hat"),
+    "hi_hat": DrumDisplay("G", 5, "x", HAND_VOICE, "up", 42, "P1-I42", "Hi-hat"),
     "tom": DrumDisplay("D", 5, "normal", HAND_VOICE, "up", 45, "P1-I45", "Low Tom"),
     "cymbal": DrumDisplay("A", 5, "x", HAND_VOICE, "up", 49, "P1-I49", "Crash Cymbal 1"),
 }
@@ -154,7 +153,7 @@ class MusicXmlGenerator:
 
         normalized_events = []
         for event in events:
-            drum = str(event.get("drum", "snare"))
+            drum = normalize_drum_name(str(event.get("drum", "snare")))
             if drum not in DRUM_DISPLAYS:
                 drum = "snare"
             normalized_events.append(
@@ -230,7 +229,7 @@ class MusicXmlGenerator:
                 hand_hat_ticks = [
                     tick
                     for tick, events_at_tick in hand_events.items()
-                    if any(event["drum"] in {"closed_hat", "open_hat"} for event in events_at_tick)
+                    if any(event["drum"] == "hi_hat" for event in events_at_tick)
                 ]
                 if hand_hat_ticks:
                     rhythm_stats["hihat_eighth_pulse_measure_count" if len(hand_hat_ticks) >= 5 else "hihat_quarter_pulse_measure_count"] += 1
@@ -286,7 +285,7 @@ class MusicXmlGenerator:
         hat_ticks = [
             tick
             for tick in ticks
-            if any(event["drum"] in {"closed_hat", "open_hat"} for event in events_by_tick[tick])
+            if any(event["drum"] == "hi_hat" for event in events_by_tick[tick])
         ]
         hat_pulse_duration = ticks_per_beat // 2 if len(hat_ticks) >= 5 else ticks_per_beat
         for index, local_tick in enumerate(ticks):
@@ -447,7 +446,7 @@ def _rhythm_note_duration(
     has_fill_drum = any(event["drum"] in {"tom", "snare"} for event in events)
     if is_fill_tail and has_fill_drum:
         return min(sixteenth, remaining, gap)
-    if voice == HAND_VOICE and any(event["drum"] in {"closed_hat", "open_hat"} for event in events):
+    if voice == HAND_VOICE and any(event["drum"] == "hi_hat" for event in events):
         return min(hat_pulse_duration, remaining, gap)
     return min(quarter, remaining, gap)
 
@@ -600,7 +599,7 @@ def _build_chart_events(
 def _normalize_events(events: list[dict]) -> list[dict]:
     normalized = []
     for event in events:
-        drum = str(event.get("drum", "snare"))
+        drum = normalize_drum_name(str(event.get("drum", "snare")))
         if drum not in DRUM_DISPLAYS:
             drum = "snare"
         normalized.append(
@@ -722,7 +721,7 @@ def _arrange_v3_literal_measure(
 ) -> tuple[list[dict], str, int]:
     if not events:
         return [], "rest", 0
-    hats = [event for event in events if event["drum"] in {"closed_hat", "open_hat"}]
+    hats = [event for event in events if event["drum"] == "hi_hat"]
     kicks = [event for event in events if event["drum"] == "kick"]
     snares = [event for event in events if event["drum"] == "snare"]
     cymbals = [event for event in events if event["drum"] == "cymbal"]
@@ -821,19 +820,19 @@ def _has_core_groove(events: tuple[dict, ...] | list[dict]) -> bool:
 
 def _has_complete_core_groove(events: tuple[dict, ...] | list[dict]) -> bool:
     drums = {event["drum"] for event in events}
-    return "kick" in drums and "snare" in drums and bool(drums & {"closed_hat", "open_hat"})
+    return {"kick", "snare", "hi_hat"}.issubset(drums)
 
 
 def _has_hihat_event(events: tuple[dict, ...] | list[dict]) -> bool:
-    return any(event["drum"] in {"closed_hat", "open_hat"} for event in events)
+    return any(event["drum"] == "hi_hat" for event in events)
 
 
 def _has_hihat_evidence(events: tuple[dict, ...]) -> bool:
-    return any(event["drum"] in {"closed_hat", "open_hat"} for event in events)
+    return any(event["drum"] == "hi_hat" for event in events)
 
 
 def _has_sufficient_hihat_evidence(events: tuple[dict, ...], ticks_per_beat: int) -> bool:
-    hats = [event for event in events if event["drum"] in {"closed_hat", "open_hat"}]
+    hats = [event for event in events if event["drum"] == "hi_hat"]
     return len(_quantized_slots(hats, ticks_per_beat)) >= 3
 
 
@@ -976,12 +975,12 @@ def _simplify_for_chart(
 
 def _select_core_chart_events(events: list[dict], measure_ticks: int, ticks_per_beat: int) -> list[dict]:
     selected: dict[tuple[int, str], dict] = {}
-    hats = [event for event in events if event["drum"] in {"closed_hat", "open_hat"}]
+    hats = [event for event in events if event["drum"] == "hi_hat"]
     cymbals = [event for event in events if event["drum"] == "cymbal"]
     toms = [event for event in events if event["drum"] == "tom"]
 
     for event in events:
-        if event["drum"] in {"kick", "snare", "pedal_hat"}:
+        if event["drum"] in {"kick", "snare"}:
             selected[(event["tick"], event["drum"])] = event
 
     for event in _pulse_events(hats, ticks_per_beat, max_per_measure=8):
@@ -1033,16 +1032,15 @@ def _trim_measure_events(events: list[dict], max_events: int, ticks_per_beat: in
 
     kicks = aligned([event for event in events if event["drum"] == "kick"], 4)
     snares = aligned([event for event in events if event["drum"] == "snare"], 4)
-    hats = aligned([event for event in events if event["drum"] in {"closed_hat", "open_hat"}], 4)
-    pedal_hats = aligned([event for event in events if event["drum"] == "pedal_hat"], 1)
+    hats = aligned([event for event in events if event["drum"] == "hi_hat"], 4)
     cymbals = aligned([event for event in events if event["drum"] == "cymbal"], 1)
     toms = aligned([event for event in events if event["drum"] == "tom"], 2)
-    kept = _unique_events([*kicks, *snares, *hats, *pedal_hats, *cymbals, *toms])
+    kept = _unique_events([*kicks, *snares, *hats, *cymbals, *toms])
     if len(kept) <= max_events:
         return sorted(kept, key=lambda item: (item["tick"], item["drum"]))
 
     def priority(event: dict) -> tuple[int, int, int]:
-        drum_priority = {"snare": 0, "kick": 0, "closed_hat": 1, "open_hat": 1, "pedal_hat": 1, "cymbal": 2, "tom": 3}.get(
+        drum_priority = {"snare": 0, "kick": 0, "hi_hat": 1, "cymbal": 2, "tom": 3}.get(
             event["drum"],
             4,
         )

@@ -101,7 +101,18 @@ def test_parse_separated_v1_threshold_preset() -> None:
         "closed_hat": 0.06,
         "cymbal": 0.08,
     }
-    assert class_thresholds_csv(thresholds) == "0.06,0.04,0.18,0.06,0.08"
+
+
+def test_parse_separated_hihat_v1_changes_only_closed_hat_threshold() -> None:
+    baseline = class_thresholds_for_preset("separated_v1")
+    thresholds = class_thresholds_for_preset("separated_hihat_v1")
+
+    assert baseline is not None and thresholds is not None
+    assert thresholds["closed_hat"] == 0.03
+    assert {key: value for key, value in thresholds.items() if key != "closed_hat"} == {
+        key: value for key, value in baseline.items() if key != "closed_hat"
+    }
+    assert class_thresholds_csv(thresholds) == "0.06,0.04,0.18,0.03,0.08"
 
 
 def test_resolve_class_thresholds_rejects_preset_and_explicit_thresholds() -> None:

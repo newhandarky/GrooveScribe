@@ -1760,19 +1760,20 @@ export function PerformancePlaybackPanel({
 function playDrumPreview(context: AudioContext, when: number, drum: string, velocity: number, volume: number) {
   const intensity = drumPreviewIntensity(velocity, volume);
   if (intensity <= 0) return;
-  if (drum === 'kick') {
+  const canonicalDrum = ['hi_hat', 'closed_hat', 'open_hat', 'pedal_hat'].includes(drum) ? 'hi_hat' : drum;
+  if (canonicalDrum === 'kick') {
     playKickPreview(context, when, intensity);
     return;
   }
-  if (drum === 'snare') {
+  if (canonicalDrum === 'snare') {
     playSnarePreview(context, when, intensity);
     return;
   }
-  if (drum === 'tom') {
+  if (canonicalDrum === 'tom') {
     playTomPreview(context, when, intensity);
     return;
   }
-  playHatPreview(context, when, intensity, drum === 'open_hat' || drum === 'cymbal');
+  playHatPreview(context, when, intensity, canonicalDrum === 'cymbal');
 }
 
 function playKickPreview(context: AudioContext, when: number, intensity: number) {
@@ -2303,7 +2304,7 @@ function QualityReview({ quality }: { quality: NonNullable<NonNullable<Transcrip
         <div className="drumCountList">
           {drumCounts.map(([drum, count]) => (
             <span key={drum}>
-              {drum}: {count}
+              {displayDrumName(drum)}: {count}
             </span>
           ))}
         </div>
@@ -2317,6 +2318,10 @@ function QualityReview({ quality }: { quality: NonNullable<NonNullable<Transcrip
       ) : null}
     </div>
   );
+}
+
+export function displayDrumName(drum: string): string {
+  return ['hi_hat', 'closed_hat', 'open_hat', 'pedal_hat'].includes(drum) ? 'Hi-hat' : drum;
 }
 
 function RuntimeCheck({ label, value }: { label: string; value: unknown }) {

@@ -8,11 +8,11 @@ from collections import defaultdict
 from pathlib import Path
 
 from ai_pipeline.midi.simple_midi import parse_midi
-from ai_pipeline.midi.mapping import map_to_general_midi_drum
+from ai_pipeline.midi.mapping import map_to_general_midi_drum, normalize_drum_name
 from ai_pipeline.notation.gate_calibration import is_valid_onset_alignment
 
 
-_CORE_DRUMS = {"kick", "snare", "closed_hat", "open_hat"}
+_CORE_DRUMS = {"kick", "snare", "hi_hat"}
 _BLOCKING_CHART_WARNINGS = {
     "notation_chart_still_dense",
     "notation_fragmented_groove_rhythm",
@@ -198,7 +198,7 @@ def compare_performance_midi_to_ground_truth(
     recall = true_positive / len(expected_events) if expected_events else 0.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
     per_drum = {}
-    for drum in ("kick", "snare", "closed_hat", "open_hat", "tom", "cymbal"):
+    for drum in ("kick", "snare", "hi_hat", "tom", "cymbal"):
         matched = matched_by_drum[drum]
         drum_precision = matched / predicted_by_drum[drum] if predicted_by_drum[drum] else 0.0
         drum_recall = matched / expected_by_drum[drum] if expected_by_drum[drum] else 0.0
@@ -296,7 +296,7 @@ def _validate_playability(events: list[dict], summary: dict, measure_ticks: int)
         tick = event.get("tick")
         drum = event.get("drum")
         if isinstance(tick, int) and isinstance(drum, str):
-            by_measure[tick // measure_ticks].append(event)
+            by_measure[tick // measure_ticks].append({**event, "drum": normalize_drum_name(drum)})
     chart_measures = {
         int(item["measure_index"]): str(item.get("render_kind", "groove"))
         for item in summary.get("chart_measures", [])
@@ -310,14 +310,14 @@ def _validate_playability(events: list[dict], summary: dict, measure_ticks: int)
         drums = {str(item.get("drum")) for item in measure_events}
         if drums & _CORE_DRUMS:
             core_evidence += 1
-        if {"kick", "snare"}.issubset(drums) and drums & {"closed_hat", "open_hat"}:
+        if {"kick", "snare", "hi_hat"}.issubset(drums):
             core_complete += 1
         if "tom" in drums and chart_measures.get(index, "groove") != "fill":
             tom_outside_fill += 1
         by_tick: dict[int, set[str]] = defaultdict(set)
         for event in measure_events:
             by_tick[int(event["tick"])].add(str(event["drum"]))
-        if any({"closed_hat", "open_hat"} & items and "cymbal" in items for items in by_tick.values()):
+        if any("hi_hat" in items and "cymbal" in items for items in by_tick.values()):
             hand_conflicts += 1
     ratio = core_complete / core_evidence if core_evidence else 0.0
     return {

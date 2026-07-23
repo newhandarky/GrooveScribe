@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   App,
   cleanupFailedChartStart,
+  displayDrumName,
   elapsedPlaybackSeconds,
   playbackElapsedSeconds,
   formatEffectiveBpm,
@@ -358,6 +359,13 @@ function localDataFixture(overrides: Partial<LocalDataSummaryResponse> = {}): Lo
 }
 
 describe('local app smoke rendering', () => {
+  it('labels generic hi-hat without an articulation claim', () => {
+    expect(displayDrumName('hi_hat')).toBe('Hi-hat');
+    expect(displayDrumName('closed_hat')).toBe('Hi-hat');
+    expect(displayDrumName('open_hat')).toBe('Hi-hat');
+    expect(displayDrumName('pedal_hat')).toBe('Hi-hat');
+  });
+
   it('can render the app shell without browser globals during static rendering', () => {
     const html = renderToStaticMarkup(<App />);
 
@@ -503,7 +511,7 @@ describe('local app smoke rendering', () => {
     expect(html).toContain('performance artifacts');
     expect(html).toContain('Raw events');
     expect(html).toContain('Processed events');
-    expect(html).toContain('closed_hat: 2');
+    expect(html).toContain('Hi-hat: 2');
     expect(html).toContain('sparse_transcription');
     expect(html).toContain('品質狀態未知');
     expect(html).toContain('尚未產生品質判斷');

@@ -1,0 +1,22 @@
+version: 1
+default_mode: standard
+gitnexus:
+  required: true
+  check_index_before_implementation: true
+  prefer_graph_before_broad_search: true
+  stale_index_action: report_and_use_fallback_evidence
+codegraph:
+  enabled: true
+  use_when_index_available: true
+  fallback_to_files_and_tests: true
+speckit:
+  enabled: false
+  activation: explicit_complete_task_binding_required
+  roots:
+    - .specify
+    - specs
+  require_task_binding: true
+refactor:
+  docs_path: docs/refactoring/work-items
+  preserve_behavior_by_default: true
+  requires_explicit_request_or_work_item: true

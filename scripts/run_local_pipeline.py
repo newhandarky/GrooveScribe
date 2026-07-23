@@ -51,7 +51,7 @@ def parse_args() -> argparse.Namespace:
         default=_optional_path(os.environ.get("GROOVESCRIBE_ADTOF_CHECKPOINT")),
     )
     parser.add_argument("--adtof-device", default=os.environ.get("GROOVESCRIBE_ADTOF_DEVICE", "cpu"))
-    parser.add_argument("--transcription-backend", choices=("adtof", "spectral_onset_v1"), default="adtof")
+    parser.add_argument("--transcription-backend", choices=("adtof", "spectral_onset_v1"), default="spectral_onset_v1")
     parser.add_argument(
         "--adtof-threshold",
         type=float,
@@ -82,7 +82,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--candidate-threshold-presets",
         default=None,
-        help="Optional comma-separated opt-in candidate presets; currently only separated_v1 is supported.",
+        help="Optional comma-separated benchmark candidate presets: separated_v1 or separated_hihat_v1.",
     )
     return parser.parse_args()
 
@@ -192,8 +192,9 @@ def _parse_candidate_presets(value: str | None) -> tuple[str, ...]:
     if not value:
         return ()
     presets = tuple(item.strip() for item in value.split(",") if item.strip())
-    if len(set(presets)) != len(presets) or any(preset != "separated_v1" for preset in presets):
-        raise SystemExit("--candidate-threshold-presets currently supports separated_v1 only")
+    supported = {"separated_v1", "separated_hihat_v1"}
+    if len(set(presets)) != len(presets) or any(preset not in supported for preset in presets):
+        raise SystemExit("--candidate-threshold-presets supports separated_v1 and separated_hihat_v1 only")
     return presets
 
 

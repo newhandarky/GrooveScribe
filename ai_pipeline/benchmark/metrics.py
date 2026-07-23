@@ -7,9 +7,9 @@ from typing import Any
 from ai_pipeline.midi.mapping import map_to_general_midi_drum
 from ai_pipeline.midi.simple_midi import parse_midi
 
-DRUMS = ("kick", "snare", "closed_hat", "open_hat", "tom", "cymbal")
+DRUMS = ("kick", "snare", "hi_hat", "tom", "cymbal")
 _TOLERANCE_TICKS = 60
-BENCHMARK_TAXONOMY = "benchmark_6_class_v1"
+BENCHMARK_TAXONOMY = "benchmark_generic_hihat_5_class_v1"
 _MAX_AUDIT_OFFSET_TICKS = 120
 _AUDIT_OFFSET_STEP_TICKS = 10
 
@@ -23,8 +23,8 @@ def compare_drum_midi(
 ) -> dict[str, Any]:
     """Compare normalized drum onsets on a shared 480-PPQ timing grid.
 
-    This benchmark-only taxonomy folds pedal hi-hat into closed hi-hat. It never
-    changes pipeline MIDI artifacts or product drum mappings.
+    Hi-hat is scored as one generic class; this benchmark does not evaluate
+    closed, open, or pedal articulation.
     """
     try:
         predicted, predicted_source_counts, predicted_unsupported = _mapped_onsets(predicted_path)
@@ -65,7 +65,7 @@ def compare_drum_midi(
         "status": "measured",
         "taxonomy": {
             "name": BENCHMARK_TAXONOMY,
-            "normalizations": {"pedal_hat": "closed_hat"},
+            "normalizations": {"closed_hat": "hi_hat", "open_hat": "hi_hat", "pedal_hat": "hi_hat"},
             "predicted_source_counts": predicted_source_counts,
             "ground_truth_source_counts": expected_source_counts,
             "predicted_unsupported_event_count": predicted_unsupported,
@@ -171,7 +171,7 @@ def _mapped_onsets(path: Path) -> tuple[dict[str, list[float]], dict[str, int], 
             unsupported += 1
             continue
         source_counts[mapping.drum] += 1
-        drum = "closed_hat" if mapping.drum == "pedal_hat" else mapping.drum
+        drum = mapping.drum
         if drum in DRUMS:
             result[drum].append(note.tick * scale)
         else:

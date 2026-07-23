@@ -30,6 +30,7 @@ _DEFAULT_CANDIDATE_THRESHOLDS = ("0.3", "0.4", "0.5", "0.6")
 _CANDIDATE_STRATEGY_PROFILES = {
     "scalar_v1": (),
     "scalar_plus_separated_v1": ("separated_v1",),
+    "scalar_plus_separated_hihat_v1": ("separated_hihat_v1",),
 }
 _QUALITY_PROFILE = {
     "schema_version": "1.0",
@@ -45,7 +46,7 @@ _QUALITY_PROFILE = {
     "maximum_core_groove_regression": 0.02,
     "maximum_timing_error_regression_ticks": 12.0,
 }
-_PUBLIC_DRUM_ORDER = ("kick", "snare", "closed_hat", "open_hat", "tom", "cymbal")
+_PUBLIC_DRUM_ORDER = ("kick", "snare", "hi_hat", "tom", "cymbal")
 _PUBLIC_DRUMS = set(_PUBLIC_DRUM_ORDER)
 _PUBLIC_LICENSES = {"CC BY 4.0", "generated_synthetic", "generated_from_configured_soundfont"}
 _PUBLIC_RENDERERS = {"dataset_recording", "sampled_drum_renderer", "synthetic_signal", "soundfont"}
@@ -91,7 +92,7 @@ def parse_args() -> argparse.Namespace:
         "--candidate-strategy-profile",
         choices=tuple(_CANDIDATE_STRATEGY_PROFILES),
         default=os.environ.get("GROOVESCRIBE_CANDIDATE_STRATEGY_PROFILE", "scalar_v1"),
-        help="Versioned candidate family: scalar_v1 or the opt-in scalar_plus_separated_v1 experiment.",
+        help="Versioned candidate family: scalar_v1 or an opt-in separated preset experiment.",
     )
     parser.add_argument(
         "--benchmark-split",
@@ -103,7 +104,7 @@ def parse_args() -> argparse.Namespace:
         "--development-evidence-report",
         type=Path,
         default=None,
-        help="Required for scalar_plus_separated_v1 holdout: matching development report with measured improvement.",
+        help="Required for any opt-in preset holdout: matching development report with measured improvement.",
     )
     parser.add_argument(
         "--no-resume",
@@ -179,7 +180,7 @@ def run_benchmark(config: argparse.Namespace, *, process_runner=subprocess.run) 
         "synthetic_full_mix_present": any(run.get("synthetic_full_mix") is True for run in runs),
         "runs": runs,
         "gate_calibration": calibration,
-        "strategy_comparison": _strategy_comparison(runs),
+        "strategy_comparison": _strategy_comparison(runs, preset=_experimental_preset(strategy_profile)),
         "summary": {
             "run_count": len(runs),
             "measured_count": measured_count,
@@ -351,8 +352,13 @@ def _candidate_strategy_profile(value: object) -> str | None:
     return profile if profile in _CANDIDATE_STRATEGY_PROFILES else None
 
 
+def _experimental_preset(strategy_profile: str) -> str | None:
+    presets = _CANDIDATE_STRATEGY_PROFILES.get(strategy_profile, ())
+    return presets[0] if len(presets) == 1 else None
+
+
 def _holdout_evidence_reason(config: argparse.Namespace, strategy_profile: str, manifest_path: Path | None, split: object) -> str | None:
-    if strategy_profile != "scalar_plus_separated_v1" or split != "holdout":
+    if _experimental_preset(strategy_profile) is None or split != "holdout":
         return None
     evidence_path = getattr(config, "development_evidence_report", None)
     if not isinstance(evidence_path, Path) or _is_within_repo(evidence_path) or not evidence_path.is_file():
@@ -377,7 +383,7 @@ def _reserve_holdout_evidence(
     reason = _holdout_evidence_reason(config, strategy_profile, manifest_path, split)
     if reason is not None:
         return None, reason
-    if strategy_profile != "scalar_plus_separated_v1" or split != "holdout":
+    if _experimental_preset(strategy_profile) is None or split != "holdout":
         return None, None
     evidence_path = getattr(config, "development_evidence_report", None)
     if not isinstance(evidence_path, Path):
@@ -402,7 +408,11 @@ def _finalize_holdout_reservation(reservation_path: Path | None, measured: bool)
         return
     try:
         if measured:
-            reservation_path.replace(reservation_path.with_name(reservation_path.name.replace("-reservation", "-consumed")))
+            consumed_path = reservation_path.with_name(reservation_path.name.replace("-reservation", "-consumed"))
+            pending_path = consumed_path.with_suffix(".tmp")
+            pending_path.write_text(json.dumps({"schema_version": "1.0", "status": "consumed"}) + "\n", encoding="utf-8")
+            pending_path.replace(consumed_path)
+            reservation_path.unlink()
         elif reservation_path.exists():
             reservation_path.unlink()
     except OSError:
@@ -417,20 +427,21 @@ def _file_sha256(path: Path | None) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _strategy_comparison(runs: list[dict[str, Any]]) -> dict[str, object]:
+def _strategy_comparison(runs: list[dict[str, Any]], *, preset: str | None) -> dict[str, object]:
+    candidate_id = f"preset_{preset}" if preset else None
     pairs: list[tuple[float, float]] = []
     for run in runs:
         candidates = run.get("candidate_evaluation") if isinstance(run.get("candidate_evaluation"), list) else []
         scalar = [candidate.get("ground_truth_eval", {}).get("f1") for candidate in candidates if isinstance(candidate, dict) and candidate.get("strategy") == "scalar_threshold_v1"]
-        preset = next((candidate.get("ground_truth_eval", {}).get("f1") for candidate in candidates if isinstance(candidate, dict) and candidate.get("candidate_id") == "preset_separated_v1"), None)
+        preset_value = next((candidate.get("ground_truth_eval", {}).get("f1") for candidate in candidates if isinstance(candidate, dict) and candidate.get("candidate_id") == candidate_id), None)
         scalar_values = [float(value) for value in scalar if isinstance(value, (int, float)) and not isinstance(value, bool)]
-        if scalar_values and isinstance(preset, (int, float)) and not isinstance(preset, bool):
-            pairs.append((max(scalar_values), float(preset)))
+        if scalar_values and isinstance(preset_value, (int, float)) and not isinstance(preset_value, bool):
+            pairs.append((max(scalar_values), float(preset_value)))
     if not pairs:
-        return {"status": "unavailable", "scalar_macro_f1": None, "separated_macro_f1": None, "improved": False}
+        return {"status": "unavailable", "preset_candidate_id": candidate_id, "scalar_macro_f1": None, "preset_macro_f1": None, "improved": False}
     scalar_macro = sum(scalar for scalar, _preset_value in pairs) / len(pairs)
     preset_macro = sum(preset for _scalar, preset in pairs) / len(pairs)
-    return {"status": "measured", "scalar_macro_f1": round(scalar_macro, 4), "separated_macro_f1": round(preset_macro, 4), "improved": preset_macro > scalar_macro}
+    return {"status": "measured", "preset_candidate_id": candidate_id, "scalar_macro_f1": round(scalar_macro, 4), "preset_macro_f1": round(preset_macro, 4), "improved": preset_macro > scalar_macro}
 
 
 def _evaluate_candidates(
@@ -546,7 +557,7 @@ def _public_candidate_strategy(config: object) -> str:
     strategy = source.get("strategy") or source.get("threshold_strategy")
     if strategy == "scalar_threshold_v1":
         return strategy
-    if strategy == "adtof_preset_v1" and source.get("adtof_threshold_preset") == "separated_v1":
+    if strategy == "adtof_preset_v1" and source.get("adtof_threshold_preset") in {"separated_v1", "separated_hihat_v1"}:
         return strategy
     return "unknown"
 
@@ -696,7 +707,7 @@ def _core_groove_accuracy(chart_events_path: Path, ground_truth_midi: Path, *, r
         ground_truth = parse_midi(ground_truth_midi)
     except Exception:
         return {"status": "unavailable", "accuracy": None}
-    core = {"kick", "snare", "closed_hat", "open_hat"}
+    core = {"kick", "snare", "hi_hat"}
     slot_ticks = max(1, ticks // 2)
     chart_core: dict[int, set[tuple[str, int]]] = {}
     for event in chart.get("events", []):

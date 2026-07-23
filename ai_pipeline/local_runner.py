@@ -39,7 +39,9 @@ class LocalPipelineConfig:
     adtof_command_template: str | None = None
     adtof_checkpoint_path: Path | None = None
     adtof_device: str = "cpu"
-    transcription_backend: str = "adtof"
+    # ADTOF remains an explicitly selected offline-evaluation adapter until its
+    # CC BY-NC-SA commercial-use gate is resolved.
+    transcription_backend: str = "spectral_onset_v1"
     adtof_threshold: float = 0.5
     adtof_class_thresholds: dict[str, float] | None = None
     adtof_threshold_preset: str | None = None
@@ -85,7 +87,7 @@ class LocalPipelineRunner:
             raise FileNotFoundError(f"input file does not exist: {input_path}")
         if (self.config.candidate_thresholds or self.config.candidate_threshold_presets) and self.config.transcription_backend != "adtof":
             raise ValueError("candidate_strategies_require_adtof_backend")
-        unsupported_candidate_presets = set(self.config.candidate_threshold_presets) - {"separated_v1"}
+        unsupported_candidate_presets = set(self.config.candidate_threshold_presets) - {"separated_v1", "separated_hihat_v1"}
         if unsupported_candidate_presets:
             raise ValueError("unsupported_candidate_threshold_preset")
 
@@ -205,9 +207,9 @@ class LocalPipelineRunner:
         if self.config.mock_ai:
             events = (
                 ProcessedDrumEvent(tick=0, note=36, drum="kick", velocity=105),
-                ProcessedDrumEvent(tick=240, note=42, drum="closed_hat", velocity=78),
+                ProcessedDrumEvent(tick=240, note=42, drum="hi_hat", velocity=78),
                 ProcessedDrumEvent(tick=480, note=38, drum="snare", velocity=96),
-                ProcessedDrumEvent(tick=720, note=42, drum="closed_hat", velocity=74),
+                ProcessedDrumEvent(tick=720, note=42, drum="hi_hat", velocity=74),
                 ProcessedDrumEvent(tick=960, note=36, drum="kick", velocity=102),
             )
             write_drum_midi(raw_midi_path, events, ticks_per_beat=480, tempo_bpm=120.0)

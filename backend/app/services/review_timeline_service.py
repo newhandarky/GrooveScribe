@@ -6,6 +6,7 @@ from collections import Counter, defaultdict
 from app.models import TranscriptionJob
 from app.storage import ArtifactType, StorageAdapter, build_job_artifact_key
 from app.storage.errors import ArtifactInvalidError, ArtifactNotFoundError, StorageReadFailedError
+from ai_pipeline.midi.mapping import normalize_drum_name
 
 
 class ReviewTimelineService:
@@ -36,13 +37,14 @@ class ReviewTimelineService:
                 continue
             tick = event.get("tick")
             drum = event.get("drum")
-            if isinstance(tick, int) and isinstance(drum, str) and drum in {"kick", "snare", "closed_hat", "open_hat", "tom", "cymbal"}:
-                events_by_measure[tick // measure_ticks][drum] += 1
+            canonical_drum = normalize_drum_name(drum) if isinstance(drum, str) else None
+            if isinstance(tick, int) and canonical_drum in {"kick", "snare", "hi_hat", "tom", "cymbal"}:
+                events_by_measure[tick // measure_ticks][canonical_drum] += 1
                 if tempo_bpm is not None:
                     playback_events.append(
                         {
                             "time_seconds": round(tick * 60 / (ticks_per_beat * tempo_bpm), 4),
-                            "drum": drum,
+                            "drum": canonical_drum,
                             "velocity": max(1, min(127, int(event.get("velocity", 80)))),
                         }
                     )
@@ -110,7 +112,7 @@ def _measure_warnings(render_kind: str, counts: Counter[str]) -> list[str]:
     warnings: list[str] = []
     if render_kind == "fill":
         warnings.append("review_fill_against_audio")
-    if counts and not ({"kick", "snare", "closed_hat", "open_hat"} & set(counts)):
+    if counts and not ({"kick", "snare", "hi_hat"} & set(counts)):
         warnings.append("no_core_groove_events")
     return warnings
 
