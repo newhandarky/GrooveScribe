@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import wave
 import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -28,6 +29,7 @@ from app.services.upload_service import UploadService
 from app.storage import ArtifactType, build_candidate_artifact_key, build_job_artifact_key
 from app.storage.dependencies import get_storage_adapter
 from app.storage.local import LocalStorageAdapter
+from ai_pipeline.midi.simple_midi import parse_midi
 
 
 @dataclass
@@ -76,6 +78,7 @@ def _client_with_local_queue(
     *,
     fail_stage: PipelineStage | None = None,
     process_runner=None,
+    real_subprocess: bool = False,
 ):
     session_factory = _session_factory(tmp_path)
     storage = LocalStorageAdapter(tmp_path / "storage")
@@ -83,8 +86,12 @@ def _client_with_local_queue(
         database_url=f"sqlite+pysqlite:///{tmp_path / 'test.db'}",
         storage_root=str(tmp_path / "storage"),
         job_queue_backend="local",
+        ai_python_path=str(Path(__file__).resolve().parents[2] / ".venv-ai" / "bin" / "python"),
     )
-    if process_runner is None:
+    if real_subprocess:
+        def runner_factory():
+            return PipelineServiceRunner(settings=settings, storage=storage)
+    elif process_runner is None:
         def runner_factory():
             return LocalMockPipelineRunner(
                 settings=settings,
@@ -117,6 +124,16 @@ def _client_with_local_queue(
     app.dependency_overrides[get_storage_adapter] = lambda: storage
     app.dependency_overrides[get_upload_service] = override_upload_service
     return TestClient(app), session_factory, storage, queue
+
+
+def _wav_bytes() -> bytes:
+    buffer = BytesIO()
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(44_100)
+        wav_file.writeframes(b"\x00\x00" * 4_410)
+    return buffer.getvalue()
 
 
 def _write_fake_pipeline_output(output_dir: Path) -> None:
@@ -435,6 +452,54 @@ def test_upload_api_default_local_queue_completes_without_celery(tmp_path: Path)
     with session_factory() as session:
         job = session.scalar(select(TranscriptionJob).where(TranscriptionJob.id == job_id))
         assert job.status == JobStatus.COMPLETED
+
+
+def test_upload_api_runs_real_demo_mock_subprocess_to_parseable_artifacts(tmp_path: Path) -> None:
+    client, _session_factory, storage, queue = _client_with_local_queue(tmp_path, real_subprocess=True)
+
+    response = client.post(
+        "/api/v1/transcriptions",
+        files={"file": ("fixture.wav", _wav_bytes(), "audio/wav")},
+        data={"pipeline_mode": "demo_mock", "title": "E2E fixture"},
+    )
+
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    queue.wait_for_all(timeout=30)
+
+    result = client.get(f"/api/v1/transcriptions/{job_id}")
+    assert result.status_code == 200
+    body = result.json()
+    assert body["status"] == "completed"
+    assert body["pipeline"]["config"]["mode"] == "demo_mock"
+    assert body["pipeline"]["quality"]["drum_taxonomy"] == "generic_hihat_v1"
+    assert body["pipeline"]["quality"]["processed_drum_counts"] == {"hi_hat": 2, "kick": 2, "snare": 1}
+    assert body["review_timeline"]["drum_taxonomy"] == "generic_hihat_v1"
+
+    with storage.open_reader(build_job_artifact_key(job_id, ArtifactType.PROCESSED_MIDI)) as reader:
+        midi_path = tmp_path / "downloaded.mid"
+        midi_path.write_bytes(reader.read())
+    midi = parse_midi(midi_path)
+    assert midi.notes and {note.note for note in midi.notes} <= {36, 38, 42}
+
+    with storage.open_reader(build_job_artifact_key(job_id, ArtifactType.PERFORMANCE_MIDI)) as reader:
+        performance_midi_path = tmp_path / "performance.mid"
+        performance_midi_path.write_bytes(reader.read())
+    performance_midi = parse_midi(performance_midi_path)
+    assert performance_midi.notes
+    assert {note.note for note in performance_midi.notes} <= {36, 38, 42}
+    assert any(note.note == 42 for note in performance_midi.notes)
+
+    with storage.open_reader(build_job_artifact_key(job_id, ArtifactType.MUSICXML)) as reader:
+        musicxml = reader.read()
+    assert b"score-partwise" in musicxml
+    assert b"Hi-hat" in musicxml
+
+    timeline_payload = json.dumps(body["review_timeline"])
+    assert "hi_hat" in timeline_payload
+    assert "closed_hat" not in timeline_payload
+    assert "open_hat" not in timeline_payload
+    assert "pedal_hat" not in timeline_payload
 
 
 def test_upload_api_rejects_true_ai_product_config(tmp_path: Path) -> None:
